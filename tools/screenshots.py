@@ -160,8 +160,4 @@ with sync_playwright() as p:
     shot(page, "14-export", "#modalBody")
     close_modal(page)
 
-    # 10. shootout
-    page.goto(URL + "shootout")
-    page.wait_for_selector(".item .row")
-    shot(page, "15-shootout")
     b.close()

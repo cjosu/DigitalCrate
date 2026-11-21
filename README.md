@@ -238,7 +238,7 @@ Given a project key and tempo:
   major/minor mismatch targets the relative key.
 - **Tempo:** only loops are time-stretched, to whichever of ½×, 1× or 2× of the project tempo is nearest. Phrases and
   one-shots keep their natural timing.
-- **Engines** were chosen by a blind listening test ([the shootout](#stretch--repitch-shootout)). Samples that aren't
+- **Engines** were chosen by blind listening tests against Rubber Band, WORLD and a neural vocoder. Samples that aren't
   stretched (phrases, chops, one-shots, free pads) are **Re-Pitched**: tape-style resampling with no processing
   artifacts, so a sample shifted up gets slightly shorter. Loops use **Signalsmith Stretch**, which keeps them
   bar-exact.
@@ -382,8 +382,8 @@ Any auto-generated kit also opens straight into the sketchpad.
    - **glide** sets how hard or natural the pull is (hard is the Auto-Tune effect);
    - **detune** and slow **drift** add back human looseness.
 3. The corrections are applied as tape-style variable speed: the playback rate follows the pitch curve, so nothing is
-   resynthesised. Corrections are under half a semitone, so timing moves by 3% at most. This engine won the blind
-   tuning test below.
+   resynthesised. Corrections are under half a semitone, so timing moves by 3% at most. In blind tests it was
+   indistinguishable from the untouched take at the default settings, unlike Rubber Band or PSOLA.
 
 The panel reports how in-key the take already is.
 
@@ -447,61 +447,6 @@ Exports are copied into `Ableton User Library/Samples/DigitalCrate/<name>/<Categ
 
 The same export works from the CLI: `python -m digitalcrate export --favorites --rack --key Fm --bpm 124`.
 
-### Stretch & repitch shootout
-
-![Blind A/B test page](docs/img/15-shootout.png)
-
-Every pitch shifter and time-stretcher leaves artifacts at some point. Which one is best depends on the material, so
-there's a blind listening test at http://localhost:8765/shootout.
-
-Each sample and task (+3 / −4 semitones, 80→100 bpm, half speed…) is rendered by every candidate method:
-
-| Method | What it is | Used on |
-|---|---|---|
-| Rubber Band R3 | high-quality phase vocoder, optional formant preservation | all |
-| Rubber Band R2 percussive | transient-focused settings | drums |
-| Signalsmith Stretch | modern open-source stretcher | all |
-| Varispeed / Re-Pitch | plain resampling: pitch and tempo move together, no processing at all | all |
-| WORLD vocoder | analyse pitch + spectral envelope, resynthesise | monophonic voice |
-| Neural vocoder (PC-NSF-HiFiGAN) | mel spectrogram + new pitch curve → waveform | monophonic voice |
-| Granular | overlapping windowed grains | pads, keys |
-| Slice & re-place | cut at each hit, move hits to the new grid, never stretch | drums |
-
-How the test works:
-
-- Clips are **loudness-matched** and the letters are shuffled.
-- Clicking another letter while one plays switches at the same point in the sound.
-- You rate each clip 1–5. `python -m digitalcrate shootout --results` tallies the averages per material.
-
-**The first run** (68 clips, rated blind, one listener) produced these averages:
-
-| Material | Re-Pitch | Signalsmith | Rubber Band R3 | Other |
-|---|---|---|---|---|
-| Vocals | **3.9** (pitch only: **4.3**) | **3.9** | 1.9 | neural vocoder 2.0, WORLD 1.0 |
-| Pads | 3.0 | 3.5 | **4.0** | granular 1.0 |
-| Keys | **5.0** | 4.0 | 4.0 | granular 1.0 |
-| Melodic loops | 3.5 | **4.5** | **4.5** | |
-| Drums | 3.0 | **4.5** | **4.5** | R2 percussive 3.0, slice 3.0 (1 and 5) |
-
-Signalsmith never scored below 3. Rubber Band's formant-preserving mode was the clear loser on voice. Re-Pitch is
-best whenever the length is allowed to change. Those results are the current defaults (`digitalcrate/stretch.py`).
-
-**The tuning round** (`shootout --tune`, http://localhost:8765/shootout?round=tune) compares engines that follow a
-time-varying pitch curve. There are 5 vocal phrases, each at two settings: natural (80% strength, 60 ms glide) and
-hard (100%, instant). The **untouched original is hidden among the letters** as a control.
-
-| Engine | Natural | Hard |
-|---|---|---|
-| Original (control) | 4.2 | 4.4 |
-| Tape-style variable speed | **4.6** | 1.6 |
-| Rubber Band R3 | 3.4 | 1.6 |
-| Rubber Band R3 + formants | 3.2 | 1.6 |
-| Praat PSOLA | 2.4 | 1.6 |
-
-At the natural setting, variable speed scored as high as the untouched original, which means it was inaudible. At the
-hard setting every engine scored 1.6. The problem there is the snap itself, not the engine. Variable speed is now the
-Tune engine, and natural is the default setting.
-
 ## Command line
 
 ```text
@@ -523,7 +468,6 @@ ingest URL|FILE|FOLDER [--drums]    add a source (YouTube via yt-dlp) and mine i
 export --favorites|--kit K|--ids … [--name N] [--rack] [--key Fm --bpm 124]
 reclassify                   re-apply category rules (no audio work)
 ytscout "query" [--n 15]     YouTube scout
-shootout [--force|--results|--tune]  render / tally the stretch (or vocal tuning) shootout
 ```
 
 ## The library on disk
@@ -604,7 +548,7 @@ Built on:
 - [basic-pitch](https://github.com/spotify/basic-pitch)
 - [aalink](https://github.com/artfwo/aalink)
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- [Praat](https://www.fon.hum.uva.nl/praat/) via [Parselmouth](https://github.com/YannickJadoul/Parselmouth) (shootout only)
+- [Praat](https://www.fon.hum.uva.nl/praat/) via [Parselmouth](https://github.com/YannickJadoul/Parselmouth) (engine comparisons)
 
 See [`models/README.md`](models/README.md) for model licences.
 
