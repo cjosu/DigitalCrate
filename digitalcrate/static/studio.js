@@ -252,7 +252,9 @@ function skVoice(ctx,dest,l,t,dur,arr){const s=ctx.createBufferSource();s.buffer
  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+f);g.gain.setValueAtTime(1,Math.max(t+f,t+dur-f));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,off,dur);if(arr){arr.push(s);s.onended=()=>{const k=arr.indexOf(s);if(k>=0)arr.splice(k,1)}}}
 function skBar(ctx,dest,l,bar,t,L,arr){if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
  else{if(bar%l.every)return;skVoice(ctx,dest,l,t+l.offset*L/4,R,arr)}}
-function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
+function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
+ stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)
+SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
  SK.lanes.forEach(l=>{l.g=AC.createGain();l.g.connect(SK.master)});skGains();SK.start=linkNextBar();SK.nextBar=0;SK.playing=true;SK.voices=[];skTick();requestAnimationFrame(skAnim);drawSK()}
 function skTick(){if(!SK.playing)return;const L=barLen();while(SK.start+SK.nextBar*L<AC.currentTime+1.2){const t=SK.start+SK.nextBar*L;SK.lanes.forEach(l=>{if(l.g)skBar(AC,l.g,l,SK.nextBar,t,L,SK.voices)});SK.nextBar++}SK.timer=setTimeout(skTick,90)}
 function skStop(){SK.playing=false;clearTimeout(SK.timer);const now=AC.currentTime;if(SK.master){SK.master.gain.setTargetAtTime(0,now,0.015);const m=SK.master;setTimeout(()=>{try{m.disconnect()}catch(e){}},150)}
