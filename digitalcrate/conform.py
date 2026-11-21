@@ -51,7 +51,7 @@ def lookup(rel):
     return (dict(r), shift) if r is not None else (None, 0)
 
 
-def plan(row, shift, key=None, bpm=None):
+def plan(row, shift, key=None, bpm=None, src=None):
     """-> (semitones, time_ratio, info) for conforming this sample."""
     semis, time, info = 0, 1.0, {}
     if key and row and row["key_from"] != "none" and row["category"] != "Percussion":
@@ -61,7 +61,14 @@ def plan(row, shift, key=None, bpm=None):
             tpc = (tpc + 9) % 12 if row["scale"] == "minor" else (tpc + 3) % 12
         semis = ((tpc - spc + 6) % 12) - 6
         info["key"] = key_label((spc + semis) % 12, row["scale"])
-    if bpm and row and row["kind"] == "loop" and row["bpm"]:
+    if bpm and src and row and row["category"] != "Percussion":
+        # the clip's own pulse, measured in the sketchpad ("fit to tempo"): stretch it onto the project tempo
+        mult = min((0.5, 1, 2), key=lambda m: abs(np.log(bpm / (src * m))))
+        r_ = (src * mult) / bpm
+        if 0.6 <= r_ <= 1.6:
+            time = r_
+            info["bpm"] = bpm
+    elif bpm and row and row["kind"] == "loop" and row["bpm"]:
         src = float(row["bpm"])
         mult = min((0.5, 1, 2), key=lambda m: abs(np.log(bpm / (src * m))))
         time = (src * mult) / bpm
@@ -79,10 +86,10 @@ def plan(row, shift, key=None, bpm=None):
     return semis, time, info
 
 
-def render(rel, key=None, bpm=None):
+def render(rel, key=None, bpm=None, src=None):
     """Conformed copy of a library file -> absolute cache path (rendered once)."""
     row, shift = lookup(rel)
-    semis, time, info = plan(row, shift, key, bpm)
+    semis, time, info = plan(row, shift, key, bpm, src)
     if semis == 0 and abs(time - 1) < 1e-3:
         return C.LIB_ROOT / rel, dict(info, semis=0, time=1, length=1)
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -120,3 +127,32 @@ def conformed_name(rel, info):
     if info.get("key"):
         tag.append(info["key"].replace(" ", ""))
     return f"{name}__{'_'.join(tag) or 'asis'}.wav"
+
+
+PULSE_CACHE = C.DATA_DIR / "pulse_cache.json"
+
+
+def pulse(rel):
+    """Does this clip have a steady pulse, and at what tempo? Essentia's RhythmExtractor2013 (multifeature): a pulse
+    needs confidence >= 2.5 (its scale runs 0-5.3) and steady beats. Clips without one are pads/textures with
+    nothing to line up. Cached per file."""
+    import json
+    cache = json.loads(PULSE_CACHE.read_text()) if PULSE_CACHE.exists() else {}
+    if rel in cache:
+        return cache[rel]
+    import essentia.standard as es
+    from scipy.signal import resample_poly
+    from .edit import _load
+    m = _load(rel).mean(0).astype(np.float32)
+    if C.SR != 44100:
+        m = resample_poly(m, 44100, C.SR).astype(np.float32)
+    out = dict(bpm=0.0, conf=0.0, steady=9.0, ok=False)
+    if len(m) > 44100 * 2:
+        bpm, beats, conf, _, _ = es.RhythmExtractor2013(method="multifeature")(m)
+        ibi = np.diff(beats)
+        steady = float(np.std(ibi) / np.mean(ibi)) if len(ibi) > 3 else 9.0
+        out = dict(bpm=round(float(bpm), 1), conf=round(float(conf), 2), steady=round(steady, 3),
+                   ok=bool(conf >= 2.5 and steady <= 0.06))
+    cache[rel] = out
+    PULSE_CACHE.write_text(json.dumps(cache))
+    return out

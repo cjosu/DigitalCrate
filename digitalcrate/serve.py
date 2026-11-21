@@ -214,8 +214,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json(galaxy())
             if u.path == "/api/conform":
                 from .conform import render
-                f, info = render(q["path"], q.get("key") or None, float(q["bpm"]) if q.get("bpm") else None)
+                f, info = render(q["path"], q.get("key") or None, float(q["bpm"]) if q.get("bpm") else None,
+                                 float(q["src"]) if q.get("src") else None)
                 return self._file(f, "audio/wav", {"X-Conform": json.dumps(info)})
+            if u.path == "/api/pulse":
+                from .conform import pulse
+                return self._json(pulse(q["path"]))
             if u.path == "/api/conform/info":
                 from .conform import lookup, plan
                 row, shift = lookup(q["path"])
@@ -287,7 +291,9 @@ class Handler(SimpleHTTPRequestHandler):
                 from .search import reference_search
                 return self._json(reference_search(req["target"]))
             elif self.path == "/api/ytscout":
-                return self._json({"job": start_job("ytscout", [req["query"], "--n", str(int(req.get("n", 15)))], req["query"])})
+                mode = "pads" if req.get("mode") == "pads" else "voice"
+                return self._json({"job": start_job("ytscout", [req["query"], "--n", str(int(req.get("n", 15))), "--mode", mode],
+                                                    req["query"])})
             elif self.path == "/api/ytscout/mark":
                 from .ytscout import mark
                 mark(req["id"], req["status"])

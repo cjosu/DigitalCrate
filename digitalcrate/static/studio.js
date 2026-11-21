@@ -181,31 +181,43 @@ function galDraw(){const c=$('galc');if(!c)return;const dpr=devicePixelRatio||1,
 setInterval(()=>{if(st.tab==='G'&&players.size)galDraw()},500);
 
 // ---------- YouTube scout
-let ytT=null,ytRes=[];
+let ytT=null,ytRes=[],ytQ='',ytAll=false,ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
+const YTM={voice:{label:'🎤 voice',intro:'Search YouTube for raw, private-feeling singing. A minute of each result is listened to and scored for clean, unaccompanied voice (and how close it is to your favourite vocals).',
+  ph:'e.g. acapella cover · singing in my car · choir rehearsal',bars:['voice','band/talk']},
+ pads:{label:'🌫 pads & textures',intro:'Search YouTube for ambient material: pads, drones, soundtracks, slow strings. A minute of each result (from the middle of long mixes) is scored for sustained, atmospheric sound with no drums, talking or singing, and for closeness to your favourite pads and textures.',
+  ph:'e.g. ps1 ambient soundtrack · organ drone · 70s synth soundtrack',bars:['ambient','drums/talk/voice']}};
 async function renderScout(){$('count').textContent='YouTube scout';const L=$('list');
  if(!SERVED){L.innerHTML='<div class="empty">The scout needs the local server.</div>';return}
- let d={presets:[],results:[]};try{d=await api('api/ytscout')}catch(e){}if(st.tab!=='Y')return;ytRes=d.results;
- L.innerHTML=`<div style="padding:12px 16px;display:grid;gap:8px"><div class="sub">Search YouTube for raw, private-feeling singing. A minute of each result is listened to and scored for clean, unaccompanied voice (and how close it is to your favourite vocals). Nothing enters the library until you press <b>add source</b>.</div>
- <div class="edrow"><input id="ytq" placeholder="e.g. acapella cover · singing in my car · choir rehearsal" style="flex:1;min-width:200px"><select id="ytn"><option>10</option><option selected>15</option><option>25</option></select><button id="ytgo" class="pill">scout</button></div>
- <div class="chips">${d.presets.map(p=>`<button data-ytp="${esc(p)}">${esc(p)}</button>`).join('')}</div><div id="ytjobs"></div>
- <label class="sub"><input type="checkbox" id="ytsk"> show skipped</label></div><div id="ytlist"></div>`;
- $('ytgo').onclick=()=>ytStart($('ytq').value.trim());$('ytq').onkeydown=e=>{if(e.key==='Enter')$('ytgo').click()};$('ytsk').onchange=ytDraw;
+ let d={presets:{},results:[]};try{d=await api('api/ytscout')}catch(e){}if(st.tab!=='Y')return;ytRes=d.results;const M=YTM[ytMode],pre=(d.presets&&d.presets[ytMode])||[];
+ L.innerHTML=`<div style="padding:12px 16px;display:grid;gap:8px"><div class="chips">${Object.entries(YTM).map(([k,m])=>`<button data-ytmode="${k}" class="${k===ytMode?'on':''}">${m.label}</button>`).join('')}</div>
+ <div class="sub">${M.intro} Nothing enters the library until you press <b>add source</b>. Repeating a search digs further down YouTube's results instead of returning the same videos.</div>
+ <div class="edrow"><input id="ytq" placeholder="${M.ph}" style="flex:1;min-width:200px" value="${esc(ytQ)}"><select id="ytn"><option>10</option><option selected>15</option><option>25</option></select><button id="ytgo" class="pill">scout</button></div>
+ <div class="chips">${pre.map(p=>`<button data-ytp="${esc(p)}">${esc(p)}</button>`).join('')}</div><div id="ytjobs"></div>
+ <div class="edrow sub"><label><input type="checkbox" id="ytall" ${ytAll||!ytQ?'checked':''}> all searches</label><label><input type="checkbox" id="ytsk"> show dismissed</label><span id="ytcount"></span></div></div><div id="ytlist"></div>`;
+ $('ytgo').onclick=()=>ytStart($('ytq').value.trim());$('ytq').onkeydown=e=>{if(e.key==='Enter')$('ytgo').click()};$('ytsk').onchange=ytDraw;$('ytall').onchange=e=>{ytAll=e.target.checked;ytDraw()};
  ytDraw();ytPoll()}
-function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk').checked;const rows=ytRes.filter(r=>sk||r.status!=='skipped');
+function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk').checked,all=!ytQ||($('ytall')&&$('ytall').checked);
+ const inQ=r=>('|'+(r.queries||r.query||'')+'|').includes('|'+ytQ+'|');
+ const rows=ytRes.filter(r=>(sk||r.status!=='skipped')&&(all||inQ(r)));
+ if($('ytcount'))$('ytcount').textContent=all?`${rows.length} videos from every search`:`${rows.length} video${rows.length===1?'':'s'} for “${ytQ}”`;
  const mx=Math.max(...rows.map(r=>r.score),1e-6);
- el.innerHTML=rows.length?rows.map(r=>`<div class="yt" style="${r.status==='skipped'?'opacity:.4':''}"><button class="play" data-ytsnip="${esc(r.snippet||'')}" data-ytt="${esc(r.title||'')}">▶</button>
+ el.innerHTML=rows.length?rows.map(r=>{const bl=(YTM[r.mode||'voice']||YTM.voice).bars;return`<div class="yt" style="${r.status==='skipped'?'opacity:.4':''}"><button class="play" data-ytsnip="${esc(r.snippet||'')}" data-ytt="${esc(r.title||'')}">▶</button>
   <div style="min-width:0"><div class="name">${r.status==='ingested'?'<span class="badge" style="background:var(--acc)">added</span>':''}<a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:inherit">${esc(r.title||r.id)}</a></div>
-  <div class="meta">${esc(r.channel||'')} · ${r.views!=null?Number(r.views).toLocaleString()+' views':''} · ${r.duration?Math.floor(r.duration/60)+':'+String(Math.round(r.duration%60)).padStart(2,'0'):''} · best moment @ ${Math.floor(r.best_at/60)}:${String(Math.round(r.best_at%60)).padStart(2,'0')} · “${esc(r.query||'')}”</div>
-  <div class="bars"><span>voice</span><i style="width:${Math.max(2,r.vocal*120)}px"></i><span>band/talk</span><i style="width:${Math.max(2,r.neg*120)}px;background:#d96c6c"></i><span>your taste</span><i style="width:${Math.max(2,(r.taste||0)*120)}px;background:var(--acc)"></i></div></div>
-  <div style="display:flex;gap:6px;align-items:center"><span class="score">${Math.round(r.score/mx*100)}</span>${r.status==='ingested'?'':`<button data-ytadd="${esc(r.url)}" data-ytid="${esc(r.id)}" class="pill">add source →</button>`}<button data-ytskip="${esc(r.id)}" title="skip">✕</button></div></div>`).join('')
-  :'<div class="empty">No candidates yet — pick a preset or type a search.</div>'}
-async function ytStart(q){if(!q)return;try{await api('api/ytscout',{query:q,n:+$('ytn').value});toast('scouting “'+q+'”…');ytPoll()}catch(e){toast('error: '+e.message)}}
+  <div class="meta">${esc(r.channel||'')} · ${r.views!=null?Number(r.views).toLocaleString()+' views':''} · ${r.duration?Math.floor(r.duration/60)+':'+String(Math.round(r.duration%60)).padStart(2,'0'):''} · best moment @ ${Math.floor(r.best_at/60)}:${String(Math.round(r.best_at%60)).padStart(2,'0')} · “${esc((r.queries||r.query||'').split('|').join('”, “'))}”</div>
+  <div class="bars"><span>${bl[0]}</span><i style="width:${Math.max(2,r.vocal*120)}px"></i><span>${bl[1]}</span><i style="width:${Math.max(2,r.neg*120)}px;background:#d96c6c"></i><span>your taste</span><i style="width:${Math.max(2,(r.taste||0)*120)}px;background:var(--acc)"></i></div></div>
+  <div style="display:flex;gap:6px;align-items:center"><span class="score">${Math.round(r.score/mx*100)}</span>${r.status==='ingested'?'':`<button data-ytadd="${esc(r.url)}" data-ytid="${esc(r.id)}" class="pill">add source →</button>`}<button data-ytskip="${esc(r.id)}" title="dismiss">✕</button></div></div>`}).join('')
+  :`<div class="empty">${ytQ&&!all?`Nothing scored for “${esc(ytQ)}” yet${ytPoll.wasRunning?' — still listening…':'. Try scouting again (it digs deeper each time) or tick “all searches”.'}`:'No candidates yet — pick a preset or type a search.'}</div>`}
+async function ytStart(q){if(!q)return;ytQ=q;ytAll=false;if($('ytall'))$('ytall').checked=false;ytDraw();
+ try{await api('api/ytscout',{query:q,n:+$('ytn').value,mode:ytMode});toast('scouting “'+q+'”…');ytPoll()}catch(e){toast('error: '+e.message)}}
 async function ytPoll(){clearTimeout(ytT);if(st.tab!=='Y')return;let js=[];try{js=await api('api/jobs?kind=ytscout')}catch(e){}
  const el=$('ytjobs');if(!el)return;const run=js.filter(j=>j.running);
- el.innerHTML=js.slice(-2).reverse().map(j=>`<div class="prov"><b>${esc(j.target)}</b> — ${j.running?'listening…':'done'}<div class="meta" style="white-space:pre-wrap">${j.tail.slice(-3).map(esc).join('\n')}</div></div>`).join('');
+ el.innerHTML=js.slice(-1).map(j=>{const sm=j.tail.map(t=>t.startsWith('SUMMARY ')?JSON.parse(t.slice(8)):null).filter(Boolean).pop();
+  const txt=sm?`${sm.found} found · ${sm.listened} listened to · ${sm.already} already scouted${sm.too_short?` · ${sm.too_short} too short`:''}${sm.failed?` · ${sm.failed} failed to download`:''}`:j.tail.slice(-2).map(esc).join('\n');
+  return `<div class="prov"><b>${esc(j.target)}</b> — ${j.running?'listening…':'done'}<div class="meta" style="white-space:pre-wrap">${txt}</div></div>`}).join('');
  if(run.length||ytPoll.wasRunning){try{const d=await api('api/ytscout');ytRes=d.results;ytDraw()}catch(e){}}
  ytPoll.wasRunning=run.length>0;if(run.length)ytT=setTimeout(ytPoll,2500)}
-document.addEventListener('click',async e=>{const p=e.target.closest('[data-ytp]');if(p){$('ytq').value=p.dataset.ytp;ytStart(p.dataset.ytp);return}
+document.addEventListener('click',async e=>{const ym=e.target.closest('[data-ytmode]');if(ym){ytMode=ym.dataset.ytmode;try{localStorage.setItem('ytMode',ytMode)}catch(err){}renderScout();return}
+ const p=e.target.closest('[data-ytp]');if(p){$('ytq').value=p.dataset.ytp;ytStart(p.dataset.ytp);return}
  const sn=e.target.closest('[data-ytsnip]');if(sn){if(!sn.dataset.ytsnip)return;if(players.has('yt')&&sn.classList.contains('playing')){stopAll();return}stopAll();
   const a=new Audio(url(sn.dataset.ytsnip));a.play();players.set('yt',a);a.onended=()=>{players.delete('yt');sn.classList.remove('playing');drawNP()};document.querySelectorAll('[data-ytsnip]').forEach(b=>b.classList.remove('playing'));sn.classList.add('playing');
   setNP(sn.dataset.ytsnip,null,'scout preview · '+sn.dataset.ytt,null);return}
@@ -227,7 +239,8 @@ async function skAdd(i){if(!SERVED){toast('the sketchpad needs the local server'
  const loop=S[i][F.kind]==='loop';
  const lane={i,path:S[i][F.path],db:0,mute:false,solo:false,every:loop?0:skEvery(S[i][F.dur]),offset:0,buf:null,state:'loading'};
  SK.lanes.push(lane);SK.open=true;drawSK();drawProj();await skLoad(lane);drawSK();toast(`added to the sketch (${SK.lanes.length})`)}
-async function skLoad(lane){lane.state='loading';lane.att=null;try{const ab=await (await fetch(conformURL(lane.path,lane.nat?'':PROJ.key,PROJ.bpm))).arrayBuffer();lane.buf=await AC.decodeAudioData(ab);lane.norm=skNorm(lane.buf);lane.state='ok'}catch(e){lane.state='error'}
+async function skLoad(lane){lane.state='loading';lane.att=null;try{const ab=await (await fetch(conformURL(lane.path,lane.nat?'':PROJ.key,PROJ.bpm)+(lane.src?`&src=${lane.src}`:''))).arrayBuffer();lane.buf=await AC.decodeAudioData(ab);lane.norm=skNorm(lane.buf);
+  if(S[lane.i]&&S[lane.i][F.kind]!=='loop'&&!lane.pulse)lane.pulse=await api('api/pulse?path='+encodeURIComponent(lane.path)).catch(()=>null);lane.state='ok'}catch(e){lane.state='error'}
  if(lane.db==null)lane.db=lane.vol!=null?Math.max(-24,Math.min(6,Math.round(20*Math.log10(Math.max(lane.vol,0.01)/0.8)*2)/2)):0}
 // relative volume: every lane is levelled to the same loudness when it loads, so 0 dB on every fader = equally loud;
 // the fader then moves it relative to the others
@@ -250,7 +263,7 @@ function skGains(){const solo=SK.lanes.some(l=>l.solo);SK.lanes.forEach(l=>{if(l
 // a lane can be trimmed to part of its clip: trim = [from, to] as fractions of the (conformed) clip
 const skRegion=l=>{const d=l.buf.duration,[a,b]=l.trim||[0,1];return [a*d,Math.max(0.01,(b-a)*d)]};
 function skVoice(ctx,dest,l,t,dur,arr){const s=ctx.createBufferSource();s.buffer=l.buf;const g=ctx.createGain();s.connect(g);g.connect(dest);
- let off=skRegion(l)[0];const lead=l.every===0||l.free?0:skAttack(l);t+=l.nudge||0;
+ let off=skRegion(l)[0];const lead=l.every===0||!skPulse(l)?0:skAttack(l);t+=l.nudge||0;
  if(lead>0){if(t-lead>=ctx.currentTime+0.005)t-=lead;else{off+=lead;dur=Math.max(0.01,dur-lead)}}
  const fi=Math.min(Math.max(0.004,(l.fin||0)/1000),dur/2),fo=Math.min(Math.max(0.004,(l.fout||0)/1000),dur/2);
  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+fi);g.gain.setValueAtTime(1,Math.max(t+fi,t+dur-fo));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,off,dur);
@@ -270,10 +283,10 @@ function skWave(c,buf,trim){if(!c||!buf)return;const dpr=devicePixelRatio||1,W=c
  for(let x=0;x<W;x++){let m=0;for(let k=x*st2;k<Math.min(d.length,(x+1)*st2);k+=4)m=Math.max(m,Math.abs(d[k]));g.fillStyle=x>=xa&&x<=xb?'#8cc0da':'#3a4048';g.fillRect(x,H/2-m*H/2,1,Math.max(1,m*H))}
  const ln=SK.lanes[+c.dataset.skw];
  // the project's beats as this lane plays them: the attack (or a loop's start) sits on a beat, shifted by any nudge
- if(ln){const L=barLen(),bt=L/4,[r0]=skRegion(ln),o=r0+(ln.every===0?0:skAttack(ln))-(ln.nudge||0),X=p=>p/buf.duration*W;
+ if(ln){const L=barLen(),bt=L/4,[r0]=skRegion(ln),pad=ln.every!==0&&!skPulse(ln),o=r0+(ln.every===0||pad?0:skAttack(ln))-(ln.nudge||0),X=p=>p/buf.duration*W;
   for(let k=Math.ceil(-o/bt);o+k*bt<=buf.duration;k++){const x=X(o+k*bt);if(x<0)continue;const bar=((k%4)+4)%4===0;g.fillStyle=bar?'rgba(224,164,88,.7)':'rgba(224,164,88,.22)';g.fillRect(x,0,(bar?1.5:1)*dpr,H)}
   const strong=new Set(skStrong(ln,0,buf.duration));g.fillStyle='rgba(255,255,255,.6)';skOnsets(ln).forEach(p=>{const h=strong.has(p)?9:4;g.fillRect(X(p)-0.5*dpr,H-h*dpr,(strong.has(p)?1.5:1)*dpr,h*dpr)});
-  const xo=X(o<0?o+Math.ceil(-o/bt)*bt:o);g.fillStyle='#e0a458';g.beginPath();g.moveTo(xo-4*dpr,0);g.lineTo(xo+4*dpr,0);g.lineTo(xo,6*dpr);g.fill()}  // ▼ = the point on the beat
+  if(!pad){const xo=X(o<0?o+Math.ceil(-o/bt)*bt:o);g.fillStyle='#e0a458';g.beginPath();g.moveTo(xo-4*dpr,0);g.lineTo(xo+4*dpr,0);g.lineTo(xo,6*dpr);g.fill()}}  // ▼ = the point on the beat
  if(trim){g.fillStyle='rgba(224,164,88,.12)';g.fillRect(xa,0,xb-xa,H);g.fillStyle='#e0a458';[xa,xb].forEach(x=>{g.fillRect(x-dpr,0,2*dpr,H);g.fillRect(x-3*dpr,H/2-6*dpr,6*dpr,12*dpr)})}
  const l=SK.lanes[+c.dataset.skw];if(l&&(l.fin||l.fout)){const px=ms=>ms/1000/buf.duration*W;g.strokeStyle='#ffffff';g.lineWidth=1.2*dpr;g.beginPath();
   if(l.fin){g.moveTo(xa,H-2*dpr);g.lineTo(Math.min(xb,xa+px(l.fin)),2*dpr)}if(l.fout){g.moveTo(Math.max(xa,xb-px(l.fout)),2*dpr);g.lineTo(xb,H-2*dpr)}g.stroke()}
@@ -297,7 +310,8 @@ function skOnsets(l){if(l.ons&&l.ons.buf===l.buf)return l.ons.v;const b=l.buf,sr
 function skStrong(l,a,b){skOnsets(l);const {v,lv}=l.ons;let mx=-200;v.forEach((p,k)=>{if(p>=a&&p<=b)mx=Math.max(mx,lv[k])});return v.filter((p,k)=>p>=a&&p<=b&&lv[k]>=mx-10)}
 // re-align: try putting each attack near the start of the selection on the beat (and small shifts around it),
 // keep the placement where the most of the clip's attacks fall on the project's 8th-note grid
-function skAlign(l){const [r0,R]=skRegion(l),e8=barLen()/8,o0=r0+(l.every===0?0:skAttack(l));
+function skAlign(l){if(l.every!==0&&!skPulse(l)){l.nudge=0;return 'no steady pulse in this selection: it plays from its start, like a pad'}
+ const [r0,R]=skRegion(l),e8=barLen()/8,o0=r0+(l.every===0?0:skAttack(l));
  const ons=skOnsets(l).filter(p=>p>=r0&&p<=r0+R);if(ons.length<4){l.nudge=0;return 'too few attacks to find a pulse: first attack put on the beat'}
  const hit=c=>ons.reduce((s,p)=>{const ph=(((p-c)/e8)%1+1)%1,d=Math.min(ph,1-ph)*e8;return s+Math.exp(-((d/0.025)**2))},0);
  const cands=ons.filter(p=>p<=r0+Math.min(R,barLen()*2));let best=o0,bs=hit(o0);
@@ -309,6 +323,9 @@ function skAlign(l){const [r0,R]=skRegion(l),e8=barLen()/8,o0=r0+(l.every===0?0:
  // any whole number of 8ths fits the grid equally well: apply only the smallest shift, so the clip stays where it was
  let dlt=best-o0;dlt-=Math.round(dlt/e8)*e8;
  l.nudge=-dlt;return `aligned: ${on} of ${ons.length} attacks on the grid${Math.abs(l.nudge)>0.001?` (moved ${Math.round(l.nudge*1000)} ms)`:''}`}
+// does this lane have a steady pulse? Measured on the server with Essentia's beat tracker (confidence >= 2.5 and
+// steady beats). No pulse = a pad or texture: it plays from the start of its selection, nothing to line up.
+function skPulse(l){return l.pulse&&l.pulse.ok?l.pulse:null}
 function skHeads(){const now=AC.currentTime,dpr=devicePixelRatio||1;SK.lanes.forEach((l,k)=>{const c=document.querySelector(`[data-skw="${k}"]`);if(!c||!c._base||!l.buf)return;
  const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);g.drawImage(c._base,0,0);
  const v=(l.on||[]).filter(v=>now>=v.t0&&now<v.t0+v.dur).pop();if(!v||!SK.playing)return;
@@ -318,11 +335,14 @@ function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
  <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button><button id="skhide">▾</button></h3>
- ${SK.lanes.map((l,k)=>{const s=S[l.i]||[];const loop=s[F.kind]==='loop';const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`].filter(Boolean).join(' · ');
+ ${SK.lanes.map((l,k)=>{const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
+  const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,
+   loop||l.state!=='ok'?'':l.src?`tempo-matched to ${PROJ.bpm}`:pu?`pulse ≈ ${pu.bpm} bpm`:'no pulse'].filter(Boolean).join(' · ');
+  const fit=!loop&&l.state==='ok'&&pu&&!l.src;
   return`<div class="lane${l.mute?' muted':''}" data-ln="${k}">
   <label class="onoff" title="turn this lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label>
   <div class="lname" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · ${esc(s[F.sub]||'')} ${s[F.cam]||''}"><div class="name"><span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span>${esc(s[F.artist]||'')}</div><div class="meta">${esc(s[F.title]||'')} · ${tags}</div></div>
-  <div class="lwave">${l.trim||l.nudge?`<button class="tbtn realign" data-skalign="${k}" title="put the first strong attack of the selection on the beat (clears any nudge)">↺ re-align</button>`:''}${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
+  <div class="lwave">${fit?`<button class="tbtn realign fitb" data-skfit="${k}" title="the clip has a steady pulse of about ${pu.bpm} bpm: stretch it onto ${PROJ.bpm} bpm so every attack stays on the grid">⟷ match tempo</button>`:''}${l.src?`<button class="tbtn realign fitb" data-skunfit="${k}" title="back to the clip's own tempo">⟷ undo match</button>`:''}${l.trim||l.nudge?`<button class="tbtn realign" data-skalign="${k}" title="put the first strong attack of the selection on the beat (clears any nudge)">↺ re-align</button>`:''}${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
   <div class="fader" title="volume relative to the other lanes (all start equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
   <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn${l.more?' on':''}" data-skmore="${k}" title="timing, key, fades, open, remove">⋯</button>
   ${l.more?`<div class="lmore">${loop?'<span class="sub">loop: locked to the bar</span>':`<label class="sub">repeat <select data-ske="${k}">${[1,2,4,8,16].map(n=>`<option value="${n}" ${l.every===n?'selected':''}>every ${n} bar${n>1?'s':''}</option>`).join('')}</select></label>
@@ -354,6 +374,8 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skclear'){skStop();SK.lanes=[];SK.name='';drawSK();drawProj();return}
  if(t.dataset.skm!=null){const l=SK.lanes[+t.dataset.skm];l.mute=!l.mute;skGains();drawSK();return}
  if(t.dataset.sks!=null){const l=SK.lanes[+t.dataset.sks];l.solo=!l.solo;skGains();drawSK();return}
+ if(t.dataset.skfit!=null){const l=SK.lanes[+t.dataset.skfit],pu=skPulse(l);if(!pu)return;l.src=pu.bpm;l.nudge=0;toast('stretching…');drawSK();await skLoad(l);const r=skAlign(l);drawSK();toast(`tempo-matched (${pu.bpm} → ${PROJ.bpm} bpm) · ${r}`);return}
+ if(t.dataset.skunfit!=null){const l=SK.lanes[+t.dataset.skunfit];l.src=null;l.nudge=0;drawSK();await skLoad(l);drawSK();return}
  if(t.dataset.skalign!=null){const l=SK.lanes[+t.dataset.skalign];if(!l.buf)return;const r=skAlign(l);drawSK();toast(r);return}
  if(t.dataset.sknudge!=null){const l=SK.lanes[+t.dataset.sknudge],step=e.shiftKey?barLen()/16:0.01;l.nudge=Math.max(-2,Math.min(2,(l.nudge||0)+(+t.dataset.d)*step));drawSK();return}
  if(t.dataset.skmore!=null){const l=SK.lanes[+t.dataset.skmore];l.more=!l.more;drawSK();return}
@@ -361,7 +383,7 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.dataset.skx!=null){SK.lanes.splice(+t.dataset.skx,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
  if(t.dataset.go!=null){select(+t.dataset.go,'list');return}
  if(t.id==='sksave'){const name=($('skname').value||'').trim()||`Sketch ${new Date().toLocaleString()}`;SK.name=name;
-  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,nat:!!l.nat}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
+  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
   api('api/export',{scope:'paths',paths:SK.lanes.map(l=>l.path),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
@@ -384,7 +406,7 @@ async function skBounce(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toa
  SK.lanes.forEach(l=>{if(l.mute||(solo&&!l.solo))return;const g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null)});
  toast('bouncing…');const buf=await ctx.startRendering();const first=SK.lanes[0];
  try{const r=await api('api/bounce',{parent:first.path,wav:wavB64(buf),kind:'loop',bpm:PROJ.bpm,bars,key:PROJ.key,prefix:'Sketch',name:($('skname').value||'').trim(),
-   tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0}))}});
+   tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null}))}});
   const j=addRow(first.i,r.row);toast('bounced → new sample (★ favourited)');select(j,'go')}catch(e){toast('bounce failed: '+e.message)}}
 function addRow(i,n){const row=S[i].slice();Object.assign(row,{[F.id]:n.id,[F.path]:n.path,[F.cat]:n.category,[F.sub]:n.subtype,[F.kind]:n.kind,[F.cam]:n.cam,[F.key]:n.key,[F.bpm]:n.bpm,[F.dur]:n.dur,
  [F.env]:n.env,[F.note]:n.note,[F.bars]:n.bars,[F.start]:n.start,[F.parent]:n.parent,[F.root]:n.root,[F.ops]:n.ops});

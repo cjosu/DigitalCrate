@@ -75,6 +75,7 @@ def main():
     sub.add_parser("reclassify", help="re-apply category rules to existing samples (fast, no audio work)")
     ys = sub.add_parser("ytscout", help="search YouTube, listen to a minute of each result, score for clean singing")
     ys.add_argument("query"); ys.add_argument("--n", type=int, default=15)
+    ys.add_argument("--mode", choices=["voice", "pads"], default="voice", help="score for singing, or for pads & textures")
     so = sub.add_parser("shootout", help="render the stretch/repitch shootout (blind test at /shootout)")
     so.add_argument("--force", action="store_true"); so.add_argument("--results", action="store_true")
     so.add_argument("--tune", action="store_true", help="round 2: vocal tuning engines")
@@ -142,7 +143,7 @@ def main():
         print(export(paths, a.name or (a.kit if a.kit else None), rack=a.rack, key=a.key, bpm=a.bpm))
     elif a.cmd == "ytscout":
         from .ytscout import run as yrun
-        yrun(a.query, a.n)
+        yrun(a.query, a.n, a.mode)
     elif a.cmd == "shootout":
         from .shootout import render, render_tune, results
         if a.tune and not a.results:
