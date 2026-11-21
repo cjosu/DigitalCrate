@@ -333,6 +333,7 @@ def run(where_sql="1=1", params=(), separate_mode="auto", limit=None, reprocess=
                 con.commit()
                 tqdm.write(f"  skip {row['artist']} - {row['title']}: same recording as track {dup}")
                 continue
+            tqdm.write(f"NOW {row['artist']} - {row['title']}")
             remove_track_files(con, row["id"])
             total += process_track(con, row, separate_mode, verbose, vocals)
         except KeyboardInterrupt:

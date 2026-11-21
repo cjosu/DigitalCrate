@@ -91,7 +91,7 @@ TEMPLATE = r"""<!doctype html>
 *{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
 font:13px/1.4 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
 button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer}
-button:hover{border-color:var(--mute)}button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button:hover{border-color:var(--mute)}button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}#tabP.busy{border-color:var(--acc);color:var(--acc)}
 input,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
 .app{display:grid;grid-template-columns:260px 1fr var(--dw,480px);height:100vh;position:relative}
 #dsplit{position:absolute;top:0;bottom:0;right:calc(var(--dw,480px) - 3px);width:7px;cursor:col-resize;z-index:5}
@@ -169,7 +169,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
   <h2>Min quality <span class="sub" id="qv"></span></h2><input id="q" type="range" min="0" max="1" step="0.05" value="0.4" style="width:100%">
 </aside>
 <main>
-  <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabA" title="browse by artist, album and song">👤 Artists</button><button id="tabK" title="recommended kits and your saved sketches">Kits &amp; sketches</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button></div>
+  <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabA" title="browse by artist, album and song">👤 Artists</button><button id="tabK" title="recommended kits and your saved sketches">Kits &amp; sketches</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button><button id="tabP" title="mining runs: what's processing, start a new run, how much of your library is mined" hidden>⚙ Processing</button></div>
     <input type="search" id="search" placeholder="search artist, title, mood, instrument, id…">
     <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select><span id="sorthq"></span><select id="since" title="only samples added recently — combine with any sort, e.g. for you"><option value="">added any time</option><option value="batch">latest run</option><option value="0.25">last 6 hours</option><option value="1">last day</option><option value="3">last 3 days</option><option value="7">last week</option><option value="30">last month</option></select>
     <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button>
@@ -602,6 +602,11 @@ function paintWheel(){const cnt={};S.forEach(s=>{if(s[F.cam])cnt[s[F.cam]]=(cnt[
 $('nbr').onclick=e=>{st.nbr=!st.nbr;e.target.classList.toggle('on');render()};$('clrkey').onclick=()=>{st.key=null;render()};
 ['bmin','bmax','half','q','search','sort','grp','since'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
 $('stop').onclick=stopAll;
+// the Processing page (served only), with a badge while a mining run is going
+if(SERVED){const tp=$('tabP');tp.hidden=false;tp.onclick=()=>location.href='activity';
+ const badge=async()=>{try{const r=await (await fetch('api/activity?jobs=1')).json();const j=(r.jobs||[]).find(j=>j.kind==='process'||j.kind==='terminal');
+  tp.textContent=j?(j.progress?`⚙ Processing · ${Math.round(100*j.progress[0]/j.progress[1])}%`:'⚙ Processing…'):'⚙ Processing';tp.classList.toggle('busy',!!j)}catch(e){}};
+ badge();setInterval(badge,30000)}
 $('refresh').onclick=()=>{$('refresh').hidden=true;render()};
 
 // the latest run: walk back from the newest sample until a gap of more than 6 hours

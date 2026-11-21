@@ -21,15 +21,86 @@ FAV_DIR = C.LIB_ROOT / "Favorites"
 JOBS = {}  # id -> dict(target, proc, log)
 
 
+def _jobs_file():
+    return C.DATA_DIR / "jobs.json"
+
+
+def _saved_jobs():
+    try:
+        return json.loads(_jobs_file().read_text())
+    except Exception:
+        return {}
+
+
 def start_job(kind, args, target):
     import subprocess, sys, time
     jid = str(int(time.time() * 1000))
     logf = C.DATA_DIR / f"{kind}_{jid}.log"
     cmd = [sys.executable, "-u", "-m", "digitalcrate", kind] + args
     proc = subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parent.parent), stdout=open(logf, "w"),
-                            stderr=subprocess.STDOUT)
+                            stderr=subprocess.STDOUT, start_new_session=True)  # keeps running if the server restarts
     JOBS[jid] = dict(kind=kind, target=target, proc=proc, log=logf)
+    saved = _saved_jobs()
+    saved[jid] = dict(kind=kind, target=target, pid=proc.pid, log=str(logf), started=time.time())
+    _jobs_file().write_text(json.dumps(dict(list(saved.items())[-40:])))
     return jid
+
+
+def _alive(pid):
+    import os
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:  # a finished child the server started is a zombie until reaped
+        return os.waitpid(pid, os.WNOHANG) == (0, 0)
+    except ChildProcessError:
+        return True
+
+
+def stop_job(jid):
+    import os, signal
+    j = _saved_jobs().get(jid)
+    if j and _alive(j["pid"]):
+        os.kill(j["pid"], signal.SIGINT)  # the run stops between songs' work; unfinished songs stay unmined
+        return True
+    return False
+
+
+def activity():
+    """Every processing job the app started (also from before a restart), with progress parsed from its log, plus
+    mining runs started from a terminal."""
+    import re, subprocess, time
+    out = []
+    for jid, j in sorted(_saved_jobs().items(), reverse=True):
+        f = Path(j["log"])
+        txt = f.read_text(errors="ignore") if f.exists() else ""
+        running = _alive(j["pid"])
+        bars = re.findall(r"(\w+):\s+(\d+)%\|[^|]*\|\s*(\d+)/(\d+) \[([\d:]+)<([\d:?]+)", txt)
+        now = re.findall(r"^NOW (.+)$", txt, re.M)
+        made = re.findall(r"^  (.+?): (\d+) samples", txt, re.M)
+        m = re.search(r"done: (\d+) samples written", txt)
+        lines = [l for l in re.split(r"[\r\n]+", txt) if l.strip() and not re.search(
+            r"Warning|warn|redirects|Loading weights|\d+%\|", l)]
+        out.append(dict(id=jid, kind=j["kind"], target=j["target"], running=running, started=j.get("started"),
+                        progress=[int(bars[-1][2]), int(bars[-1][3])] if bars else None,
+                        elapsed=bars[-1][4] if bars else None, eta=bars[-1][5] if bars else None,
+                        now=now[-1] if now and running else None, songs=len(made),
+                        samples=int(m.group(1)) if m else sum(int(x[1]) for x in made),
+                        errors=txt.count("  ERROR "), building="BUILDING" in txt and "BUILD DONE" not in txt,
+                        finished=bool(m) or "BUILD DONE" in txt or "INGEST DONE" in txt or "SCOUT DONE" in txt,
+                        tail=lines[-8:]))
+    mine = {j["pid"] for j in _saved_jobs().values()}
+    try:
+        ps = subprocess.run(["ps", "-axo", "pid=,etime=,command="], capture_output=True, text=True).stdout
+        for l in ps.splitlines():
+            pid, et, cmd = l.strip().split(None, 2)
+            if "python" in cmd.split()[0].rsplit("/", 1)[-1].lower() and "digitalcrate" in cmd and re.search(r"digitalcrate\W+(process|drums|scout|build|ingest|transform|mangle)\b|process import run|\.build import", cmd) \
+                    and int(pid) not in mine and "grep" not in cmd:
+                out.append(dict(id="pid" + pid, kind="terminal", target=cmd[-160:], running=True, elapsed=et, external=True))
+    except Exception:
+        pass
+    return out
 
 
 def start_ingest(target, drums):
@@ -186,6 +257,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.split("?")[0] in ("/pairtest", "/drumlabel"):
             return self._file(Path(__file__).resolve().parent / "static" / (self.path.split("?")[0][1:] + ".html"),
                               "text/html", {"Cache-Control": "no-store"})
+        if self.path.split("?")[0] == "/activity":
+            return self._file(Path(__file__).resolve().parent / "static" / "activity.html", "text/html",
+                              {"Cache-Control": "no-store"})
         if self.path.split("?")[0] == "/shootout":
             return self._file(Path(__file__).resolve().parent / "static" / "shootout.html", "text/html",
                               {"Cache-Control": "no-store"})
@@ -260,6 +334,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json([dict(r) for r in _sketch_db().execute("SELECT * FROM sketches ORDER BY updated_at DESC")])
         except Exception as e:
             return self._json({"error": str(e)}, 400)
+        if u.path == "/api/activity":
+            from .batches import coverage
+            if q.get("jobs") == "1":  # the main page's badge: just what's running
+                return self._json(dict(jobs=[j for j in activity() if j["running"]]))
+            return self._json(dict(jobs=activity(), coverage=coverage()))
         if u.path == "/api/jobs":
             return self._json(job_status(q.get("kind")))
         if self.path == "/api/favs":
@@ -333,6 +412,20 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"ok": vote(req["clip"], req.get("rating"))})
             elif self.path == "/api/sketch/delete":
                 con = _sketch_db(); con.execute("DELETE FROM sketches WHERE name=?", (req["name"],)); con.commit()
+            elif self.path in ("/api/activity/plan", "/api/activity/start"):
+                from .batches import PICKERS, save_batch, DEFAULT_SKIP
+                plan = PICKERS[req.get("mode", "breadth")](int(req.get("n", 200)), req.get("skip", DEFAULT_SKIP))
+                if self.path.endswith("/plan"):
+                    plan.pop("ids")
+                    return self._json(plan)
+                if any(j["running"] and j["kind"] in ("process", "terminal") for j in activity()):
+                    return self._json({"error": "a mining run is already going; stop it first"}, 409)
+                f = save_batch(plan)
+                args = ["--ids-file", str(f)] + (["--build"] if req.get("build", True) else [])
+                label = f"{plan['n']} songs · {plan['mode']} · {plan['artists']} artists"
+                return self._json({"job": start_job("process", args, label)})
+            elif self.path == "/api/activity/stop":
+                return self._json({"stopped": stop_job(req["id"])})
             elif self.path == "/api/ingest":
                 return self._json({"job": start_ingest(req["target"], bool(req.get("drums")))})
             elif self.path == "/api/export":
