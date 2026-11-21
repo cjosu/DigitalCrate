@@ -131,7 +131,12 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 .artbar input{flex:1;min-width:180px}.letters{display:flex;flex-wrap:wrap;gap:2px}.letters a{color:var(--mute);text-decoration:none;font-size:12px;padding:1px 4px;border-radius:3px}.letters a:hover{color:var(--ink);background:var(--panel)}
 .art{border-bottom:1px solid #1a1d23;padding:6px 16px;scroll-margin-top:56px}.arow{display:flex;gap:8px;align-items:baseline}.tw{border:0;padding:0 4px;color:var(--mute)}
 .aname{color:var(--ink);text-decoration:none;font-weight:600}.aname:hover,.alb a:hover,.song a:hover{color:var(--acc)}
-.rackb{font-size:11px;padding:1px 6px;margin-left:6px}.alb{margin:4px 0 6px 28px}.alb>a{color:var(--ink);text-decoration:none;font-size:12px;font-weight:600}.song{margin-left:14px;font-size:12px}.song a{color:var(--ink);text-decoration:none}
+.rackb{font-size:11px;padding:1px 6px;margin-left:6px}
+.rackgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.rpad{border:1px solid var(--line);border-radius:8px;background:#161a20;padding:6px 8px;cursor:pointer;user-select:none;display:grid;gap:4px;min-height:84px}
+.rpad:hover{border-color:var(--mute)}.rpad.hit{background:#d96c6c;border-color:#d96c6c;color:#000}.rpad.empty{opacity:.25;cursor:default}
+.rtop{display:flex;justify-content:space-between;align-items:center}.rtop b{color:var(--acc);font-size:13px}.rpad.hit .rtop b{color:#000}
+.rx{border:0;padding:0 3px;font-size:11px;color:#4a515c}.rx:hover{color:var(--ink)}.rpad span{font-size:12px}.rpad span i{color:var(--mute);font-style:normal;font-size:10px;margin-left:4px}
+.rpad svg{width:100%;height:22px}.alb{margin:4px 0 6px 28px}.alb>a{color:var(--ink);text-decoration:none;font-size:12px;font-weight:600}.song{margin-left:14px;font-size:12px}.song a{color:var(--ink);text-decoration:none}
 .cattabs{display:flex;flex-wrap:wrap;gap:0;flex-basis:100%;border-bottom:1px solid var(--line);margin:4px -16px -12px;padding:0 16px}
 .cattabs button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 6px 7px;font-size:12.5px;white-space:nowrap;color:var(--mute)}
 .cattabs button:hover{color:var(--ink)}.cattabs button.on{background:none;color:var(--ink);border-bottom-color:var(--c,var(--ink))}
@@ -426,12 +431,39 @@ const RACK_ORDER=['Kick','Snare','Rim & Clap','Hat Closed','Hat Open','Shaker & 
 function drumHits(tids){const T=new Set(tids.map(String)),ro=s=>{const k=RACK_ORDER.indexOf(s);return k<0?99:k};
  return S.map((s,i)=>i).filter(i=>T.has(String(S[i][F.tid]))&&S[i][F.cat]==='Percussion'&&S[i][F.kind]==='oneshot')
   .sort((a,b)=>ro(S[a][F.sub])-ro(S[b][F.sub])||S[b][F.q]-S[a][F.q]).slice(0,128)}
-async function makeRack(tids,name,btn){if(!SERVED){alert('Drum Racks need the local server: run "digitalcrate serve"');return}
- const ids=drumHits(tids);if(!ids.length){btn.textContent='no drum hits';return}const was=btn.textContent;btn.textContent='building…';
+async function makeRack(ids,name,btn){if(!SERVED){btn.textContent='needs "digitalcrate serve"';return}
+ if(!ids.length){btn.textContent='no pads left';return}btn.textContent='building…';
  try{const r=await (await fetch('api/export',{method:'POST',body:JSON.stringify({scope:'paths',paths:ids.map(i=>S[i][F.path]),name:name+' drums',rack:true,reveal:true})})).json();
-  btn.textContent=r.error?'error':`🥁 rack ✓ (${r.count} pads)`}catch(e){btn.textContent='error'}}
-const rackBtn=(tids,name)=>{const n=drumHits(tids).length;return n?`<button class="rackb" data-rack="${esc(tids.join(','))}" data-rname="${esc(name)}" title="an Ableton Drum Rack of ${n} drum hits, kicks first">🥁 ${n}</button>`:''};
-document.addEventListener('click',e=>{const b=e.target.closest('[data-rack]');if(!b)return;e.preventDefault();e.stopPropagation();makeRack(b.dataset.rack.split(','),b.dataset.rname,b)},true);
+  btn.textContent=r.error?'error':`✓ exported ${r.count} pads (Finder is open)`}catch(e){btn.textContent='error'}}
+// ---------- Drum Rack viewer: the rack as 4x4 pad pages; click or keys 1234/QWER/ASDF/ZXCV to play
+const RKEYS='1234qwerasdfzxcv'.split(''),RACK={open:false,ids:[],page:0,name:'',buf:{}};
+const RSHORT={'Kick':'Kick','Snare':'Snare','Rim & Clap':'Rim/Clap','Hat Closed':'Hat','Hat Open':'Open hat','Shaker & Tamb':'Shaker','Tom':'Tom','Hand Drum':'Hand drum',
+ 'Wood & Metal':'Wood/Metal','Orchestral':'Timpani','Ride':'Ride','Crash':'Crash','Kick + Snare':'Kick+Snare','Kick + Hat':'Kick+Hat','Snare + Hat':'Snare+Hat',
+ 'Perc + Hat':'Perc+Hat','Kick + Cymbal':'Kick+Cym','Snare + Cymbal':'Snare+Cym','Other Combos':'Combo'};
+function openRack(tids,name){RACK.ids=drumHits(tids);RACK.name=name;RACK.page=0;RACK.open=true;$('modalBody').style.width='min(760px,94vw)';drawRack();
+ RACK.ids.slice(0,16).forEach(rackLoad)}
+async function rackLoad(i){const p=S[i][F.path];if(!RACK.buf[p])RACK.buf[p]=fetch(url(p)).then(r=>r.arrayBuffer()).then(a=>AC.decodeAudioData(a));return RACK.buf[p]}
+async function rackHit(k){const i=RACK.ids[RACK.page*16+k];if(i==null)return;AC.resume();const b=await rackLoad(i);const s=AC.createBufferSource();s.buffer=b;s.connect(AC.destination);s.start();
+ const el=document.querySelector(`#rackgrid [data-rp="${k}"]`);if(el){el.classList.add('hit');setTimeout(()=>el.classList.remove('hit'),Math.min(400,b.duration*1000))}}
+function drawRack(){const n=RACK.ids.length,pages=Math.max(1,Math.ceil(n/16)),p0=RACK.page*16;
+ modal(`<h2 style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">🥁 ${esc(RACK.name)}<span class="sub">${n} pad${n===1?'':'s'} · kicks first</span></h2>
+ <div class="sub">Click a pad or press its key to play it. ✕ drops a pad from the rack; shift-click opens its sample.</div>
+ ${pages>1?`<div class="chips">${Array.from({length:pages},(_,k)=>`<button data-rpage="${k}" class="${k===RACK.page?'on':''}">pads ${k*16+1}–${Math.min(n,k*16+16)}</button>`).join('')}</div>`:''}
+ <div id="rackgrid" class="rackgrid">${Array.from({length:16},(_,k)=>{const i=RACK.ids[p0+k];if(i==null)return`<div class="rpad empty"></div>`;const s=S[i];
+  return `<div class="rpad" data-rp="${k}" title="${esc(s[F.sub])} · ${esc(s[F.artist])} — ${esc(s[F.title])} (${s[F.id]})"><div class="rtop"><b>${RKEYS[k].toUpperCase()}</b><button class="rx" data-rx="${p0+k}" title="drop this pad">✕</button></div>
+   ${wave(s[F.env],120,22,'#7d8592')}<span>${esc(RSHORT[s[F.sub]]||s[F.sub])} <i>${p0+k+1}</i></span></div>`}).join('')}</div>
+ <div class="edrow"><button id="rackexp" class="pill">⇩ Drum Rack to Ableton</button><button data-close>close</button></div>`)}
+$('modalBody').addEventListener('mousedown',e=>{if(!RACK.open)return;const x=e.target.closest('[data-rx]');if(x){e.stopPropagation();RACK.ids.splice(+x.dataset.rx,1);
+  if(RACK.page*16>=RACK.ids.length&&RACK.page>0)RACK.page--;drawRack();return}
+ const pg=e.target.closest('[data-rpage]');if(pg){RACK.page=+pg.dataset.rpage;drawRack();RACK.ids.slice(RACK.page*16,RACK.page*16+16).forEach(rackLoad);return}
+ const pd=e.target.closest('[data-rp]');if(pd){e.preventDefault();const k=+pd.dataset.rp;if(e.shiftKey){const i=RACK.ids[RACK.page*16+k];closeRack();select(i,'list');return}rackHit(k);return}
+ if(e.target.id==='rackexp'){makeRack(RACK.ids,RACK.name,e.target)}});
+function closeRack(){RACK.open=false;$('modal').hidden=true;$('modalBody').style.width=''}
+$('modal').addEventListener('click',e=>{if(RACK.open&&(e.target.id==='modal'||e.target.closest('[data-close]')))closeRack()});
+window.addEventListener('keydown',e=>{if(!RACK.open||$('modal').hidden){RACK.open=false;return}if(e.key==='Escape'){closeRack();return}
+ if(e.metaKey||e.ctrlKey||e.target.tagName==='INPUT')return;const k=RKEYS.indexOf(e.key.toLowerCase());if(k<0)return;e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)rackHit(k)},true);
+const rackBtn=(tids,name)=>{const n=drumHits(tids).length;return n?`<button class="rackb" data-rack="${esc(tids.join(','))}" data-rname="${esc(name)}" title="see and play a Drum Rack of ${n} drum hits (kicks first), then export it to Ableton">🥁 ${n}</button>`:''};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-rack]');if(!b)return;e.preventDefault();e.stopPropagation();openRack(b.dataset.rack.split(','),b.dataset.rname)},true);
 $('list').addEventListener('click',e=>{if(st.tab!=='A')return;const t=e.target.closest('[data-aopen],[data-aall],[data-aalb],[data-jump]');if(!t)return;e.preventDefault();e.stopPropagation();
  if(t.dataset.jump){const el=$('art-'+t.dataset.jump),m=document.querySelector('main'),hd=document.querySelector('.top');
   if(el)m.scrollTop+=el.getBoundingClientRect().top-hd.getBoundingClientRect().bottom-4;return}

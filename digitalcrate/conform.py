@@ -38,10 +38,11 @@ def parse_key(k):
 
 def lookup(rel):
     con = connect()
-    r = con.execute("SELECT * FROM samples WHERE path=?", (rel,)).fetchone()
+    tq = "SELECT s.*, t.bpm AS track_bpm, t.tempo_ok FROM samples s JOIN tracks t ON t.id=s.track_id"
+    r = con.execute(f"{tq} WHERE s.path=?", (rel,)).fetchone()
     shift = 0
     if r is None:  # a variation: inherit from its source, shifted by the variation's own pitch
-        r = con.execute("SELECT s.* FROM variants v JOIN samples s ON s.id=v.sample_id WHERE v.path=?", (rel,)).fetchone()
+        r = con.execute(f"{tq} JOIN variants v ON v.sample_id=s.id WHERE v.path=?", (rel,)).fetchone()
         ch = con.execute("SELECT chain FROM variants WHERE path=?", (rel,)).fetchone()
         mm = re.search(r"(?:pitch|tape|vari)([+-]\d+)", ch["chain"] if ch else "")
         shift = int(mm.group(1)) if mm else 0
@@ -65,6 +66,16 @@ def plan(row, shift, key=None, bpm=None):
         mult = min((0.5, 1, 2), key=lambda m: abs(np.log(bpm / (src * m))))
         time = (src * mult) / bpm
         info["bpm"] = bpm
+    elif bpm and row and row["kind"] in ("phrase", "free") and row["category"] != "Percussion" \
+            and row.get("tempo_ok") and row.get("track_bpm"):
+        # phrases and free clips keep their song's pulse: stretch them to the project tempo too, when the
+        # song's tempo was detected reliably and the stretch is gentle enough to sound clean
+        src = float(row["track_bpm"])
+        mult = min((0.5, 1, 2), key=lambda m: abs(np.log(bpm / (src * m))))
+        r_ = (src * mult) / bpm
+        if 0.7 <= r_ <= 1.4:
+            time = r_
+            info["bpm"] = bpm
     return semis, time, info
 
 
@@ -75,13 +86,15 @@ def render(rel, key=None, bpm=None):
     if semis == 0 and abs(time - 1) < 1e-3:
         return C.LIB_ROOT / rel, dict(info, semis=0, time=1, length=1)
     CACHE.mkdir(parents=True, exist_ok=True)
-    h = hashlib.sha1(f"{rel}|{semis}|{time:.5f}|v2".encode()).hexdigest()[:14]
+    h = hashlib.sha1(f"{rel}|{semis}|{time:.5f}|v3".encode()).hexdigest()[:14]
     out = CACHE / f"{h}.wav"
     if not out.exists():
         from .edit import _load
         from .stretch import shift as engine
         y = _load(rel)
-        loop = row["kind"] == "loop"  # loops must keep their length -> Signalsmith; anything else -> Re-Pitch
+        # loops, and anything being moved to the project tempo, need an exact length -> Signalsmith;
+        # a key change alone -> Re-Pitch (tape-style: pitch and length move together; won the blind test)
+        loop = row["kind"] == "loop" or abs(time - 1) > 1e-3
         z, _ = engine(y, semis, time if loop else 1.0, engine="signalsmith" if loop else "repitch")
         if row["kind"] == "loop":  # keep loops bar-exact after the stretch
             n = int(round(y.shape[1] * time))
@@ -90,7 +103,7 @@ def render(rel, key=None, bpm=None):
         tmp = out.with_suffix(".tmp.wav")
         sf.write(str(tmp), z.T, C.SR, subtype="PCM_24")
         tmp.rename(out)
-    loop = row["kind"] == "loop"
+    loop = row["kind"] == "loop" or abs(time - 1) > 1e-3
     eng = "signalsmith" if loop else "repitch"
     length = time if loop else 2 ** (-semis / 12)  # Re-Pitch changes the length with the pitch
     return out, dict(info, semis=semis, time=round(time, 4), length=round(length, 5), engine=eng)

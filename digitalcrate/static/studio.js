@@ -225,20 +225,29 @@ async function skAdd(i){if(!SERVED){toast('the sketchpad needs the local server'
  const loop=S[i][F.kind]==='loop';
  const lane={i,path:S[i][F.path],vol:0.8,mute:false,solo:false,every:loop?0:(S[i][F.dur]>barLen()*2?4:S[i][F.dur]>barLen()?2:1),offset:0,buf:null,state:'loading'};
  SK.lanes.push(lane);SK.open=true;drawSK();drawProj();await skLoad(lane);drawSK();toast(`added to the sketch (${SK.lanes.length})`)}
-async function skLoad(lane){lane.state='loading';try{const ab=await (await fetch(conformURL(lane.path,PROJ.key,PROJ.bpm))).arrayBuffer();lane.buf=await AC.decodeAudioData(ab);lane.state='ok'}catch(e){lane.state='error'}}
+async function skLoad(lane){lane.state='loading';lane.att=null;try{const ab=await (await fetch(conformURL(lane.path,lane.nat?'':PROJ.key,PROJ.bpm))).arrayBuffer();lane.buf=await AC.decodeAudioData(ab);lane.state='ok'}catch(e){lane.state='error'}}
+// where the sound really starts inside a (trimmed) clip: phrases often open with a breath or silence, so the
+// attack, not the file's first sample, is what gets placed on the beat
+function skAttack(l){const [r0,R]=skRegion(l),key=`${r0}|${R}`;if(l.att&&l.att.key===key)return l.att.v;const sr=l.buf.sampleRate,a=Math.floor(r0*sr),b=Math.min(l.buf.length,a+Math.floor(Math.min(R,4)*sr));
+ let pk=0;const chs=[...Array(l.buf.numberOfChannels).keys()].map(c=>l.buf.getChannelData(c));for(const d of chs)for(let k=a;k<b;k+=2)pk=Math.max(pk,Math.abs(d[k]));
+ let at=a;outer:for(let k=a;k<b;k+=2)for(const d of chs)if(Math.abs(d[k])>0.2*pk){at=k;break outer}
+ const v=Math.min(1,Math.max(0,(at-a)/sr-0.01));l.att={key,v};return v}
 let reloadSeq=0;
 async function skReload(){if(!SK.lanes.length)return;const seq=++reloadSeq,was=SK.playing;if(was)skStop();SK.lanes.forEach(l=>l.state='loading');drawSK();
  await Promise.all(SK.lanes.map(skLoad));if(seq!==reloadSeq)return;drawSK();if(was)skPlay()}
 function skGains(){const solo=SK.lanes.some(l=>l.solo);SK.lanes.forEach(l=>{if(l.g)l.g.gain.setTargetAtTime(l.mute||(solo&&!l.solo)?0:l.vol,AC.currentTime,0.02)})}
 // a lane can be trimmed to part of its clip: trim = [from, to] as fractions of the (conformed) clip
 const skRegion=l=>{const d=l.buf.duration,[a,b]=l.trim||[0,1];return [a*d,Math.max(0.01,(b-a)*d)]};
-function skVoice(ctx,dest,l,t,dur,arr){const s=ctx.createBufferSource();s.buffer=l.buf;const g=ctx.createGain();s.connect(g);g.connect(dest);const f=Math.min(0.004,dur/4);
- g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+f);g.gain.setValueAtTime(1,Math.max(t+f,t+dur-f));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,skRegion(l)[0],dur);if(arr){arr.push(s);s.onended=()=>{const k=arr.indexOf(s);if(k>=0)arr.splice(k,1)}}}
+function skVoice(ctx,dest,l,t,dur,arr){const s=ctx.createBufferSource();s.buffer=l.buf;const g=ctx.createGain();s.connect(g);g.connect(dest);
+ let off=skRegion(l)[0];const lead=l.every===0||l.free?0:skAttack(l);
+ if(lead>0){if(t-lead>=ctx.currentTime+0.005)t-=lead;else{off+=lead;dur=Math.max(0.01,dur-lead)}}
+ const f=Math.min(0.004,dur/4);
+ g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+f);g.gain.setValueAtTime(1,Math.max(t+f,t+dur-f));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,off,dur);if(arr){arr.push(s);s.onended=()=>{const k=arr.indexOf(s);if(k>=0)arr.splice(k,1)}}}
 function skBar(ctx,dest,l,bar,t,L,arr){if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
  else{if(bar%l.every)return;skVoice(ctx,dest,l,t+l.offset*L/4,R,arr)}}
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
  SK.lanes.forEach(l=>{l.g=AC.createGain();l.g.connect(SK.master)});skGains();SK.start=linkNextBar();SK.nextBar=0;SK.playing=true;SK.voices=[];skTick();requestAnimationFrame(skAnim);drawSK()}
-function skTick(){if(!SK.playing)return;const L=barLen();while(SK.start+SK.nextBar*L<AC.currentTime+0.5){const t=SK.start+SK.nextBar*L;SK.lanes.forEach(l=>{if(l.g)skBar(AC,l.g,l,SK.nextBar,t,L,SK.voices)});SK.nextBar++}SK.timer=setTimeout(skTick,90)}
+function skTick(){if(!SK.playing)return;const L=barLen();while(SK.start+SK.nextBar*L<AC.currentTime+1.2){const t=SK.start+SK.nextBar*L;SK.lanes.forEach(l=>{if(l.g)skBar(AC,l.g,l,SK.nextBar,t,L,SK.voices)});SK.nextBar++}SK.timer=setTimeout(skTick,90)}
 function skStop(){SK.playing=false;clearTimeout(SK.timer);const now=AC.currentTime;if(SK.master){SK.master.gain.setTargetAtTime(0,now,0.015);const m=SK.master;setTimeout(()=>{try{m.disconnect()}catch(e){}},150)}
  SK.voices.forEach(s=>{try{s.stop(now+0.08)}catch(e){}});SK.voices=[];drawSK()}
 function skAnim(){if(!SK.playing)return;const el=$('skpos');if(el){const L=barLen(),t=AC.currentTime-SK.start;el.textContent=t<0?'waiting for the bar…':`bar ${Math.floor(t/L)+1} · beat ${Math.floor(t%L/(L/4))+1}`}requestAnimationFrame(skAnim)}
@@ -255,7 +264,7 @@ function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
  ${SK.lanes.map((l,k)=>{const s=S[l.i]||[];const loop=s[F.kind]==='loop';return`<div class="lane${l.mute?' muted':''}" data-ln="${k}"><span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span>
   <div style="min-width:0"><div class="name">${esc(s[F.sub]||'')} · ${s[F.cam]||'—'}</div><div class="meta">${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')}</div></div>
   <div>${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
-  <div class="ctl"><label class="onoff" title="turn this lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label><button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button>${l.trim?`<span class="sub" title="playing part of the clip; double-click the waveform for all of it">✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%</span>`:''}
+  <div class="ctl"><label class="onoff" title="turn this lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label><button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button>${s[F.cat]!=='Percussion'&&s[F.cam]?`<button class="tbtn${l.nat?' on':''}" data-sknat="${k}" title="keep this lane's own key instead of moving it to the project key">orig key</button>`:''}${l.trim?`<span class="sub" title="playing part of the clip; double-click the waveform for all of it">✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%</span>`:''}
   <input type="range" min="0" max="1.2" step="0.01" value="${l.vol}" data-skv="${k}" title="volume">
   ${loop?`<span>loop</span>`:`<select data-ske="${k}" title="repeat every…">${[1,2,4,8,16].map(n=>`<option value="${n}" ${l.every===n?'selected':''}>every ${n} bar${n>1?'s':''}</option>`).join('')}</select>
   <select data-sko="${k}" title="start offset (beats)">${Array.from({length:32},(_,b)=>b/2).map(b=>`<option value="${b}" ${l.offset===b?'selected':''}>+${b} beat${b===1?'':'s'}</option>`).join('')}</select>`}
@@ -278,10 +287,11 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skclear'){skStop();SK.lanes=[];SK.name='';drawSK();drawProj();return}
  if(t.dataset.skm!=null){const l=SK.lanes[+t.dataset.skm];l.mute=!l.mute;skGains();drawSK();return}
  if(t.dataset.sks!=null){const l=SK.lanes[+t.dataset.sks];l.solo=!l.solo;skGains();drawSK();return}
+ if(t.dataset.sknat!=null){const l=SK.lanes[+t.dataset.sknat];l.nat=!l.nat;drawSK();await skLoad(l);drawSK();return}
  if(t.dataset.skx!=null){SK.lanes.splice(+t.dataset.skx,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
  if(t.dataset.go!=null){select(+t.dataset.go,'list');return}
  if(t.id==='sksave'){const name=($('skname').value||'').trim()||`Sketch ${new Date().toLocaleString()}`;SK.name=name;
-  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,vol:l.vol,mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
+  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,vol:l.vol,mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null,nat:!!l.nat}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
   api('api/export',{scope:'paths',paths:SK.lanes.map(l=>l.path),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
@@ -323,7 +333,11 @@ async function skOpen(name,s){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm})
  const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();skPlay()}
 document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kitrack]');if(kr){e.stopPropagation();const k=D.kits[+kr.dataset.kitrack];kr.textContent='building…';
   try{const r=await api('api/export',{scope:'paths',paths:kitMembers(k).map(i=>S[i][F.path]),name:k.name,rack:true,reveal:true});kr.textContent=`rack ✓ (${r.count})`}catch(err){kr.textContent='error'}return}
- const ks=e.target.closest('[data-kitsk]');if(ks){e.stopPropagation();const k=D.kits[+ks.dataset.kitsk];skStop();SK.lanes=[];for(const i of kitMembers(k))await skAdd(i);skPlay();return}
+ const ks=e.target.closest('[data-kitsk]');if(ks){e.stopPropagation();const k=D.kits[+ks.dataset.kitsk];skStop();SK.lanes=[];SK.name=k.name;
+  // a kit was built around one key and tempo (they're in its name): use those, not whatever the project was last set to
+  const m=k.name.match(/_(\d{1,2}[AB])-[^_]*_(\d+)bpm/);if(m){PROJ.key=keyFromCam(m[1].replace(/^0/,''));if(!(PROJ.link&&LINK.peers))PROJ.bpm=+m[2];
+   try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(err){}drawProj();toast(`sketch set to ${PROJ.key} · ${PROJ.bpm} bpm, from the kit`)}
+  for(const i of kitMembers(k))await skAdd(i);skPlay();return}
  const a=e.target.closest('[data-sk]');if(a){e.stopPropagation();e.preventDefault();skAdd(+a.dataset.sk)}},true);
 
 // ================= detail panel: ＋ sketch · pads · MIDI · project info =================
