@@ -24,6 +24,8 @@ def main():
     p.add_argument("--drum-only", action="store_true",
                    help="songs that so far only went through `drums` (they have drum samples but no others)")
     p.add_argument("--limit", type=int)
+    p.add_argument("--ids-file", help="a JSON list of track ids to mine (from the Processing page or research/*_batch.py)")
+    p.add_argument("--build", action="store_true", help="rebuild the browser page when done")
     p.add_argument("--separate", choices=["auto", "always", "never"], default="auto",
                    help="auto: separate stems unless the track is already drumless")
     p.add_argument("--reprocess", action="store_true")
@@ -38,6 +40,10 @@ def main():
     b = sub.add_parser("build")
     b.add_argument("--kits", type=int, default=60)
     sub.add_parser("status")
+    bk = sub.add_parser("backup", help="back up your ratings, favourites, sketches, labels and edits (not regenerable)")
+    bk.add_argument("--install", action="store_true", help="also back up nightly (launchd)")
+    bk.add_argument("--restore", metavar="ZIP", help="put a backup back")
+    bk.add_argument("--to", help="folder to write to (default ~/Documents/DigitalCrate Backups)")
     sub.add_parser("policy", help="apply source policy (reference / vocals_only / source) to all tracks")
     sc = sub.add_parser("scout", help="fast whole-library pass ranking tracks for exposed, sample-worthy vocals")
     sc.add_argument("--limit", type=int)
@@ -93,6 +99,10 @@ def main():
             clauses.append("path LIKE ?"); params.append(f"%{x}%")
         for x in a.genre:
             clauses.append("genre LIKE ?"); params.append(f"%{x}%")
+        if a.ids_file:
+            import json as _j
+            ids = [int(x) for x in _j.loads(open(a.ids_file).read())]
+            clauses.append(f"id IN ({','.join('?' * len(ids))})"); params += ids
         if not clauses and not a.all and not a.top and not a.drum_only:
             ap.error("give --artist/--match/--genre filters, --top N, --drum-only or --all")
         where = " OR ".join(clauses) if clauses else "1=1"
@@ -106,6 +116,11 @@ def main():
             a.limit = a.top
         run(where, params, a.separate, a.limit, a.reprocess, vocals=a.vocals,
             include_reference=a.reference, order_by=order)
+        if a.build:
+            print("BUILDING the browser page…", flush=True)
+            from .build import build
+            build()
+            print("BUILD DONE", flush=True)
     elif a.cmd == "policy":
         from .policy import apply
         apply()
@@ -159,6 +174,14 @@ def main():
     elif a.cmd == "build":
         from .build import build
         build(n_kits=a.kits)
+    elif a.cmd == "backup":
+        from .backup import backup, install, restore
+        if a.restore:
+            restore(a.restore)
+        else:
+            backup(a.to)
+            if a.install:
+                install()
     elif a.cmd == "status":
         from .db import connect
         con = connect()

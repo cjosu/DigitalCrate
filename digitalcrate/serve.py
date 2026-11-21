@@ -338,7 +338,8 @@ class Handler(SimpleHTTPRequestHandler):
             from .batches import coverage
             if q.get("jobs") == "1":  # the main page's badge: just what's running
                 return self._json(dict(jobs=[j for j in activity() if j["running"]]))
-            return self._json(dict(jobs=activity(), coverage=coverage()))
+            from .backup import last_backup
+            return self._json(dict(jobs=activity(), coverage=coverage(), backup=last_backup()))
         if u.path == "/api/jobs":
             return self._json(job_status(q.get("kind")))
         if self.path == "/api/favs":
@@ -394,13 +395,14 @@ class Handler(SimpleHTTPRequestHandler):
             elif self.path == "/api/chords/midi":
                 from .harmony import write_midi
                 return self._json(write_midi(req["name"], req["chords"], float(req["step"] or 0), float(req["tempo"]),
-                                             times=req.get("times")))
+                                             times=req.get("times"), bass=req.get("bass")))
             elif self.path == "/api/pair/save":
                 from .combos import save_pair
                 return self._json(save_pair(unquote(req["src"]), unquote(req["partner"]), req.get("name") or None))
             elif self.path == "/api/stems":
                 from .combos import write_stems
-                return self._json(write_stems(req["name"], req["stems"], req.get("key"), req.get("bpm")))
+                return self._json(write_stems(req["name"], req["stems"], req.get("key"), req.get("bpm"),
+                                               als=bool(req.get("als")), bars=req.get("bars")))
             elif self.path == "/api/pairtest/vote":
                 from .listening import pair_vote
                 return self._json({"ok": pair_vote(req["trial"], req.get("rating"))})

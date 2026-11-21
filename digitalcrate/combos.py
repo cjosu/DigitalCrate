@@ -57,8 +57,10 @@ def save_pair(src, partner, name=None):
     return dict(name=name, key=key, bpm=bpm)
 
 
-def write_stems(name, stems, key=None, bpm=None, reveal=True):
-    """stems: [{label, wav (base64)}], all the same length. -> folder in the Ableton User Library."""
+def write_stems(name, stems, key=None, bpm=None, reveal=True, als=False, bars=None):
+    """stems: [{label, wav (base64), mute, category, drums}], all the same length. -> folder in the Ableton User
+    Library; with als, also a Live set there (digitalcrate/als.py) that opens in Live. Muted stems are written but
+    left out of the reference mix."""
     folder = _safe(f"{name} ({', '.join(x for x in (key, f'{bpm:g} bpm' if bpm else None) if x)})")
     if not stems:
         raise ValueError("nothing to export: every lane is muted")
@@ -66,7 +68,8 @@ def write_stems(name, stems, key=None, bpm=None, reveal=True):
     dest.mkdir(parents=True, exist_ok=True)
     audio = [sf.read(io.BytesIO(base64.b64decode(s["wav"])), dtype="float32", always_2d=True) for s in stems]
     n = min(len(y) for y, _ in audio)
-    mix = sum(y[:n] for y, _ in audio)
+    mix = sum(y[:n] for (y, _), s in zip(audio, stems) if not s.get("mute"))
+    mix = mix if not np.isscalar(mix) else np.zeros_like(audio[0][0][:n])
     # one gain for every stem, so the balance you set in the sketchpad survives and nothing clips
     g = min(1.0, 0.89 / (max([np.abs(mix).max()] + [np.abs(y).max() for y, _ in audio]) + 1e-9))
     out = []
@@ -77,6 +80,14 @@ def write_stems(name, stems, key=None, bpm=None, reveal=True):
     sr0 = audio[0][1] if audio else C.SR
     if audio:
         sf.write(str(dest / "00 mix (reference).wav"), mix * g, sr0, subtype="PCM_24")
+    res = dict(dest=str(dest), files=out)
+    if als:
+        from .als import write_set
+        lanes = [dict(s, file=dest / f) for s, f in zip(stems, out)]
+        res["als"] = str(write_set(dest, _safe(name)[:60], lanes, float(bpm or 120), int(bars or 8)))
+        if reveal:
+            subprocess.run(["open", res["als"]])  # opens in Live
+        return res
     if reveal:
         subprocess.run(["open", str(dest)])
-    return dict(dest=str(dest), files=out)
+    return res
