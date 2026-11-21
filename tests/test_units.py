@@ -106,3 +106,16 @@ def test_harmony_theory():
     assert best["root"] == 0 and best["q"] in ("", "add9")
     clash = next(c for c in plain if c["root"] == 4)  # E minor over C E G: C is a semitone above B -> penalised
     assert _fit(clash, w) < _fit(best, w)
+
+
+def test_voicings_use_only_chord_tones():
+    """Every voiced note belongs to its chord (a 5-note voicing once fell back to wrong notes), root in the bass."""
+    from digitalcrate.harmony import _vocab, _voicing, QUAL
+    for tonic, mode in ((5, "minor"), (8, "major"), (2, "minor")):
+        for style in ("soulful", "dark", "ethereal", "plain"):
+            prev = None
+            for ch in _vocab(tonic, mode, style):
+                v = _voicing(ch, prev, 57, 76)
+                assert {n % 12 for n in v} <= {(ch["root"] + i) % 12 for i in QUAL[ch["q"]]}, ch["name"]
+                assert v[0] % 12 == ch["root"] and v[0] < min(v[1:])
+                prev = v[1:]

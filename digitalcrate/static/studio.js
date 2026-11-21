@@ -480,13 +480,23 @@ function drawChords(){const r=CH.res,box=$('chordbox');if(!r)return;
   <label>pad <select id="chpad">${r.pads.map(p=>`<option ${p===CH.pad?'selected':''}>${p}</option>`).join('')}</select></label>
   <label>pad level <input type="range" id="chlvl" min="0" max="1.5" step="0.05" value="${CH.lvl}" style="width:80px"></label><button id="chstop">■ stop</button></div>
  ${r.options.map((o,k)=>`<div class="chopt"><button class="play" data-chplay="${k}" title="the sample with this progression">▶</button>
-  <div class="chs">${o.chords.map(c=>`<span class="chd" title="fit ${c.fit}"><b>${esc(c.name)}</b><i>${esc(c.roman)}</i></span>`).join('')}</div>
+  <div class="chs">${o.chords.map((c,ci)=>`<span class="chd" data-chone="${k}:${ci}" title="fit ${c.fit} · click to hear this chord"><b>${esc(c.name)}</b><i>${esc(c.roman)}</i></span>`).join('')}</div>
   <span class="sub" title="how well the chords' notes match what the sample plays">${Math.round(o.fit*100)}%</span>
   <div class="chbtn"><button data-chmidi="${k}" title="the chords as a MIDI clip, in your Ableton User Library/Chords">⇩ MIDI</button><button data-chsk="${k}" title="render the pad as a new sample and put it in the sketchpad with this sample">＋ sketch</button></div></div>`).join('')||'<div class="sub">no confident suggestions for this one</div>'}
- <div class="hint">Chords follow the sample's key and what it plays in each bar; the flavour comes from its mood. Voiced ${r.register[0]<55?'below':'above'} the sample's own register so they don't mask it.</div>`;
+ <div class="kbd" id="chkeys"></div>
+ <div class="hint">Click a chord to hear it alone. Chords follow the sample's key and what it plays in each bar; the flavour comes from its mood. Voiced ${r.register[0]<55?'below':'above'} the sample's own register so they don't mask it.</div>`;
+ chKeys([]);
  $('chbpc').onchange=e=>{CH.bpc=+e.target.value;chStop();openChords(CH.i,true)};$('chpad').onchange=e=>{CH.pad=e.target.value;if(CH.play)chPlay(CH.play.k)};
  $('chlvl').oninput=e=>{CH.lvl=+e.target.value;if(CH.play)CH.play.pg.gain.value=CH.lvl};$('chstop').onclick=chStop}
-function chStop(){if(!CH.play)return;const p=CH.play;CH.play=null;clearTimeout(p.timer);const now=AC.currentTime;p.master.gain.setTargetAtTime(0,now,0.05);setTimeout(()=>{try{p.master.disconnect()}catch(e){}},400);
+// a piano keyboard over the register the chords use; lit keys = the chord sounding now (bass in a darker colour)
+function chKeys(notes,label){const el=$('chkeys');if(!el||!CH.res)return;const lo=Math.min(36,...notes.map(n=>n-(n%12))),hi=Math.max(84,...notes.map(n=>n+1));
+ const blk=n=>[1,3,6,8,10].includes(n%12),wh=[];for(let n=lo;n<=hi;n++)if(!blk(n))wh.push(n);const W=100/wh.length,on=new Set(notes),bass=notes.length?Math.min(...notes):null;
+ let h=wh.map((n,k)=>`<i class="w${on.has(n)?(n===bass?' bs':' on'):''}" style="left:${k*W}%;width:${W}%">${n%12===0?`<em>C${n/12-1}</em>`:''}</i>`).join('');
+ for(let n=lo;n<=hi;n++)if(blk(n)){const k=wh.filter(x=>x<n).length;h+=`<i class="b${on.has(n)?(n===bass?' bs':' on'):''}" style="left:${k*W-W*0.32}%;width:${W*0.64}%"></i>`}
+ el.innerHTML=`<div class="kl">${label?esc(label):'&nbsp;'}</div><div class="kk">${h}</div>`}
+function chMark(k,ci){document.querySelectorAll('[data-chone]').forEach(x=>x.classList.toggle('now',x.dataset.chone===`${k}:${ci}`));const c=CH.res&&CH.res.options[k]&&CH.res.options[k].chords[ci];
+ chKeys(c?c.notes:[],c?`${c.name} · ${c.roman}`:'')}
+function chStop(){if(!CH.play)return;const p=CH.play;CH.play=null;clearTimeout(p.timer);cancelAnimationFrame(p.raf);chMark(-1,-1);const now=AC.currentTime;p.master.gain.setTargetAtTime(0,now,0.05);setTimeout(()=>{try{p.master.disconnect()}catch(e){}},400);
  try{p.src.stop(now+0.2)}catch(e){}document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.remove('playing'))}
 // anything else starting to play (a sample, play-together, a variation, the sketch, the stop button) stops the chords too
 const _stopAllChords=stopAll;stopAll=function(){_stopAllChords.apply(this,arguments);chStop()};
@@ -497,8 +507,12 @@ async function chPlay(k){chStop();stopAll();skStop();AC.resume();const r=CH.res,
  const src=AC.createBufferSource();src.buffer=buf;src.loop=true;src.loopEnd=Math.min(buf.duration,L);const sg=AC.createGain();sg.gain.value=Math.min(4,skNorm(buf))*0.8;src.connect(sg);sg.connect(master);
  const t0=AC.currentTime+0.1;src.start(t0);CH.play={k,master,pg,src,timer:null};
  const sched=n=>{if(!CH.play||CH.play.k!==k)return;padProgression(AC,pg,o,r.step,t0+n*L,CH.pad);CH.play.timer=setTimeout(()=>sched(n+1),Math.max(50,(t0+(n+1)*L-AC.currentTime-1)*1000))};sched(0);
+ let last=-1;const follow=()=>{if(!CH.play||CH.play.k!==k)return;const t=AC.currentTime-t0;const ci=t<0?0:Math.floor((t%L)/r.step);if(ci!==last){last=ci;chMark(k,ci)}CH.play.raf=requestAnimationFrame(follow)};follow();
  document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.toggle('playing',+b.dataset.chplay===k))}
-document.addEventListener('click',async e=>{const p=e.target.closest('[data-chplay]');if(p){if(CH.play&&CH.play.k===+p.dataset.chplay)chStop();else chPlay(+p.dataset.chplay);return}
+document.addEventListener('click',async e=>{const one=e.target.closest('[data-chone]');if(one){const [k,ci]=one.dataset.chone.split(':').map(Number),r=CH.res,c=r.options[k].chords[ci];
+  chStop();stopAll();AC.resume();const pg=AC.createGain();pg.gain.value=CH.lvl;const rv=padReverb(AC),wet=AC.createGain();wet.gain.value=0.35;pg.connect(AC.destination);pg.connect(rv);rv.connect(wet);wet.connect(AC.destination);
+  padChord(AC,pg,c.notes,AC.currentTime+0.02,Math.min(2.5,r.step),CH.pad);chMark(k,ci);return}
+ const p=e.target.closest('[data-chplay]');if(p){if(CH.play&&CH.play.k===+p.dataset.chplay)chStop();else chPlay(+p.dataset.chplay);return}
  const m=e.target.closest('[data-chmidi]');if(m){const r=CH.res,o=r.options[+m.dataset.chmidi],s=S[CH.i];
   try{await api('api/chords/midi',{name:`${s[F.artist]} - ${s[F.title]} - ${o.chords.map(c=>c.name).join(' ')}`,chords:o.chords.map(c=>c.notes),step:r.step,tempo:r.tempo});m.textContent='✓ MIDI';toast('MIDI clip saved to your Ableton User Library › Chords')}catch(err){toast('error: '+err.message)}return}
  const sk=e.target.closest('[data-chsk]');if(sk){const r=CH.res,o=r.options[+sk.dataset.chsk],i=CH.i,s=S[i];sk.textContent='rendering…';

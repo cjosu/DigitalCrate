@@ -89,7 +89,9 @@ font:13px/1.4 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
 button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer}
 button:hover{border-color:var(--mute)}button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 input,select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
-.app{display:grid;grid-template-columns:260px 1fr 400px;height:100vh}
+.app{display:grid;grid-template-columns:260px 1fr var(--dw,480px);height:100vh;position:relative}
+#dsplit{position:absolute;top:0;bottom:0;right:calc(var(--dw,480px) - 3px);width:7px;cursor:col-resize;z-index:5}
+#dsplit:hover,#dsplit.on{background:linear-gradient(90deg,transparent 2px,var(--acc) 2px,var(--acc) 4px,transparent 4px)}
 aside,.detail{overflow:auto;padding:16px;border-right:1px solid var(--line)}.detail{border-right:0;border-left:1px solid var(--line)}
 main{overflow:auto;display:flex;flex-direction:column}
 h1{font-size:15px;letter-spacing:.08em;text-transform:uppercase;margin:0 0 2px}h2{font-size:11px;letter-spacing:.1em;
@@ -171,7 +173,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
   <div id="modal" class="modal" hidden>
    <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:min(560px,92vw);display:grid;gap:10px" id="modalBody"></div></div>
 </main>
-<section class="detail" id="detail"><div class="empty">Select a sample to see what it goes with.<br><br>Click an <span class="id">ID</span> to copy it — paste into Ableton's browser search to find the file instantly.</div></section>
+<div id="dsplit" title="drag to resize the sample panel · double-click to reset"></div><section class="detail" id="detail"><div class="empty">Select a sample to see what it goes with.<br><br>Click an <span class="id">ID</span> to copy it — paste into Ableton's browser search to find the file instantly.</div></section>
 </div>
 <script id="data" type="application/json">__DATA__</script>
 <script>
@@ -300,6 +302,14 @@ function edButtons(){if(!$('edprev'))return;const m=ED&&ED.P&&ED.P.mode;
  $('edplay').textContent=m==='sel'?'■ stop':'▶ selection';$('edplay').classList.toggle('playing',m==='sel')}
 function edParams(){return{start:+ED.sel[0].toFixed(3),end:+ED.sel[1].toFixed(3),stretch:+$('edst').value,semis:+$('edpi').value,
  formant:$('edfm').checked,reverse:$('edrev').checked,fade_in:+$('edfi').value,fade_out:+$('edfo').value,normalize:true,loop_xfade:$('edloop').checked?+$('edxf').value:0}}
+// ---------- resizable sample panel (remembered per browser)
+(function(){const app=document.querySelector('.app'),sp=$('dsplit'),KEY='atlasDetailW',set=w=>{w=Math.max(340,Math.min(window.innerWidth-560,w));app.style.setProperty('--dw',w+'px');return w};
+ try{const v=+localStorage.getItem(KEY);if(v)set(v)}catch(e){}
+ let drag=false;sp.onmousedown=e=>{drag=true;sp.classList.add('on');e.preventDefault()};
+ window.addEventListener('mousemove',e=>{if(drag)set(window.innerWidth-e.clientX)});
+ window.addEventListener('mouseup',()=>{if(!drag)return;drag=false;sp.classList.remove('on');try{localStorage.setItem(KEY,parseInt(getComputedStyle(app).getPropertyValue('--dw')))}catch(e){}
+  window.dispatchEvent(new Event('resize'))});
+ sp.ondblclick=()=>{app.style.removeProperty('--dw');try{localStorage.removeItem(KEY)}catch(e){}window.dispatchEvent(new Event('resize'))}})();
 function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.devicePixelRatio||1,W=Math.round(c.clientWidth*dpr),H=Math.round(120*dpr);
  if(c.width!==W||c.height!==H){c.width=W;c.height=H;ED.peaks=null}
  const base=ED.base||(ED.base=document.createElement('canvas'));base.width=W;base.height=H;const g=base.getContext('2d');

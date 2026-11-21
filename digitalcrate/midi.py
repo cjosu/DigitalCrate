@@ -90,7 +90,8 @@ def transcribe(rel, bpm=None):
         try:
             import pretty_midi
             pm = pretty_midi.PrettyMIDI(initial_tempo=float(bpm))
-            inst = pretty_midi.Instrument(0, name=src.stem[:40])
+            # MIDI track names are Latin-1: keep what fits (titles in Japanese etc. would crash the write)
+            inst = pretty_midi.Instrument(0, name=src.stem[:40].encode("latin-1", "ignore").decode("latin-1") or "notes")
             inst.notes = [pretty_midi.Note(velocity=max(1, min(127, v)), pitch=p, start=s, end=e) for s, e, p, v in notes]
             pm.instruments.append(inst)
             midi = pm

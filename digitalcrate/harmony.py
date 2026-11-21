@@ -150,29 +150,44 @@ def _fit(ch, w):
 
 
 def _voicing(ch, prev, low, high):
-    """Notes for a chord between low..high, as close as possible to the previous voicing."""
-    ivs = QUAL[ch["q"]]
+    """Bass root + upper voices, like a keyboard player: the root lives in the bass, so the upper voices leave it out
+    once there are 4+ tones, and drop the 5th too for 9ths/11ths/13ths. The upper voices take the inversion closest
+    to the previous chord (smooth voice leading) within about two octaves above `low`."""
+    ivs = list(QUAL[ch["q"]])
+    if len(ivs) >= 4:
+        ivs = [i for i in ivs if i % 12 != 0]
+    if len(ivs) >= 5:
+        ivs = [i for i in ivs if i % 12 != 7]
     pcs = [(ch["root"] + i) % 12 for i in ivs]
-    best, bc = None, 1e9
-    for base in range(low, high - 6):
-        notes, n = [], base
+    top = max(high, low + 24)
+    cands = []
+    for r in range(len(pcs)):  # each inversion: start from a different chord tone, stack upwards
+        order = pcs[r:] + pcs[:r]
+        for base in range(low - 2, top):
+            notes, n = [], base
+            for pc in order:
+                while n % 12 != pc:
+                    n += 1
+                notes.append(n)
+                n += 1
+            if notes[0] >= low - 2 and notes[-1] <= top:
+                cands.append(notes)
+    def cost(v):
+        if prev:
+            return sum(min(abs(a - b) for b in prev) for a in v) + 0.5 * abs(np.mean(v) - np.mean(prev)) + 0.05 * (v[-1] - v[0])
+        return abs(np.mean(v) - (low + high) / 2) + 0.05 * (v[-1] - v[0])
+    best = min(cands, key=cost) if cands else None
+    if best is None:  # stack upwards from low, each tone on its own pitch class
+        best, n = [], low
         for pc in pcs:
             while n % 12 != pc:
                 n += 1
-            notes.append(n)
+            best.append(n)
             n += 1
-        if notes[-1] > high:
-            continue
-        if prev:
-            cost = sum(min(abs(a - b) for b in prev) for a in notes) + abs(np.mean(notes) - np.mean(prev)) * 0.5
-        else:
-            cost = abs(np.mean(notes) - (low + high) / 2)
-        if cost < bc:
-            best, bc = notes, cost
-    bass = (ch["root"] % 12) + 12 * ((low - 12) // 12)  # root in the octave below, for weight
-    while bass >= low:
+    bass = ch["root"] + 12 * ((low - 12) // 12)
+    while bass >= low - 3:
         bass -= 12
-    return [bass] + (best or [low + p for p in pcs])
+    return [bass] + sorted(best)
 
 
 def suggest(rel, bpm=None, bars_per_chord=1, n_options=4):
