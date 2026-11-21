@@ -72,7 +72,11 @@ def write_browser(d, tags, parts, kits):
             added = not str(r["tpath"]).startswith(str(C.MUSIC_ROOT))
             kind = "YouTube" if "/YouTube/" in str(r["tpath"]) else ("added file" if added else "")
             tracks[r["track_id"]] = [ep, r["artist"] or "", r["title"] or "", kind, r["album"] or ""]
-    data = dict(tracks=tracks, samples=S, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+    # when each sample was made (minutes since the epoch, UTC): for the "added" filter
+    from datetime import timezone
+    born = [int(datetime.strptime(r["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp() // 60)
+            if r["created_at"] else 0 for r in d["rows"]]
+    data = dict(tracks=tracks, samples=S, born=born, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
     html = TEMPLATE.replace("__DATA__", json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
     (C.LIB_ROOT / "Browser.html").write_text(html, encoding="utf-8")
@@ -129,6 +133,10 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 .toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-size:12px;z-index:20}
 .xp{border:0;padding:2px 4px;font-size:13px;color:#4a515c}.xp:hover{color:var(--acc)}.xp.done{color:var(--acc)}
 .hint{font-size:11px;color:var(--mute);margin-top:6px}
+.hq{display:inline-grid;place-items:center;width:17px;height:17px;padding:0;border-radius:50%;font-size:11px;font-weight:700;color:var(--mute);border:1px solid var(--line);margin-left:4px;vertical-align:middle;line-height:1}
+.hq:hover{color:var(--acc);border-color:var(--acc)}
+#helppop{position:fixed;z-index:60;background:#1b1f26;border:1px solid #3a414c;border-radius:10px;padding:12px 14px;font-size:12.5px;line-height:1.5;color:var(--ink);box-shadow:0 8px 30px rgba(0,0,0,.5)}
+#helppop b:first-child{display:block;margin-bottom:4px;color:var(--acc)}
 .artbar{background:var(--bg);display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);z-index:1}
 .artbar input{flex:1;min-width:180px}.letters{display:flex;flex-wrap:wrap;gap:2px}.letters a{color:var(--mute);text-decoration:none;font-size:12px;padding:1px 4px;border-radius:3px}.letters a:hover{color:var(--ink);background:var(--panel)}
 .art{border-bottom:1px solid #1a1d23;padding:6px 16px;scroll-margin-top:56px}.arow{display:flex;gap:8px;align-items:baseline}.tw{border:0;padding:0 4px;color:var(--mute)}
@@ -163,13 +171,13 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 <main>
   <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabA" title="browse by artist, album and song">👤 Artists</button><button id="tabK" title="recommended kits and your saved sketches">Kits &amp; sketches</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button></div>
     <input type="search" id="search" placeholder="search artist, title, mood, instrument, id…">
-    <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select>
+    <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select><span id="sorthq"></span><select id="since" title="only samples added recently — combine with any sort, e.g. for you"><option value="">added any time</option><option value="batch">latest run</option><option value="0.25">last 6 hours</option><option value="1">last day</option><option value="3">last 3 days</option><option value="7">last week</option><option value="30">last month</option></select>
     <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button>
     <div class="cattabs" id="cats" title="⌘/ctrl-click to pick several"></div><div id="subsBox" class="chips subrow" hidden></div></div>
   <div id="tbanner" class="prov" style="margin:8px 16px" hidden></div>
   <div id="list"></div>
   <div class="np" id="np" hidden></div>
-  <div class="toast" id="toast" hidden></div>
+  <div class="toast" id="toast" hidden></div><div id="helppop" hidden></div>
   <div id="modal" class="modal" hidden>
    <div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;width:min(560px,92vw);display:grid;gap:10px" id="modalBody"></div></div>
 </main>
@@ -184,6 +192,32 @@ function unpackP(p){if(Array.isArray(p))return p;const b=atob(p.b64),w=p.w,stp=w
   const j=w===2?(b.charCodeAt(o)|b.charCodeAt(o+1)<<8):(b.charCodeAt(o)|b.charCodeAt(o+1)<<8|b.charCodeAt(o+2)<<16|b.charCodeAt(o+3)<<24)>>>0;
   a.push([j,Math.round(b.charCodeAt(o+w)/255*1000)/1000,Math.round(b.charCodeAt(o+w+1)/255*100)/100,Math.round(b.charCodeAt(o+w+2)/255*100)/100])}out[i]=a}return out}
 const S=D.samples, P=unpackP(D.partners), AB=D.abbr;
+// ---------- "?" explainers for the less obvious features: hq('key') renders the button, HELP holds the text
+const HELP={
+ goes:['Goes well with','Samples that sit well with this one. Each is scored on <b>key</b> (Camelot wheel plus the notes the two actually use), <b>tempo</b> (for loops), whether their <b>roles</b> fit in an arrangement (a pad under a vocal), and how alike they <b>sound</b>. You get the best 24 overall plus the best few of every other category; the chips show one category at a time. <b>⧉</b> plays the pair together, <b>💾</b> saves the pair as a sketch.'],
+ sort:['Sort orders','<b>diverse</b>: the best of each artist in turn. <b>for you</b>: what the taste model (trained on your ★, ✕ and listening) rates highest. <b>today\'s vibe</b>: the same, weighted to your last few hours. <b>discover</b>: what the model is least sure about, to widen what it knows. The <b>added</b> menu next to it narrows any sort to recent samples, so <i>for you</i> + <i>latest run</i> shows the best of what the last mining run found.'],
+ sound:['Search by sound','<b>≈ by sound</b>: describe a sound in words and press Enter. Commas mean AND (“female voice, distant, rainy”); <b>-word</b> pushes away from something (“-drums”). <b>🎧 feels like…</b>: give a YouTube link, a file or “artist – title” and get the samples that feel most like it. Searches match timbre and mood, not key or tempo.'],
+ project:['Project key & tempo','Set the key and tempo of the track you\'re making. Previews (with the box ticked), the sketchpad and exports are retuned by the smallest shift that fits, and loops (and phrases with a reliable tempo) are stretched to the tempo. <b>🔗 Live</b> follows Ableton Live\'s tempo over Link.'],
+ sketch:['Sketchpad','Layer up to 8 samples in time. Loops lock to the bar; other clips repeat every N bars (⋯ to change).<br><b>Amber lines</b>: the project\'s bars and beats as that lane plays. <b>White ticks</b>: the clip\'s own attacks (tall = strong). <b>▼</b>: the attack placed on the beat.<br><b>no pulse</b>: a pad or texture with nothing to line up; it plays from its start. <b>pulse ≈ N bpm</b>: a steady rhythm; <b>⟷ match tempo</b> stretches it so every attack stays on the grid.<br>Drag a waveform to use part of it, <b>⌥-drag</b> to slide it in time, <b>↺ re-align</b> to fit the selection to the grid. Faders are relative: every lane starts equally loud at 0 dB.<br><b>⇩ stems</b>: each lane as its own WAV, same length from bar 1, so they line up in Live.'],
+ pads:['Pads','Your sample cut at its syllables (or notes), one slice per pad, in order, like an MPC. Tap keys <b>1–4 · Q–R · A–F · Z–V</b> to play the pieces back in a new order and rhythm.<br><b>● record</b> loops 1–4 bars with a click: play pads to lay down a pattern (it overdubs, and quantises if you like). <b>▶ pattern</b> plays it; <b>save pattern</b> keeps it as a new sample. <b>chops → Drum Rack</b> sends every slice to Ableton as a playable rack.'],
+ chords:['Chord suggestions','Progressions picked to suit this sample: every chord is scored on how much of what the sample plays falls on its notes (and penalised for clashing a semitone away), then whole sequences are chosen for good movement and smooth voice leading. The sample\'s mood picks the flavour (soulful = 7ths/9ths, dark = minor 9ths, ethereal = sus/add9).<br>If the sample has chords of its own, suggestions change where it does: <b>follows</b> enriches its chords in another register, <b>reharmonised</b> swaps in chords that still contain what it plays.<br>On the keyboard, <span style="color:#7fb0c9">blue</span> = bass, <span style="color:#e0a458">amber</span> = the chord. ⇩ MIDI for your own instruments; ＋ sketch renders the pad.'],
+ rack:['Drum Rack','Every drum hit cut from this song (or album/artist), kicks first, then snares, hats, toms, cymbals and combinations. Keys <b>1–4 · Q–R · A–F · Z–V</b> play the current page. ✕ drops a pad before export. The type names come from automatic drum labelling, which is often wrong; trust your ears.'],
+ tune:['Tune to','Pulls a vocal toward a key by gently changing its speed, tape-style (nothing is resynthesised). <b>Strength</b>: how far each note moves. <b>Glide</b>: how slowly it moves (low = the hard Auto-Tune effect). <b>Detune</b> and <b>drift</b> add back human looseness.'],
+ galaxy:['Galaxy','Every sample on a map by sound: neighbours sound alike, and clusters are families of sounds (distances between far-apart clusters mean little). Hover to hear, click to open, wheel to zoom. <b>Show taste</b> colours by how much the taste model thinks you\'ll like each one.'],
+ crate:['Crate','A daily dig: samples the taste model rates highest that you haven\'t heard yet, plus wildcards. ★ and ✕ teach it; a fresh crate appears each day and never repeats.'],
+ scout:['Scout','Searches YouTube and listens to a minute of each result (from the middle of long videos), scoring it for <b>🎤 raw singing</b> or for <b>🌫 pads & textures</b>, and for closeness to your favourites. Nothing enters the library until you press add source. Repeating a search digs further down YouTube\'s results.'],
+ kits:['Kits & sketches','<b>Kits</b> are built automatically: a few samples in compatible keys whose sounds and roles fit together. Open one in the sketchpad (🎛), play it together, export it, or make a Drum Rack. <b>Your sketches</b> are the ones you saved, including pairs saved with 💾.'],
+};
+const hq=k=>`<button class="hq" data-help="${k}" title="what is this?">?</button>`;
+document.addEventListener('DOMContentLoaded',()=>{const x=document.getElementById('sorthq');if(x)x.outerHTML=hq('sort')});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-help]'),pop=$('helppop');
+ if(!b){if(pop&&!e.target.closest('#helppop'))pop.hidden=true;return}e.preventDefault();e.stopPropagation();
+ const [t,txt]=HELP[b.dataset.help]||['',''];pop.innerHTML=`<b>${t}</b><div>${txt}</div>`;pop.hidden=false;
+ const r=b.getBoundingClientRect(),w=Math.min(360,window.innerWidth-24);pop.style.width=w+'px';
+ pop.style.left=Math.max(12,Math.min(window.innerWidth-w-12,r.left-w/2))+'px';const below=r.bottom+8+pop.offsetHeight<window.innerHeight;
+ pop.style.top=(below?r.bottom+8:Math.max(12,r.top-8-pop.offsetHeight))+'px'},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('helppop'))$('helppop').hidden=true});
+
 S.forEach(s=>{if(typeof s[13]==='string'){const b=atob(s[13]);const e=new Array(b.length);for(let k=0;k<b.length;k++)e[k]=b.charCodeAt(k);s[13]=e}});
 const F={id:0,path:1,cat:2,sub:3,kind:4,cam:5,key:6,bpm:7,dur:8,artist:9,title:10,q:11,tags:12,env:13,note:14,inst:15,bars:16,start:17,ref:18,refm:19,genre:20,tid:21,parent:22,root:23,ops:24};
 const st={tracks:null,subs:new Set(),rel:'go',genres:new Set(),open:new Set(),cats:new Set(),kinds:new Set(),moods:new Set(),key:null,nbr:true,tab:'S',sel:null,shown:200};
@@ -456,7 +490,7 @@ async function rackLoad(i){const p=S[i][F.path];if(!RACK.buf[p])RACK.buf[p]=fetc
 async function rackHit(k){const i=RACK.ids[RACK.page*16+k];if(i==null)return;AC.resume();const b=await rackLoad(i);const s=AC.createBufferSource();s.buffer=b;s.connect(AC.destination);s.start();
  const el=document.querySelector(`#rackgrid [data-rp="${k}"]`);if(el){el.classList.add('hit');setTimeout(()=>el.classList.remove('hit'),Math.min(400,b.duration*1000))}}
 function drawRack(){const n=RACK.ids.length,pages=Math.max(1,Math.ceil(n/16)),p0=RACK.page*16;
- modal(`<h2 style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">🥁 ${esc(RACK.name)}<span class="sub">${n} pad${n===1?'':'s'} · kicks first</span></h2>
+ modal(`<h2 style="margin:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">🥁 ${esc(RACK.name)}${hq('rack')}<span class="sub">${n} pad${n===1?'':'s'} · kicks first</span></h2>
  <div class="sub">Click a pad or press its key to play it. ✕ drops a pad from the rack; shift-click opens its sample.</div>
  ${pages>1?`<div class="chips">${Array.from({length:pages},(_,k)=>`<button data-rpage="${k}" class="${k===RACK.page?'on':''}">pads ${k*16+1}–${Math.min(n,k*16+16)}</button>`).join('')}</div>`:''}
  <div id="rackgrid" class="rackgrid">${Array.from({length:16},(_,k)=>{const i=RACK.ids[p0+k];if(i==null)return`<div class="rpad empty"></div>`;const s=S[i];
@@ -566,10 +600,12 @@ function paintWheel(){const cnt={};S.forEach(s=>{if(s[F.cam])cnt[s[F.cam]]=(cnt[
  p.style.fill=nb&&nb.has(c)?(c===st.key?'#e0a458':'#8a6a3e'):`rgba(127,176,201,${0.08+v*0.6})`});
  $('keylbl').textContent=st.key?st.key:''}
 $('nbr').onclick=e=>{st.nbr=!st.nbr;e.target.classList.toggle('on');render()};$('clrkey').onclick=()=>{st.key=null;render()};
-['bmin','bmax','half','q','search','sort','grp'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
+['bmin','bmax','half','q','search','sort','grp','since'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
 $('stop').onclick=stopAll;
 $('refresh').onclick=()=>{$('refresh').hidden=true;render()};
 
+// the latest run: walk back from the newest sample until a gap of more than 6 hours
+const BORN=D.born||[],BATCH0=(()=>{const e=BORN.filter(x=>x).sort((a,b)=>b-a);let k=0;while(k+1<e.length&&e[k]-e[k+1]<360)k++;return e[k]||0})();
 const tabs={S:'tabS',A:'tabA',K:'tabK',F:'tabF',R:'tabR'};
 Object.entries(tabs).forEach(([k,id])=>$(id).onclick=()=>{st.tab=k;Object.values(tabs).forEach(t=>$(t).classList.toggle('on',t===id));render()});
 function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').value,bmin=+$('bmin').value||0,bmax=+$('bmax').value||0,half=$('half').checked;
@@ -580,6 +616,7 @@ function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').va
  if(st.moods.size&&![...st.moods].every(m=>s[F.tags].includes(m)))return;
  if(q&&!(`${s[F.artist]} ${s[F.title]} ${s[F.tags].join(' ')} ${s[F.inst]} ${s[F.id]} ${s[F.cat]} ${s[F.sub]} ${s[F.genre]}`.toLowerCase().includes(q)))return;out.push(i)});
  out=out.filter(i=>!TASTE.disliked.has(S[i][F.path]));
+ const sv=$('since').value;if(sv){const lim=sv==='batch'?BATCH0:Date.now()/60000-sv*1440;out=out.filter(i=>(BORN[i]||0)>=lim)}
  const k=$('sort').value;
  const tsort=m=>(a,b)=>((m[S[b][F.path]]??-9)-(m[S[a][F.path]]??-9));
  if(k==='div'){const by=new Map();out.sort((a,b)=>S[b][F.q]-S[a][F.q]||((TASTE.score[S[b][F.path]]??0)-(TASTE.score[S[a][F.path]]??0)));
@@ -672,7 +709,7 @@ function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==
  <div id="vars">${[[0,'original','',s[F.path]],...D.variants[i]].map(([k,t,c,p])=>`<div class="prow vrow" data-v="${k}">
  <button class="play" data-vp="${esc(p)}" data-vk="${k}">▶</button><div style="min-width:0"><div class="name">${String(k).padStart(2,'0')} · ${esc(t.replace('_',' '))}</div>
  <div class="meta">${esc(c)}</div></div>${star(p,s[F.id],`${s[F.artist]} — ${s[F.title]} · ${String(k).padStart(2,'0')} ${t}`)}${nope(p,s[F.id])}${xp(p)}</div>`).join('')}</div>`:''}
- <h2 style="display:flex;gap:6px;align-items:center"><button data-rel="go" class="${st.rel==='go'?'on':''}">Goes well with</button><button data-rel="song" class="${st.rel==='song'?'on':''}">Same song (${(BYTRACK.get(s[F.tid])||[]).length-1})</button></h2>
+ <h2 style="display:flex;gap:6px;align-items:center"><button data-rel="go" class="${st.rel==='go'?'on':''}">Goes well with</button><button data-rel="song" class="${st.rel==='song'?'on':''}">Same song (${(BYTRACK.get(s[F.tid])||[]).length-1})</button>${hq('goes')}</h2>
  <div class="hint">${st.rel==='go'?'▶ auditions alone · ⧉ plays it together with the selected sample':'every sample cut from this track, in song order · ⧉ plays it with the selected one'}</div>
  ${st.rel==='song'?(BYTRACK.get(s[F.tid])||[]).filter(j=>j!==i).map(j=>{const t=S[j];return`<div class="prow"><button class="play" data-play="${j}">▶</button>
  <div style="min-width:0"><div class="name"><span class="badge" style="background:${col(t[F.cat])}">${AB[t[F.cat]]}</span>${Math.floor(t[F.start]/60)}:${String(t[F.start]%60).padStart(2,'0')} · ${esc(t[F.sub])} · ${t[F.dur]}s${t[F.note]?' · '+t[F.note]:''}</div>
