@@ -4,9 +4,13 @@
 .dock{position:sticky;bottom:0;margin-top:auto;z-index:4}.dock .np{position:static}
 .sk{background:#12151a;border-top:2px solid var(--acc);padding:10px 16px;z-index:4;max-height:46vh;overflow:auto}
 .sk h3{margin:0 0 8px;font-size:13px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.lane{display:grid;grid-template-columns:28px 150px 1fr auto;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid #1a1d23}
+.lane{display:grid;grid-template-columns:34px minmax(110px,190px) minmax(120px,1fr) 150px auto auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #1a1d23}
+.lane .lname{min-width:0}.lane .lname .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}.lane .lname .meta{font-size:11px}
+.lane .lwave{min-width:0}.fader{display:flex;align-items:center;gap:6px}.fader input{width:96px}.fader output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);min-width:52px;text-align:right}
+.lmore{grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 0 2px 42px;font-size:12px}
+@media (max-width:900px){.lane{grid-template-columns:34px 1fr 120px auto auto}.lane .lwave{grid-column:2/-1;grid-row:2}}
 .lane .ctl{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--mute);flex-wrap:wrap}
-.lane input[type=range]{width:80px}.lane.muted{opacity:.45}
+.lane input[type=range]{width:96px}.lane.muted{opacity:.45}
 .lane canvas{width:100%;height:30px;display:block}
 .tbtn{font-size:11px;padding:2px 6px}.tbtn.on{background:var(--acc);color:#000;border-color:var(--acc)}
 .grid16{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:8px 0}
