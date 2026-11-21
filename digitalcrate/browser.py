@@ -16,6 +16,30 @@ def _ops_label(ops):
     return _ops_tag(clean_params(o)) + (f" · {o['name']}" if o.get("name") else "")
 
 
+def _q(x):
+    return int(round(max(0.0, min(1.0, float(x))) * 255))
+
+
+def pack_partners(parts, n):
+    """Goes-well-with lists as one base64 blob: per pick the sample index (2 or 4 bytes) + score, harmony, vibe
+    (1 byte each, 0-1 in 1/255 steps), with offsets per sample. About a third the size of plain JSON."""
+    import base64
+    import struct
+    w = 2 if n < 65535 else 4
+    fmt = "<H3B" if w == 2 else "<I3B"
+    buf, off = bytearray(), [0]
+    for picks in parts:
+        for j, sc, h, v in picks:
+            buf += struct.pack(fmt, int(j), _q(sc), _q(h), _q(v))
+        off.append(off[-1] + len(picks))
+    return dict(b64=base64.b64encode(bytes(buf)).decode(), off=off, w=w)
+
+
+def _pack_env(env):
+    import base64
+    return base64.b64encode(bytes(max(0, min(255, int(x))) for x in env)).decode()
+
+
 def write_browser(d, tags, parts, kits):
     S = []
     for i, r in enumerate(d["rows"]):
@@ -23,7 +47,7 @@ def write_browser(d, tags, parts, kits):
         S.append([r["id"], r["path"], r["category"], r["subtype"], r["kind"],
                   r["camelot"] if keyed else "", (r["key"] + ("m" if r["scale"] == "minor" else "")) if keyed else "",
                   round(r["bpm"]) if r["bpm"] else 0, round(r["dur"], 1), r["artist"] or "", r["title"] or "",
-                  round(r["quality"], 2), tags[i], json.loads(r["env"] or "[]"), r["note"] or "",
+                  round(r["quality"], 2), tags[i], _pack_env(json.loads(r["env"] or "[]")), r["note"] or "",
                   r["instrument"] or "", r["bars"] or 0, round(r["start"]),
                   round(float(d["ref_sim"][i]), 3), d["ref_match"][i], d["genre"][i], r["track_id"],
                   r["parent_id"] or "", r["root_id"] or "", _ops_label(r["ops"])])
@@ -47,8 +71,8 @@ def write_browser(d, tags, parts, kits):
             ep = int(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").timestamp()) if ts else 0
             added = not str(r["tpath"]).startswith(str(C.MUSIC_ROOT))
             kind = "YouTube" if "/YouTube/" in str(r["tpath"]) else ("added file" if added else "")
-            tracks[r["track_id"]] = [ep, r["artist"] or "", r["title"] or "", kind]
-    data = dict(tracks=tracks, samples=S, partners=parts, variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+            tracks[r["track_id"]] = [ep, r["artist"] or "", r["title"] or "", kind, r["album"] or ""]
+    data = dict(tracks=tracks, samples=S, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
     html = TEMPLATE.replace("__DATA__", json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
     (C.LIB_ROOT / "Browser.html").write_text(html, encoding="utf-8")
@@ -103,6 +127,11 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 .toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-size:12px;z-index:20}
 .xp{border:0;padding:2px 4px;font-size:13px;color:#4a515c}.xp:hover{color:var(--acc)}.xp.done{color:var(--acc)}
 .hint{font-size:11px;color:var(--mute);margin-top:6px}
+.artbar{background:var(--bg);display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--line);z-index:1}
+.artbar input{flex:1;min-width:180px}.letters{display:flex;flex-wrap:wrap;gap:2px}.letters a{color:var(--mute);text-decoration:none;font-size:12px;padding:1px 4px;border-radius:3px}.letters a:hover{color:var(--ink);background:var(--panel)}
+.art{border-bottom:1px solid #1a1d23;padding:6px 16px;scroll-margin-top:56px}.arow{display:flex;gap:8px;align-items:baseline}.tw{border:0;padding:0 4px;color:var(--mute)}
+.aname{color:var(--ink);text-decoration:none;font-weight:600}.aname:hover,.alb a:hover,.song a:hover{color:var(--acc)}
+.rackb{font-size:11px;padding:1px 6px;margin-left:6px}.alb{margin:4px 0 6px 28px}.alb>a{color:var(--ink);text-decoration:none;font-size:12px;font-weight:600}.song{margin-left:14px;font-size:12px}.song a{color:var(--ink);text-decoration:none}
 .cattabs{display:flex;flex-wrap:wrap;gap:0;flex-basis:100%;border-bottom:1px solid var(--line);margin:4px -16px -12px;padding:0 16px}
 .cattabs button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 6px 7px;font-size:12.5px;white-space:nowrap;color:var(--mute)}
 .cattabs button:hover{color:var(--ink)}.cattabs button.on{background:none;color:var(--ink);border-bottom-color:var(--c,var(--ink))}
@@ -125,7 +154,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
   <h2>Min quality <span class="sub" id="qv"></span></h2><input id="q" type="range" min="0" max="1" step="0.05" value="0.4" style="width:100%">
 </aside>
 <main>
-  <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabK">Kits</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button></div>
+  <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabA" title="browse by artist, album and song">👤 Artists</button><button id="tabK" title="recommended kits and your saved sketches">Kits &amp; sketches</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button></div>
     <input type="search" id="search" placeholder="search artist, title, mood, instrument, id…">
     <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select>
     <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button>
@@ -142,7 +171,13 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 <script id="data" type="application/json">__DATA__</script>
 <script>
 const D=JSON.parse(document.getElementById('data').textContent);
-const S=D.samples, P=D.partners, AB=D.abbr;
+// partners and waveform envelopes arrive packed (see pack_partners in browser.py); unpack once here
+function unpackP(p){if(Array.isArray(p))return p;const b=atob(p.b64),w=p.w,stp=w+3,out=new Array(p.off.length-1);
+ for(let i=0;i<out.length;i++){const a=[];for(let k=p.off[i];k<p.off[i+1];k++){const o=k*stp;
+  const j=w===2?(b.charCodeAt(o)|b.charCodeAt(o+1)<<8):(b.charCodeAt(o)|b.charCodeAt(o+1)<<8|b.charCodeAt(o+2)<<16|b.charCodeAt(o+3)<<24)>>>0;
+  a.push([j,Math.round(b.charCodeAt(o+w)/255*1000)/1000,Math.round(b.charCodeAt(o+w+1)/255*100)/100,Math.round(b.charCodeAt(o+w+2)/255*100)/100])}out[i]=a}return out}
+const S=D.samples, P=unpackP(D.partners), AB=D.abbr;
+S.forEach(s=>{if(typeof s[13]==='string'){const b=atob(s[13]);const e=new Array(b.length);for(let k=0;k<b.length;k++)e[k]=b.charCodeAt(k);s[13]=e}});
 const F={id:0,path:1,cat:2,sub:3,kind:4,cam:5,key:6,bpm:7,dur:8,artist:9,title:10,q:11,tags:12,env:13,note:14,inst:15,bars:16,start:17,ref:18,refm:19,genre:20,tid:21,parent:22,root:23,ops:24};
 const st={tracks:null,subs:new Set(),rel:'go',genres:new Set(),open:new Set(),cats:new Set(),kinds:new Set(),moods:new Set(),key:null,nbr:true,tab:'S',sel:null,shown:200};
 const $=id=>document.getElementById(id);
@@ -354,13 +389,55 @@ async function edSave(){$('edmsg').textContent='saving (analysing for related-sa
  FAV.set(n.path,{path:n.path,sample_id:n.id,label:'edit of '+lbl(i),added_at:new Date().toISOString()});
  edStop();select(j,'go')}
 // ---------- source focus (show only some tracks' samples)
-function showTracks(ids,{group='type'}={}){st.tracks=new Set(ids.map(String));st.tab='S';Object.values(tabs).forEach(t=>$(t).classList.toggle('on',t==='tabS'));
+function showTracks(ids,{group='type',label=''}={}){st.tracks=new Set(ids.map(String));st.tlabel=label;st.tab='S';Object.values(tabs).forEach(t=>$(t).classList.toggle('on',t==='tabS'));
  st.excl=new Set();if(group)$('grp').value=group;st.shown=500;history.replaceState(null,'','#tracks='+ids.join(','));render()}
-function clearTracks(){st.tracks=null;history.replaceState(null,'',location.pathname);
+function clearTracks(){st.tracks=null;st.tlabel='';history.replaceState(null,'',location.pathname);
  st.excl=new Set((()=>{try{const v=localStorage.getItem('atlasExcl');return v?JSON.parse(v):['Electronic']}catch(e){return['Electronic']}})());$('grp').value='';render()}
 function drawBanner(){const b=$('tbanner');if(!st.tracks||st.tab!=='S'){b.hidden=true;return}const ids=[...st.tracks],n=S.filter(s=>st.tracks.has(String(s[F.tid]))).length;
  const names=ids.map(t=>D.tracks[t]?`${D.tracks[t][1]} – ${D.tracks[t][2]}`:t);
- b.hidden=false;b.innerHTML=`Showing <b>${n}</b> samples from ${esc(names.slice(0,3).join(' · '))}${names.length>3?` +${names.length-3} more`:''} &nbsp;<button id="tclear">✕ clear</button>`;$('tclear').onclick=clearTracks}
+ b.hidden=false;b.innerHTML=`Showing <b>${n}</b> samples from ${st.tlabel?`<b>${esc(st.tlabel)}</b> (${ids.length} song${ids.length>1?'s':''})`:esc(names.slice(0,3).join(' · '))+(names.length>3?` +${names.length-3} more`:'')} &nbsp;${st.tlabel?'<button id="tback">← artists</button> ':''}${rackBtn(ids,st.tlabel||'Selection').replace('🥁 ','🥁 Drum Rack · ')} <button id="tclear">✕ clear</button>`;$('tclear').onclick=clearTracks;
+ if($('tback'))$('tback').onclick=()=>{$('tabA').click()}}
+// ---------- artists: every artist → albums → songs; click any level to list its samples
+const ARTISTS=(()=>{const cnt={};S.forEach(s=>{cnt[s[F.tid]]=(cnt[s[F.tid]]||0)+1});const A=new Map();
+ Object.entries(D.tracks).forEach(([t,[ep,ar,ti,kind,al]])=>{if(!cnt[t])return;const name=(ar||'Unknown artist').trim(),k=name.toLowerCase();
+  if(!A.has(k))A.set(k,{name,n:0,tracks:[],albums:new Map()});const a=A.get(k);a.n+=cnt[t];a.tracks.push(t);const alb=al||'(no album)';
+  if(!a.albums.has(alb))a.albums.set(alb,[]);a.albums.get(alb).push([t,ti,cnt[t]])});return [...A.values()]})();
+st.aq='';st.asort='az';st.aopen=new Set();
+function artistKey(a){return a.name.replace(/^the\s+/i,'')}
+function renderArtists(){const L=$('list');const q=st.aq.toLowerCase();
+ let list=ARTISTS.filter(a=>!q||a.name.toLowerCase().includes(q)||[...a.albums.values()].some(ts=>ts.some(([,ti])=>(ti||'').toLowerCase().includes(q))));
+ list.sort(st.asort==='n'?(a,b)=>b.n-a.n:(a,b)=>artistKey(a).localeCompare(artistKey(b),undefined,{sensitivity:'base'}));
+ $('count').textContent=`${ARTISTS.length.toLocaleString()} artists · ${Object.keys(D.tracks).length.toLocaleString()} songs`;
+ const letters=[...new Set(list.map(a=>{const c=artistKey(a)[0]||'#';return /[a-z]/i.test(c)?c.toUpperCase():'#'}))];
+ let h=`<div class="artbar"><input id="aq" type="search" placeholder="find an artist or song…" value="${esc(st.aq)}"><select id="asort"><option value="az" ${st.asort==='az'?'selected':''}>A–Z</option><option value="n" ${st.asort==='n'?'selected':''}>most samples</option></select>
+  ${st.asort==='az'?`<span class="letters">${letters.map(l=>`<a href="#" data-jump="${l}">${l}</a>`).join('')}</span>`:''}</div>`;
+ let last='';h+=list.map(a=>{const c=artistKey(a)[0]||'#',l=/[a-z]/i.test(c)?c.toUpperCase():'#';const anchor=st.asort==='az'&&l!==last?` id="art-${l}"`:'';last=l;
+  const open=st.aopen.has(a.name)||(q&&list.length<=5);const songs=a.tracks.length;
+  return `<div class="art"${anchor}><div class="arow"><button class="tw" data-aopen="${esc(a.name)}">${open?'▾':'▸'}</button><a href="#" class="aname" data-aall="${esc(a.name)}">${esc(a.name)}</a><span class="sub">${a.n} samples · ${songs} song${songs>1?'s':''}</span>${open?rackBtn(a.tracks,a.name):''}</div>
+  ${open?[...a.albums.entries()].map(([al,ts])=>`<div class="alb"><a href="#" data-aalb="${esc(a.name)}|${esc(al)}">${esc(al)}</a> <span class="sub">${ts.reduce((x,t)=>x+t[2],0)}</span> ${rackBtn(ts.map(t=>t[0]),a.name+' - '+al)}
+   ${ts.map(([t,ti,n])=>`<div class="song"><a href="#" data-showt="${t}" data-tlabel="${esc(a.name+' — '+ti)}">${esc(ti||'untitled')}</a> <span class="sub">${n}</span> ${rackBtn([t],a.name+' - '+(ti||'untitled'))}</div>`).join('')}</div>`).join(''):''}</div>`}).join('');
+ L.innerHTML=h||'<div class="empty">No artists match.</div>';
+ const aq=$('aq');aq.oninput=()=>{st.aq=aq.value;const pos=aq.selectionStart;renderArtists();const n=$('aq');n.focus();n.setSelectionRange(pos,pos)};
+ $('asort').onchange=e=>{st.asort=e.target.value;renderArtists()}}
+const artistBy=name=>ARTISTS.find(a=>a.name===name);
+// ---------- Drum Racks from a song / album / artist: its drum one-shots, kicks first, then snares, hats…
+const RACK_ORDER=['Kick','Snare','Rim & Clap','Hat Closed','Hat Open','Shaker & Tamb','Tom','Hand Drum','Wood & Metal','Orchestral','Ride','Crash',
+ 'Kick + Snare','Kick + Hat','Snare + Hat','Perc + Hat','Kick + Cymbal','Snare + Cymbal','Other Combos'];
+function drumHits(tids){const T=new Set(tids.map(String)),ro=s=>{const k=RACK_ORDER.indexOf(s);return k<0?99:k};
+ return S.map((s,i)=>i).filter(i=>T.has(String(S[i][F.tid]))&&S[i][F.cat]==='Percussion'&&S[i][F.kind]==='oneshot')
+  .sort((a,b)=>ro(S[a][F.sub])-ro(S[b][F.sub])||S[b][F.q]-S[a][F.q]).slice(0,128)}
+async function makeRack(tids,name,btn){if(!SERVED){alert('Drum Racks need the local server: run "digitalcrate serve"');return}
+ const ids=drumHits(tids);if(!ids.length){btn.textContent='no drum hits';return}const was=btn.textContent;btn.textContent='building…';
+ try{const r=await (await fetch('api/export',{method:'POST',body:JSON.stringify({scope:'paths',paths:ids.map(i=>S[i][F.path]),name:name+' drums',rack:true,reveal:true})})).json();
+  btn.textContent=r.error?'error':`🥁 rack ✓ (${r.count} pads)`}catch(e){btn.textContent='error'}}
+const rackBtn=(tids,name)=>{const n=drumHits(tids).length;return n?`<button class="rackb" data-rack="${esc(tids.join(','))}" data-rname="${esc(name)}" title="an Ableton Drum Rack of ${n} drum hits, kicks first">🥁 ${n}</button>`:''};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-rack]');if(!b)return;e.preventDefault();e.stopPropagation();makeRack(b.dataset.rack.split(','),b.dataset.rname,b)},true);
+$('list').addEventListener('click',e=>{if(st.tab!=='A')return;const t=e.target.closest('[data-aopen],[data-aall],[data-aalb],[data-jump]');if(!t)return;e.preventDefault();e.stopPropagation();
+ if(t.dataset.jump){const el=$('art-'+t.dataset.jump),m=document.querySelector('main'),hd=document.querySelector('.top');
+  if(el)m.scrollTop+=el.getBoundingClientRect().top-hd.getBoundingClientRect().bottom-4;return}
+ if(t.dataset.aopen){const n=t.dataset.aopen;st.aopen.has(n)?st.aopen.delete(n):st.aopen.add(n);const y=document.querySelector('main').scrollTop;renderArtists();document.querySelector('main').scrollTop=y;return}
+ if(t.dataset.aall){const a=artistBy(t.dataset.aall);showTracks(a.tracks,{label:a.name});return}
+ if(t.dataset.aalb){const [n,al]=t.dataset.aalb.split('|');const a=artistBy(n);showTracks(a.albums.get(al).map(x=>x[0]),{label:`${a.name} — ${al}`})}},true);
 // ---------- per-clip export
 const XPKEY='atlasExportName';
 function xpName(){try{return localStorage.getItem(XPKEY)||'Clips'}catch(e){return 'Clips'}}
@@ -451,7 +528,7 @@ $('nbr').onclick=e=>{st.nbr=!st.nbr;e.target.classList.toggle('on');render()};$(
 $('stop').onclick=stopAll;
 $('refresh').onclick=()=>{$('refresh').hidden=true;render()};
 
-const tabs={S:'tabS',K:'tabK',F:'tabF',R:'tabR'};
+const tabs={S:'tabS',A:'tabA',K:'tabK',F:'tabF',R:'tabR'};
 Object.entries(tabs).forEach(([k,id])=>$(id).onclick=()=>{st.tab=k;Object.values(tabs).forEach(t=>$(t).classList.toggle('on',t===id));render()});
 function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').value,bmin=+$('bmin').value||0,bmax=+$('bmax').value||0,half=$('half').checked;
  const nb=st.key?(st.nbr?camNbrs(st.key):new Set([st.key])):null;$('qv').textContent=mq.toFixed(2);
@@ -494,8 +571,10 @@ function render(){paintWheel();drawCats();const L=$('list');$('refresh').hidden=
    return `<div class="row" style="cursor:default"><button class="play" data-vp2="${esc(f.path)}">▶</button><span class="sub">variation</span>
    <div style="min-width:0"><div class="name">${esc(f.label||f.path)}</div><div class="meta">${esc(f.path)}</div></div><div class="right">${star(f.path,f.sample_id,f.label)}</div></div>`}).join('')
    :'<div class="empty">No favourites yet — click ★ on any sample or variation.</div>';mark();return}
- if(st.tab==='K'){$('count').textContent=`${D.kits.length} kits`;
-  L.innerHTML=D.kits.length?D.kits.map((k,ki)=>`<div class="kit"><h3><span>${esc(k.name)}</span><button data-kit="${ki}">▶ play together</button> <button data-kitexp="${esc(k.name)}">⇩ export</button></h3>${k.m.map(rowHTML).join('')}</div>`).join(''):'<div class="empty">No kits yet.</div>';return}
+ if(st.tab==='A'){renderArtists();return}
+ if(st.tab==='K'){const shown=D.kits.map((k,ki)=>[k,ki]).filter(([k])=>kitMembers(k).length>=3),hid=D.kits.length-shown.length;
+  $('count').textContent=`${shown.length} kits`+(hid?` · ${hid} hidden: mostly ${[...st.excl].join(', ')}`:'')+(st.excl.size?` · ${[...st.excl].join(', ')} samples left out`:'');
+  L.innerHTML=shown.length?shown.map(([k,ki])=>`<div class="kit"><h3><span>${esc(k.name)}</span><button data-kit="${ki}">▶ play together</button> <button data-kitexp="${esc(k.name)}" data-kiti="${ki}">⇩ export</button></h3>${kitMembers(k).map(rowHTML).join('')}</div>`).join(''):'<div class="empty">No kits yet.</div>';return}
  const ids=filtered();$('count').textContent=`${ids.length.toLocaleString()} of ${S.length.toLocaleString()} samples`+(st.excl.size?` · excluding ${[...st.excl].join(', ')}`:'')+(SERVED?` · taste model: ${TASTE.n} ratings`:'');
  const gm=$('grp').value;
  if(gm&&ids.length){const keyOf={track:i=>S[i][F.artist]+' — '+S[i][F.title],type:i=>S[i][F.cat]+' / '+S[i][F.sub],genre:i=>S[i][F.genre]}[gm];
@@ -506,12 +585,12 @@ function render(){paintWheel();drawCats();const L=$('list');$('refresh').hidden=
    return `<div class="kit"><h3><span>${esc(k)}</span><span class="sub">${l.length} samples ${l.length>per?`<button data-grp="${esc(gm+k)}">${open?'collapse':'show more'}</button>`:''}</span></h3>${l.slice(0,lim).map(rowHTML).join('')}</div>`}).join('')
    +(gm==='track'&&g.size>shownGroups.length?`<button class="more" id="more">show more tracks</button>`:'');mark();return}
  L.innerHTML=ids.length?ids.slice(0,st.shown).map(rowHTML).join('')+(ids.length>st.shown?`<button class="more" id="more">show more (${ids.length-st.shown})</button>`:''):'<div class="empty">Nothing matches these filters.</div>';mark()}
-$('list').addEventListener('click',async e=>{const stb=e.target.closest('[data-showt]');if(stb){showTracks([stb.dataset.showt]);return}const ke=e.target.closest('[data-kitexp]');if(ke){const r=await (await fetch('api/export',{method:'POST',body:JSON.stringify({scope:'kit',kit:ke.dataset.kitexp,name:ke.dataset.kitexp})})).json();ke.textContent=r.error?'error':`exported ${r.count} ✓`;return}
+$('list').addEventListener('click',async e=>{const stb=e.target.closest('[data-showt]');if(stb){e.preventDefault();showTracks([stb.dataset.showt],{label:stb.dataset.tlabel||''});return}const ke=e.target.closest('[data-kitexp]');if(ke){const r=await (await fetch('api/export',{method:'POST',body:JSON.stringify({scope:'paths',paths:kitMembers(D.kits[+ke.dataset.kiti]).map(i=>S[i][F.path]),name:ke.dataset.kitexp})})).json();ke.textContent=r.error?'error':`exported ${r.count} ✓`;return}
  const gb=e.target.closest('[data-grp]');if(gb){const k=gb.dataset.grp;st.open.has(k)?st.open.delete(k):st.open.add(k);render();return}
  const vp=e.target.closest('[data-vp2]');if(vp){stopAll();const a=new Audio(url(vp.dataset.vp2));a.play();players.set('f',a);const f=FAV.get(vp.dataset.vp2);setNP(vp.dataset.vp2,f&&f.sample_id,(f&&f.label)||vp.dataset.vp2,null);return}
  const t=e.target.closest('[data-play],[data-id],[data-kit],#more,.row');if(!t)return;
  if(t.id==='more'){st.shown+=300;render();return}
- if(t.dataset.kit!=null){playTogether(D.kits[+t.dataset.kit].m);return}
+ if(t.dataset.kit!=null){playTogether(kitMembers(D.kits[+t.dataset.kit]));return}
  if(t.dataset.id){navigator.clipboard&&navigator.clipboard.writeText(t.dataset.id);t.textContent='copied';setTimeout(()=>t.textContent=t.dataset.id,800);return}
  if(t.dataset.play!=null){toggle(+t.dataset.play,t);return}
  select(+t.dataset.i,'list')});
@@ -526,6 +605,8 @@ function goList(i){const pool=goPool(i);if(st.gcat){const f=pool.filter(([j])=>S
 function goChips(i){const cnt={};goPool(i).forEach(([j])=>{const c=S[j][F.cat];cnt[c]=(cnt[c]||0)+1});const cs=CATS.filter(c=>cnt[c]);if(cs.length<2)return'';
  const cur=st.gcat&&cnt[st.gcat]?st.gcat:'';
  return `<div class="chips" style="margin:6px 0 8px"><button data-gcat="" class="${cur?'':'on'}">All</button>${cs.map(c=>`<button data-gcat="${esc(c)}" class="${cur===c?'on':''}" title="${esc(c)}"><span class="badge" style="background:${col(c)};margin-right:4px">${AB[c]}</span>${cnt[c]}</button>`).join('')}</div>`}
+// kits are built for everyone; the members in genres you've excluded are left out when shown, played or exported
+const kitMembers=k=>k.m.filter(i=>!st.excl.has(S[i][F.genre]));
 function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==i)HIST.push({i:st.sel,scroll:$('detail').scrollTop});else if(from==='list')HIST=[];
  st.sel=i;vcur=0;document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',+r.dataset.i===i));const s=S[i];
  const back=HIST.length?`<div style="margin-bottom:10px"><button id="back">← back to ${esc(S[HIST[HIST.length-1].i][F.artist])} — ${esc(S[HIST[HIST.length-1].i][F.title])}</button> <span class="sub">${HIST.length>1?HIST.length+' steps · ':''}Backspace</span></div>`:'';
@@ -540,7 +621,8 @@ function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==
  <span>Sounds like</span><span>${esc(s[F.inst].replace('_',' '))}${s[F.tags].length?' · '+s[F.tags].map(esc).join(', '):''}</span><span>Category</span><span><select id="rcat">${Object.keys(D.subtypes).map(c=>`<option ${c===s[F.cat]?'selected':''}>${esc(c)}</option>`).join('')}</select>
  <select id="rsub">${D.subtypes[s[F.cat]].map(c=>`<option ${c===s[F.sub]?'selected':''}>${esc(c)}</option>`).join('')}</select>
  <button id="rsave" class="pill" hidden>save</button>${OVR.has(s[F.id])?' <span class="sub">(your correction)</span>':''}</span>
- <span>Source</span><span><a href="#" data-showt2="${s[F.tid]}">show all ${(BYTRACK.get(s[F.tid])||[]).length} samples from this track →</a></span>
+ <span>Source</span><span><a href="#" data-showt2="${s[F.tid]}">this track (${(BYTRACK.get(s[F.tid])||[]).length})</a>${rackBtn([s[F.tid]],`${s[F.artist]} - ${s[F.title]}`)}${(()=>{const a=ARTISTS.find(x=>x.name.toLowerCase()===((s[F.artist]||'Unknown artist').trim().toLowerCase()));if(!a)return'';
+  const al=(D.tracks[s[F.tid]]||[])[4]||'(no album)',ts=a.albums.get(al)||[];return `${ts.length>1?` · <a href="#" data-aalb2="${esc(a.name)}|${esc(al)}">this album (${ts.reduce((x,t)=>x+t[2],0)})</a>`:''}${a.tracks.length>1?` · <a href="#" data-aall2="${esc(a.name)}">everything by ${esc(a.name)} (${a.n})</a>`:''}`})()}</span>
  <span>Genre</span><span>${esc(s[F.genre])}</span><span>Quality</span><span>${s[F.q]}</span>
  ${s[F.refm]?`<span>Echoes</span><span>${esc(s[F.refm])} <span class="sub">(${Math.round(s[F.ref]*100)}% similar)</span></span>`:''}
  <span>ID</span><span class="id" data-id="${s[F.id]}">${s[F.id]}</span></div><div class="path">${esc(s[F.path])}</div>
@@ -581,7 +663,9 @@ async function recat(i){const cat=$('rcat').value,sub=$('rsub').value;if(!SERVED
  if(FAV.has(old)){const f=FAV.get(old);FAV.delete(old);f.path=r.path;FAV.set(r.path,f)}
  const row=document.querySelector(`.row[data-i="${i}"]`);if(row)row.outerHTML=rowHTML(i);const sc=$('detail').scrollTop;select(i,'back');$('detail').scrollTop=sc}
 $('detail').addEventListener('click',e=>{if(e.target.id==='back'){goBack();return}
- const s2=e.target.closest('[data-showt2]');if(s2){e.preventDefault();showTracks([s2.dataset.showt2]);return}
+ const s2=e.target.closest('[data-showt2]');if(s2){e.preventDefault();showTracks([s2.dataset.showt2],{label:`${S[st.sel][F.artist]} — ${S[st.sel][F.title]}`});return}
+ const aa=e.target.closest('[data-aall2]');if(aa){e.preventDefault();const a=artistBy(aa.dataset.aall2);showTracks(a.tracks,{label:a.name});return}
+ const ab=e.target.closest('[data-aalb2]');if(ab){e.preventDefault();const [n,al]=ab.dataset.aalb2.split('|');const a=artistBy(n);showTracks(a.albums.get(al).map(x=>x[0]),{label:`${a.name} — ${al}`});return}
  if(e.target.id==='rsave'){recat(st.sel);return}
  if(e.target.id==='edopen'){openEditor(st.sel);return}
  const g2=e.target.closest('[data-go2]');if(g2){e.preventDefault();select(+g2.dataset.go2,'go');return}

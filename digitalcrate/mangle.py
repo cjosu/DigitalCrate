@@ -31,7 +31,19 @@ TASTE = {
     # stretch, groove chop and heavy reverse swell = no. Fragments of phrases added (Burial-style short cuts).
     "varispeed_down": 0.0, "varispeed_up": 0.8, "formant_up": 3.0, "fragment": 2.5, "slow_stretch": 0.0,
     "chop": 0.0, "vowel_hold": 0.8, "reverse_swell": 0.7, "octave_bed": 1.0, "plain_space": 0.8,
+    # gentle tuning to the vocal's own key with the tape-style engine (won the blind tuning test)
+    "in_tune": 1.5,
 }
+
+
+def _key_after(key, semis):
+    """'Fm' shifted by semis -> 'G#m' (None when the key is unknown)."""
+    if not key:
+        return None
+    from .conform import parse_key
+    from .audio import key_label
+    pc, sc = parse_key(key)
+    return key_label((pc + int(round(semis))) % 12, sc)
 
 
 # ---------------------------------------------------------------- extra vocal techniques
@@ -248,18 +260,30 @@ def _vocal_core(y, rng, prof, steps):
     if force == "fragment":
         picks.append("formant_up" if rng.random() < 0.7 else "varispeed_up")
     for t in picks:
-        if t == "varispeed_up":       # tape-style: pitch + speed together, formants move (androgynous)
+        k2 = lambda s_: f"→{_key_after(prof.get('key'), s_)}" if prof.get("key") else ""
+        if t == "in_tune":            # tuned to its own key, natural glide (hard snap always lost by ear)
+            if prof.get("key"):
+                from .retune import tune
+                if prof.get("slot", 0) % 2 == 0:
+                    y = tune(y, prof["key"], strength=0.8, speed_ms=60); steps.append(f"tuned {prof['key']}")
+                else:  # up a fourth = next door on the Camelot wheel, so it still fits the original's key
+                    k4 = _key_after(prof["key"], 5)
+                    y = tune(_rb(y, semis=5.0, formant=True), k4, strength=0.8, speed_ms=60)
+                    steps.append(f"pitch+5F tuned {k4}")
+            else:                     # no reliable key: fall back to the favourite pitch-up
+                y = _rb(y, semis=3.0, formant=True); steps.append("pitch+3F")
+        elif t == "varispeed_up":       # tape-style: pitch + speed together, formants move (androgynous)
             s_ = float([3, 2, 4, 5][prof.get("slot", int(rng.integers(4))) % 4])
-            y = varispeed(y, s_); steps.append(f"tape+{s_:.0f}")
+            y = varispeed(y, s_); steps.append(f"tape+{s_:.0f}{k2(s_)}")
         elif t == "fragment":
             y = fragment(y, rng); steps.append("fragment")
         elif t == "formant_up":       # higher note, natural throat: same singer, higher
             ladder = [3, 5, 2, 4, 7, 1]
             s_ = float(ladder[prof.get("slot", int(rng.integers(6))) % len(ladder)])
-            y = _rb(y, semis=s_, formant=True); steps.append(f"pitch+{s_:.0f}F")
+            y = _rb(y, semis=s_, formant=True); steps.append(f"pitch+{s_:.0f}F{k2(s_)}")
         elif t == "varispeed_down":   # small drops only, formant-preserved
             s_ = float(rng.choice([-2, -3, -4]))
-            y = _rb(y, semis=s_, formant=True); steps.append(f"pitch{s_:.0f}F")
+            y = _rb(y, semis=s_, formant=True); steps.append(f"pitch{s_:.0f}F{k2(s_)}")
         elif t == "slow_stretch":
             f = float(rng.uniform(1.3, 2.2))
             y = _rb(y, time=f); steps.append(f"stretch{f:.1f}x")
@@ -346,13 +370,13 @@ CORES = {"vocal": _vocal_core, "sustained": _sustained_core, "transient": _trans
 
 
 PLANS = {  # technique families per material, in the order they appear in a variation family
-    "vocal": ["formant_up", "fragment", "varispeed_up", "vowel_hold", "reverse_swell",
+    "vocal": ["in_tune", "formant_up", "fragment", "varispeed_up", "vowel_hold", "reverse_swell",
               "varispeed_down", "slow_stretch", "chop"],
     "sustained": ["dark_phase", "pop_phase", "freeze", "octave_bed", "plain_space", "micro", "paulstretch"],
     "transient": ["dark_phase", "pop_phase", "freeze", "reverse_swell"],
     "texture": ["vari_low", "vari_mid", "plain_space"],
 }
-LABELS = {"varispeed_down": "Pitch down", "varispeed_up": "Tape up", "formant_up": "Pitch up", "slow_stretch": "Slow stretch",
+LABELS = {"in_tune": "In tune", "varispeed_down": "Pitch down", "varispeed_up": "Tape up", "formant_up": "Pitch up", "slow_stretch": "Slow stretch",
           "vowel_hold": "Vowel hold", "chop": "Chop", "reverse_swell": "Reverse swell", "dark_phase": "Dark phase",
           "pop_phase": "Pop phase", "freeze": "Freeze", "octave_bed": "Octave bed", "plain_space": "Space",
           "micro": "Micro loops", "fragment": "Fragment", "paulstretch": "Paulstretch", "vari_low": "Octave down", "vari_mid": "Slowed"}
@@ -429,6 +453,8 @@ def run(ids=(), files=(), category=None, top=5, variants=12, seed=None):
             except Exception as e:
                 print(f"  (RoFormer re-isolation failed, using stored stem: {e})")
         prof = profile(y, cat)
+        if row is not None and row["key_from"] != "none" and row["key"]:
+            prof["key"] = row["key"] + ("m" if row["scale"] == "minor" else "")  # for tuning + key labels
         stem = re.sub(r"^[A-Za-z]+(-Loop\d+)?_", "", src.stem)[:70]
         fam = C.LIB_ROOT / "Variations" / (cat or "Files") / stem
         if fam.exists():

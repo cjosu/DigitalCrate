@@ -22,3 +22,6 @@
 .yt .bars i{display:inline-block;height:4px;border-radius:2px;background:var(--acc2)}
 .crateprog{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:6px 16px}.crateprog i{display:block;height:100%;background:var(--acc)}
 #midibox a{color:var(--fg);text-decoration:none}
+.onoff{position:relative;display:inline-block;width:30px;height:17px;cursor:pointer}.onoff input{opacity:0;width:0;height:0}
+.onoff span{position:absolute;inset:0;background:#2a2f37;border-radius:17px;transition:.15s}.onoff span:before{content:"";position:absolute;width:13px;height:13px;left:2px;top:2px;background:#8b93a1;border-radius:50%;transition:.15s}
+.onoff input:checked+span{background:var(--acc)}.onoff input:checked+span:before{transform:translateX(13px);background:#000}

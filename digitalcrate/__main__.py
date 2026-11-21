@@ -21,6 +21,8 @@ def main():
     p.add_argument("--match", nargs="*", default=[], help="substring(s) of file path (any)")
     p.add_argument("--genre", nargs="*", default=[], help="genre tag substrings (any)")
     p.add_argument("--all", action="store_true", help="process the whole library")
+    p.add_argument("--drum-only", action="store_true",
+                   help="songs that so far only went through `drums` (they have drum samples but no others)")
     p.add_argument("--limit", type=int)
     p.add_argument("--separate", choices=["auto", "always", "never"], default="auto",
                    help="auto: separate stems unless the track is already drumless")
@@ -90,9 +92,11 @@ def main():
             clauses.append("path LIKE ?"); params.append(f"%{x}%")
         for x in a.genre:
             clauses.append("genre LIKE ?"); params.append(f"%{x}%")
-        if not clauses and not a.all and not a.top:
-            ap.error("give --artist/--match/--genre filters, --top N, or --all")
+        if not clauses and not a.all and not a.top and not a.drum_only:
+            ap.error("give --artist/--match/--genre filters, --top N, --drum-only or --all")
         where = " OR ".join(clauses) if clauses else "1=1"
+        if a.drum_only:
+            where = f"({where}) AND id IN (SELECT track_id FROM samples WHERE category='Percussion')"
         order = "artist, album, path"
         if a.top:
             from .scout import RANK_SQL
