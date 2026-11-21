@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Drum labels</title>
+<style>
+:root{--bg:#0e1013;--panel:#161a20;--line:#262b33;--fg:#e6e6e6;--mute:#8b93a1;--acc:#e0a458;--perc:#d96c6c}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:20px 16px 80px}
+main{max-width:720px;margin:auto}h1{font-size:20px;margin:0 0 4px}p.lead{color:var(--mute);margin:0 0 16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
+.big{display:flex;gap:12px;align-items:center;margin-bottom:16px}.big button.play{font-size:18px;padding:10px 22px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+button{background:#1d2229;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;font:inherit;text-align:left}
+button:hover{border-color:var(--acc)}button.on{background:var(--perc);color:#000;border-color:var(--perc)}
+button kbd{float:right;font:11px ui-monospace,Menlo,monospace;color:var(--mute);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+button.on kbd{color:#000;border-color:#000}
+.nav{display:flex;gap:8px;margin-top:16px;align-items:center}.nav .prog{margin-left:auto;color:var(--mute);font-size:12px}
+.pill{background:var(--acc);color:#000;border-color:var(--acc)}.sub{color:var(--mute);font-size:12px}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:10px}.bar i{display:block;height:100%;background:var(--acc);border-radius:2px}
+</style></head><body><main>
+<h1>Drum labels</h1>
+<p class="lead">Each hit plays automatically. Mark <b>every</b> piece you can hear striking together: one for a clean hit, several for a combo
+(kick + hat, snare + crash…). Press <b>Enter</b> to save and move on. These labels are used to measure the drum classifier and retrain it.
+About 150 hits; any number helps, and you can stop and come back.</p>
+<div class="card"><div class="big"><button class="play pill" id="play">▶ replay <kbd style="float:none;margin-left:6px">space</kbd></button><span class="sub" id="info"></span></div>
+<div class="grid" id="grid"></div>
+<div class="nav"><button id="back">← back</button><button id="skip">skip</button><button id="save" class="pill">save &amp; next <kbd style="float:none">enter</kbd></button><span class="prog" id="prog"></span></div>
+<div class="bar"><i id="bar"></i></div></div>
+<script>
+const AC=new AudioContext();let M,L={},k=0,sel=new Set(),src=null;
+const NAMES={kick:['Kick','k'],snare:['Snare','s'],rim_clap:['Rim / clap','c'],hat_closed:['Closed hat','h'],hat_open:['Open hat','o'],shaker:['Shaker / tamb','t'],ride:['Ride','r'],crash:['Crash','x'],tom:['Tom','m'],hand_drum:['Hand drum (conga…)','b'],wood_metal:['Wood / metal (cowbell, block…)','w'],orchestral:['Timpani / orchestral','p'],not_drum:['Not a drum / junk','n']};
+const KEY=Object.fromEntries(Object.entries(NAMES).map(([p,[_,key]])=>[key,p]));
+const url=p=>'/'+p.split('/').map(encodeURIComponent).join('/');
+async function play(){AC.resume();if(src)try{src.stop()}catch(e){};const it=M.items[k];const b=await AC.decodeAudioData(await (await fetch(url(it.path))).arrayBuffer());
+  src=AC.createBufferSource();src.buffer=b;src.connect(AC.destination);src.start()}
+function draw(){const it=M.items[k];if(!it){document.querySelector('.card').innerHTML='<h2>All done, thank you!</h2><p class="sub">Tell Claude the labels are in.</p>';return}
+  sel=new Set(L[it.id]||[]);
+  document.getElementById('grid').innerHTML=M.pieces.map(p=>`<button data-p="${p}" class="${sel.has(p)?'on':''}">${NAMES[p][0]}<kbd>${NAMES[p][1]}</kbd></button>`).join('');
+  const done=M.items.filter(x=>L[x.id]).length;document.getElementById('prog').textContent=`${k+1} of ${M.items.length} · ${done} labelled`;
+  document.getElementById('bar').style.width=(done/M.items.length*100)+'%';document.getElementById('info').textContent=L[it.id]?'already labelled — change it if you like':'';play()}
+function toggle(p){sel.has(p)?sel.delete(p):sel.add(p);if(p==='not_drum'&&sel.has(p))sel=new Set(['not_drum']);else if(p!=='not_drum')sel.delete('not_drum');
+  document.querySelectorAll('#grid button').forEach(b=>b.classList.toggle('on',sel.has(b.dataset.p)))}
+async function save(){if(!sel.size)return;const it=M.items[k];await fetch('/api/drumlabel/vote',{method:'POST',body:JSON.stringify({id:it.id,pieces:[...sel]})});L[it.id]=[...sel];next()}
+function next(){k++;while(k<M.items.length&&L[M.items[k].id]&&!window._revisit)k++;draw()}
+document.getElementById('grid').onclick=e=>{const b=e.target.closest('button');if(b)toggle(b.dataset.p)};
+document.getElementById('play').onclick=play;document.getElementById('save').onclick=save;
+document.getElementById('skip').onclick=()=>{k++;draw()};document.getElementById('back').onclick=()=>{if(k>0){k--;draw()}};
+window.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey)return;if(e.code==='Space'){e.preventDefault();play();return}
+  if(e.key==='Enter'){e.preventDefault();save();return}if(e.key==='ArrowLeft'){document.getElementById('back').click();return}
+  if(e.key==='ArrowRight'){document.getElementById('skip').click();return}const p=KEY[e.key.toLowerCase()];if(p)toggle(p)});
+fetch('/api/drumlabel').then(r=>r.json()).then(j=>{M=j;L=j.labels||{};k=0;while(k<M.items.length&&L[M.items[k].id])k++;draw()});
+</script></main></body></html>

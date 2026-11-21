@@ -247,7 +247,7 @@ function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
  el.innerHTML=`<h3>🎛 Sketchpad <span class="sub">${esc(PROJ.key||'no key')} · ${PROJ.bpm||'—'} bpm — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
- <button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button><button id="skhide">▾</button></h3>
+ <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button><button id="skhide">▾</button></h3>
  ${SK.lanes.map((l,k)=>{const s=S[l.i]||[];const loop=s[F.kind]==='loop';return`<div class="lane${l.mute?' muted':''}" data-ln="${k}"><span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span>
   <div style="min-width:0"><div class="name">${esc(s[F.sub]||'')} · ${s[F.cam]||'—'}</div><div class="meta">${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')}</div></div>
   <div>${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
@@ -269,7 +269,15 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
   await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,vol:l.vol,mute:l.mute,solo:l.solo,every:l.every,offset:l.offset}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
   api('api/export',{scope:'paths',paths:SK.lanes.map(l=>l.path),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
- if(t.id==='skbounce'){skBounce(+$('skbars').value);return}});
+ if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
+ if(t.id==='skstems'){skStems(+$('skbars').value);return}});
+// aligned stems: render every audible lane alone over the same N bars, so each file starts on bar 1 and they all line up
+async function skStems(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
+ const L=barLen(),sr=44100,solo=SK.lanes.some(l=>l.solo),name=($('skname').value||'').trim()||SK.name||'Sketch '+new Date().toISOString().slice(0,10);
+ const live=SK.lanes.filter(l=>!(l.mute||(solo&&!l.solo)));if(!live.length){toast('every lane is muted');return}toast(`rendering ${live.length} stems…`);
+ const stems=[];for(const l of live){const ctx=new OfflineAudioContext(2,Math.ceil(bars*L*sr),sr),g=ctx.createGain();g.gain.value=l.vol;g.connect(ctx.destination);
+  for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null);const s=S[l.i];stems.push({label:`${AB[s[F.cat]]} ${s[F.artist]} - ${s[F.title]}`,wav:wavB64(await ctx.startRendering())})}
+ try{const r=await api('api/stems',{name,key:PROJ.key,bpm:PROJ.bpm,stems});toast(`${r.files.length} stems → ${r.dest.split('/').slice(-2).join('/')} · set Live to ${PROJ.bpm} bpm, ⌘-drag them in to get one track each`)}catch(e){toast('stems failed: '+e.message)}}
 $('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.skv!=null){SK.lanes[+t.dataset.skv].vol=+t.value;skGains()}});
 $('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.ske!=null)SK.lanes[+t.dataset.ske].every=+t.value;if(t.dataset.sko!=null)SK.lanes[+t.dataset.sko].offset=+t.value;if(t.id==='skname')SK.name=t.value});
 async function skBounce(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
@@ -282,7 +290,7 @@ async function skBounce(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toa
   const j=addRow(first.i,r.row);toast('bounced → new sample (★ favourited)');select(j,'go')}catch(e){toast('bounce failed: '+e.message)}}
 function addRow(i,n){const row=S[i].slice();Object.assign(row,{[F.id]:n.id,[F.path]:n.path,[F.cat]:n.category,[F.sub]:n.subtype,[F.kind]:n.kind,[F.cam]:n.cam,[F.key]:n.key,[F.bpm]:n.bpm,[F.dur]:n.dur,
  [F.env]:n.env,[F.note]:n.note,[F.bars]:n.bars,[F.start]:n.start,[F.parent]:n.parent,[F.root]:n.root,[F.ops]:n.ops});
- const j=S.push(row)-1;P.push(P[i]);BYID.set(n.id,j);byPath.set(n.path,j);(BYTRACK.get(row[F.tid])||[]).push(j);
+ const j=S.push(row)-1;P.push(n.partners?n.partners.map(([id,sc,h,v])=>[BYID.get(id),sc,h,v]).filter(x=>x[0]!=null):P[i]);BYID.set(n.id,j);byPath.set(n.path,j);(BYTRACK.get(row[F.tid])||[]).push(j);
  FAV.set(n.path,{path:n.path,sample_id:n.id,label:n.ops,added_at:new Date().toISOString()});return j}
 function wavB64(buf){const n=buf.length,ch=2,sr=buf.sampleRate,b=new ArrayBuffer(44+n*ch*2),v=new DataView(b),w=(o,s)=>{for(let k=0;k<s.length;k++)v.setUint8(o+k,s.charCodeAt(k))};
  w(0,'RIFF');v.setUint32(4,36+n*ch*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,ch,true);v.setUint32(24,sr,true);v.setUint32(28,sr*ch*2,true);v.setUint16(32,ch*2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*ch*2,true);
@@ -296,7 +304,8 @@ async function renderKitExtras(){const L=$('list');
  L.querySelectorAll('[data-skopen]').forEach(b=>b.onclick=()=>{const x=sk.find(z=>z.name===b.dataset.skopen);skOpen(x.name,JSON.parse(x.state))});
  L.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=async()=>{await api('api/sketch/delete',{name:b.dataset.skdel});render()})}
 async function skOpen(name,s){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
- SK.name=name;SK.lanes=s.lanes.map(l=>({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.i!=null);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();skPlay()}
+ SK.name=name;SK.lanes=s.lanes.map(l=>({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.i!=null);
+ const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();skPlay()}
 document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kitrack]');if(kr){e.stopPropagation();const k=D.kits[+kr.dataset.kitrack];kr.textContent='building…';
   try{const r=await api('api/export',{scope:'paths',paths:k.m.map(i=>S[i][F.path]),name:k.name,rack:true,reveal:true});kr.textContent=`rack ✓ (${r.count})`}catch(err){kr.textContent='error'}return}
  const ks=e.target.closest('[data-kitsk]');if(ks){e.stopPropagation();const k=D.kits[+ks.dataset.kitsk];skStop();SK.lanes=[];for(const i of k.m)await skAdd(i);skPlay();return}
@@ -309,9 +318,11 @@ function augment(i){const eo=$('edopen');if(!eo)return;eo.parentNode.style.flexW
  eo.insertAdjacentHTML('afterend',` <button data-sk="${i}" title="add to the sketchpad">＋ sketch</button><button id="padsopen" title="play its syllables / notes from the keyboard, record a pattern">🎹 pads</button>${S[i][F.cat]!=='Percussion'&&S[i][F.cam]?'<button id="midiopen" title="notes & chords → MIDI">♪ MIDI</button>':''}`);
  eo.parentNode.insertAdjacentHTML('afterend','<div class="sub" id="pjinfo" style="margin:-4px 0 8px"></div>');
  $('editor').insertAdjacentHTML('afterend','<div class="ed" id="pads" hidden></div><div class="ed" id="midibox" hidden></div>');
- document.querySelectorAll('#detail [data-pair]').forEach(b=>b.insertAdjacentHTML('beforebegin',`<button data-sk="${b.dataset.pair}" title="add to the sketchpad">＋</button>`));
+ document.querySelectorAll('#detail [data-pair]').forEach(b=>b.insertAdjacentHTML('beforebegin',`<button data-sk="${b.dataset.pair}" title="add to the sketchpad">＋</button><button data-savepair="${b.dataset.pair}" title="save this pair as a sketch (Kits tab), ready to open or export as aligned stems">💾</button>`));
  if(PROJ.key||PROJ.bpm)projInfo(i);if(PADS.i!==i)padsClose()}
-$('detail').addEventListener('click',e=>{if(e.target.id==='padsopen'){openPads(st.sel);return}if(e.target.id==='midiopen'){openMidi(st.sel);return}});
+$('detail').addEventListener('click',async e=>{const sp=e.target.closest('[data-savepair]');if(sp){e.stopPropagation();const j=+sp.dataset.savepair;
+  try{const r=await api('api/pair/save',{src:S[st.sel][F.path],partner:S[j][F.path]});sp.textContent='✓';toast(`saved “${r.name}” · open it from the Kits tab`)}catch(err){toast('error: '+err.message)}return}
+ if(e.target.id==='padsopen'){openPads(st.sel);return}if(e.target.id==='midiopen'){openMidi(st.sel);return}});
 
 // ---------- MIDI
 async function openMidi(i){const box=$('midibox');if(!box.hidden){box.hidden=true;return}box.hidden=false;box.innerHTML='<div class="sub">transcribing notes & chords (basic-pitch)…</div>';

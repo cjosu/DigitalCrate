@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS shootout_votes (clip TEXT, sample TEXT, task TEXT, me
 CREATE TABLE IF NOT EXISTS yt_scout (id TEXT PRIMARY KEY, query TEXT, url TEXT, title TEXT,
     channel TEXT, duration REAL, views INTEGER, score REAL, vocal REAL, neg REAL, taste REAL,
     best_at REAL, snippet TEXT, status TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS pair_votes (trial TEXT PRIMARY KEY, rating INTEGER, ts REAL);
+CREATE TABLE IF NOT EXISTS drum_labels (sample_id TEXT PRIMARY KEY, pieces TEXT, ts REAL);
 """
 
 

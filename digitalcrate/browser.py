@@ -216,7 +216,7 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  <span id="edfol">Fade out</span><input type="range" id="edfo" min="0" max="2000" step="5" value="40"><span id="edfov">40 ms</span></div>
  <div class="edrow sub"><label title="Rubber Band's formant mode: keeps a voice's character on big shifts, but scored lowest in your blind shootout"><input type="checkbox" id="edfm"> keep formants</label><label><input type="checkbox" id="edrev"> reverse</label>
  <span title="Fade in: start of playback. Fade out: end of a one-shot, or when you stop. Loop crossfade: between loop passes.">ⓘ which fade applies when</span></div>
- <div class="edrow"><button id="edprev">▶ preview edit</button><input id="edname" placeholder="name (optional)" style="flex:1;min-width:120px"><button id="edsave" class="pill">save as new</button></div>
+ <div class="edrow"><button id="edprev">▶ preview edit</button><button id="edreset" title="put every setting and the selection back to how they started">↺ reset</button><input id="edname" placeholder="name (optional)" style="flex:1;min-width:120px"><button id="edsave" class="pill">save as new</button></div>
  <div class="sub" id="edmsg">original is never modified · the new sample remembers where it came from</div>`;
  ED={i,sel:null,onsets:[],buf:null,P:null,peaks:null,base:null,view:null};
  const path=S[i][F.path];
@@ -226,9 +226,12 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  c.addEventListener('wheel',e=>{e.preventDefault();const [v0,v1]=edView(),t=tx(e),f=e.deltaY>0?1.25:0.8,d=ED.buf.duration;
   let n0=t-(t-v0)*f,n1=t+(v1-t)*f;if(n1-n0>=d){n0=0;n1=d}if(n1-n0<0.02)return;edZoom([Math.max(0,n0),Math.min(d,n1)])},{passive:false});
  const snap=t=>{if(!$('edsnap').checked||!ED.onsets.length)return t;const n=ED.onsets.reduce((a,b)=>Math.abs(b-t)<Math.abs(a-t)?b:a);return Math.abs(n-t)<0.2?n:t};
- let down=null,drag=null;c.onmousedown=e=>{drag=edHandleAt(e);if(drag)return;down=snap(tx(e));ED.sel=[down,down];edDraw()};
+ let down=null,drag=null;c.onmousedown=e=>{drag=edHandleAt(e);if(drag)return;
+  // grabbing an edge moves just that edge: anchor on the opposite one and let the normal drag logic extend from it
+  const edge=edEdgeAt(e);if(edge){down=edge==='a'?ED.sel[1]:ED.sel[0];return}
+  down=snap(tx(e));ED.sel=[down,down];edDraw()};
  c.onmousemove=e=>{if(drag){const t=tx(e),[a,b]=ED.sel;edSetEnv(drag,Math.max(0,(drag==='in'||drag==='xin'?t-a:b-t))*1000);return}
-  c.style.cursor=edHandleAt(e)?'ew-resize':'crosshair';if(down==null)return;const t=tx(e);ED.sel=[Math.min(down,t),Math.max(down,t)];edDraw()};
+  c.style.cursor=down!=null||edHandleAt(e)||edEdgeAt(e)?'ew-resize':'crosshair';if(down==null)return;const t=tx(e);ED.sel=[Math.min(down,t),Math.max(down,t)];edDraw()};
  window.addEventListener('mouseup',()=>{if(drag){drag=null;['edxf','edfi','edfo'].forEach(id=>$(id).dispatchEvent(new Event('change')));return}
   if(down==null)return;down=null;ED.sel=[snap(ED.sel[0]),snap(ED.sel[1])];if(ED.sel[1]-ED.sel[0]<0.03)ED.sel=[0,ED.buf.duration];edDraw();edChanged()},{once:false});
  c.ondblclick=e=>{const t=tx(e),b=[0,...ED.onsets,ED.buf.duration];let k=b.findIndex(x=>x>t);if(k<1)k=1;ED.sel=[b[k-1],b[k]];edDraw();
@@ -245,7 +248,13 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  foMode();$('edloop').addEventListener('change',()=>{foMode();edDraw()});
  $('edst').oninput=()=>$('edstv').textContent=(+$('edst').value).toFixed(2)+'×';
  $('edpi').oninput=()=>$('edpiv').textContent=(+$('edpi').value>0?'+':'')+$('edpi').value+' st';
- $('edprev').onclick=edPreview;$('edsave').onclick=edSave}
+ $('edprev').onclick=edPreview;$('edsave').onclick=edSave;$('edreset').onclick=edReset}
+// start over: every control back to its starting value (including ones studio.js adds), whole sample selected, zoom out.
+// loop / snap / the name are preferences, not edits, so they stay
+function edReset(){if(!ED||!ED.buf)return;$('editor').querySelectorAll('input,select').forEach(el=>{if(['edloop','edsnap','edname'].includes(el.id))return;
+ if(el.type==='checkbox')el.checked=el.defaultChecked;else if(el.tagName==='SELECT')el.selectedIndex=Math.max(0,[...el.options].findIndex(o=>o.defaultSelected));else el.value=el.defaultValue;
+ el.dispatchEvent(new Event('input'))});if($('tnrep'))$('tnrep').textContent='';
+ ED.sel=[0,ED.buf.duration];edZoom(null);edDraw();edChanged();$('edmsg').textContent='reset: back to the untouched sample'}
 function edButtons(){if(!$('edprev'))return;const m=ED&&ED.P&&ED.P.mode;
  $('edprev').textContent=m==='prev'?'■ stop preview':'▶ preview edit';$('edprev').classList.toggle('playing',m==='prev');
  $('edplay').textContent=m==='sel'?'■ stop':'▶ selection';$('edplay').classList.toggle('playing',m==='sel')}
@@ -263,7 +272,7 @@ function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.d
  ED.peaks.forEach(([mn,mx],x)=>{const t=edT(x/dpr,W/dpr),inS=t>=a&&t<=b,k=inS?gain(t):1;g.fillStyle=inS?'#8cc0da':'#3f4e58';
   g.fillRect(x,mid-mx*amp*k,1,Math.max(1,(mx-mn)*amp*k))});
  g.fillStyle='rgba(255,255,255,.28)';ED.onsets.forEach(t=>g.fillRect(X(t),H-7*dpr,1*dpr,7*dpr));
- g.fillStyle='#e0a458';[a,b].forEach(t=>g.fillRect(X(t)-1*dpr,0,2*dpr,H));
+ g.fillStyle='#e0a458';[a,b].forEach(t=>{g.fillRect(X(t)-1*dpr,0,2*dpr,H);g.fillRect(X(t)-3*dpr,mid-10*dpr,6*dpr,20*dpr)});
  const line=(x0,y0,x1,y1,col,dash)=>{g.save();g.strokeStyle=col;g.lineWidth=1.5*dpr;g.setLineDash(dash?[4*dpr,3*dpr]:[]);g.beginPath();g.moveTo(x0,y0);g.lineTo(x1,y1);g.stroke();g.restore()};
  if(e.fin>0)line(X(a),bot,X(a+e.fin),top,'#ffffff');
  if(e.loop){if(e.fout>0)line(X(b-e.fout),top,X(b),bot,'rgba(255,255,255,.45)',true);
@@ -282,6 +291,8 @@ function edEnv(){const [a,b]=ED.sel,len=b-a,loop=$('edloop').checked,cap=v=>Math
  return{loop,fin:cap(+$('edfi').value/1000),fout:cap(+$('edfo').value/1000),xf:cap(+$('edxf').value/1000)}}
 function edKnobs(){const e=edEnv(),[a,b]=ED.sel;const k=[{id:'in',t:a+e.fin,col:'#ffffff'}];
  if(e.loop){k.push({id:'xout',t:b-e.xf,col:'#e0a458'},{id:'xin',t:a+e.xf,col:'#e0a458',small:true})}else k.push({id:'out',t:b-e.fout,col:'#ffffff'});return k}
+function edEdgeAt(ev){const c=$('edc');if(!ED||!ED.buf)return null;const [a,b]=ED.sel,W=c.clientWidth;
+ const da=Math.abs(ev.offsetX-edX(a,W)),db=Math.abs(ev.offsetX-edX(b,W));if(Math.min(da,db)>7)return null;return da<db?'a':'b'}
 function edHandleAt(ev){const c=$('edc');if(ev.offsetY>24)return null;let best=null,bd=10;
  edKnobs().forEach(k=>{const d=Math.abs(ev.offsetX-edX(k.t,c.clientWidth));if(d<bd){bd=d;best=k.id}});return best}
 function edSetEnv(which,ms){const el={in:$('edfi'),out:$('edfo'),xin:$('edxf'),xout:$('edxf')}[which],st=+el.step||1;
@@ -339,7 +350,7 @@ async function edSave(){$('edmsg').textContent='saving (analysing for related-sa
  if(r.error){$('edmsg').textContent='error: '+r.error;return}const n=r.row,row=p.slice();
  Object.assign(row,{[F.id]:n.id,[F.path]:n.path,[F.sub]:n.subtype,[F.kind]:n.kind,[F.cam]:n.cam,[F.key]:n.key,[F.bpm]:n.bpm,[F.dur]:n.dur,
   [F.env]:n.env,[F.note]:n.note,[F.bars]:n.bars,[F.start]:n.start,[F.parent]:n.parent,[F.root]:n.root,[F.ops]:n.ops});
- const j=S.push(row)-1;P.push(P[i]);BYID.set(n.id,j);byPath.set(n.path,j);(BYTRACK.get(row[F.tid])||[]).push(j);
+ const j=S.push(row)-1;P.push(n.partners?n.partners.map(([id,sc,h,v])=>[BYID.get(id),sc,h,v]).filter(x=>x[0]!=null):P[i]);BYID.set(n.id,j);byPath.set(n.path,j);(BYTRACK.get(row[F.tid])||[]).push(j);
  FAV.set(n.path,{path:n.path,sample_id:n.id,label:'edit of '+lbl(i),added_at:new Date().toISOString()});
  edStop();select(j,'go')}
 // ---------- source focus (show only some tracks' samples)

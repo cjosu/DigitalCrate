@@ -59,5 +59,14 @@ def test_pipeline(tmp_path):
             pytest.fail("server did not start")
         r = json.load(urllib.request.urlopen("http://localhost:8799/api/shootout"))
         assert "items" in r
+        # saving a pitch-shifted edit returns its own "goes well with" picks, scored in the new key
+        src = json.loads(lib.joinpath("Browser.html").read_text().split('type="application/json">', 1)[1]
+                         .split("</script>", 1)[0])["samples"]
+        keyed = next(x for x in src if x[5])  # a sample with a key
+        req = urllib.request.Request("http://localhost:8799/api/edit/save", method="POST",
+                                     data=json.dumps({"path": keyed[1], "params": {"semis": 3}}).encode())
+        row = json.load(urllib.request.urlopen(req, timeout=300))["row"]
+        assert row["cam"] != keyed[5]
+        assert "partners" in row and all(len(p) == 4 for p in row["partners"])
     finally:
         srv.terminate()

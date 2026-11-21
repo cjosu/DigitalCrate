@@ -35,6 +35,9 @@ for (a, b), v in _R.items():
     ROLE[CATS.index(a), CATS.index(b)] = ROLE[CATS.index(b), CATS.index(a)] = v
 
 KEY_NEUTRAL = 0.75
+# "learned": vibe from the arrangement model in pairing.py, plus variety across categories and artists.
+# "clap": the original plain sound similarity (kept for comparison; set DIGITALCRATE_PAIRING=clap).
+PAIRING = __import__("os").environ.get("DIGITALCRATE_PAIRING", "learned")
 TOPK = 30
 
 
@@ -55,6 +58,13 @@ def load(con, reference=False):
     d["loop"] = np.array([r["kind"] == "loop" for r in rows])
     d["track"] = np.array([r["track_id"] for r in rows])
     d["quality"] = np.array([r["quality"] for r in rows])
+    d["artist"] = np.array([(r["artist"] or "").lower() for r in rows])
+    d["Fa"] = d["Gb"] = None
+    if n and PAIRING == "learned":
+        from .pairing import vectors
+        v = vectors(d["emb"], d["cat"])
+        if v is not None:
+            d["Fa"], d["Gb"] = v
     return d
 
 
@@ -67,8 +77,9 @@ def camelot_score(num_a, minor_a, num_b, minor_b):
     return s
 
 
-def compat_block(d, idx, cols=None):
+def compat_block(d, idx, cols=None, mode=None):
     """Compatibility of samples idx (rows) vs cols (default: all). Returns dict of component matrices."""
+    mode = mode or ("learned" if d.get("Fa") is not None else "clap")
     cols = np.arange(d["n"]) if cols is None else cols
     i, j = idx[:, None], cols[None, :]
     cam = camelot_score(d["num"][i], d["minor"][i], d["num"][j], d["minor"][j])
@@ -86,9 +97,16 @@ def compat_block(d, idx, cols=None):
     r = np.minimum.reduce([r, np.abs(r - 1), np.abs(r + 1)])
     tempo = np.where(both, np.clip(1 - (r - 0.02) / 0.2, 0.4, 1.0), 1.0)
     role = ROLE[d["cat"][i], d["cat"][j]]
-    vibe = np.clip((d["emb"][idx] @ d["emb"][cols].T - 0.25) / 0.55, 0, 1)
-    score = harm * tempo * (0.4 * role + 0.6 * vibe)
-    return dict(score=score, harm=harm, tempo=tempo, role=role, vibe=vibe)
+    if mode == "learned":
+        # arrangement fit, scaled per row: median candidate -> 0, the row's top 1% -> 1
+        v = d["Fa"][idx] @ d["Gb"][cols].T
+        lo, hi = np.percentile(v, [50, 99], axis=1, keepdims=True)
+        vibe = np.clip((v - lo) / (hi - lo + 1e-9), 0, 1)
+        score = harm * tempo * (0.35 * role + 0.65 * vibe)
+    else:
+        vibe = np.clip((d["emb"][idx] @ d["emb"][cols].T - 0.25) / 0.55, 0, 1)
+        score = harm * tempo * (0.4 * role + 0.6 * vibe)
+    return dict(score=score, harm=harm, tempo=tempo, role=role, vibe=vibe, mode=mode)
 
 
 def mood_tags(con, d):
@@ -106,6 +124,54 @@ def mood_tags(con, d):
     return tags
 
 
+def _picks(d, gi, comp, sc, row_i):
+    if comp.get("mode") == "learned":
+        return _picks_varied(d, gi, comp, sc, row_i)
+    order = np.argsort(-sc[row_i])
+    picks, same_track = [], 0
+    for j in order:
+        if d["track"][j] == d["track"][gi]:
+            if same_track >= 3:
+                continue
+            same_track += 1
+        picks.append([int(j), round(float(sc[row_i, j]), 3),
+                      round(float(comp["harm"][row_i, j]), 2), round(float(comp["vibe"][row_i, j]), 2)])
+        if len(picks) >= TOPK:
+            break
+    return picks
+
+
+def _picks_varied(d, gi, comp, sc, row_i):
+    """Greedy top-K with variety: each earlier pick from the same category costs 12%, at most 2 per other artist,
+    at most 3 from the sample's own song."""
+    row = sc[row_i]
+    cand = np.argpartition(-row, min(400, len(row) - 1))[:400]
+    cand = cand[np.argsort(-row[cand])]
+    cats, arts = d["cat"][cand], d["artist"][cand]
+    base = row[cand].copy()
+    ncat, nart, same_track, picks = {}, {}, 0, []
+    alive = np.ones(len(cand), bool)
+    for _ in range(TOPK):
+        eff = base * np.array([0.88 ** ncat.get(c, 0) for c in cats])
+        eff[~alive] = -9
+        k = int(np.argmax(eff))
+        if eff[k] <= -9:
+            break
+        alive[k] = False
+        j = int(cand[k])
+        if d["track"][j] == d["track"][gi]:
+            if same_track >= 3:
+                continue
+            same_track += 1
+        elif arts[k] and nart.get(arts[k], 0) >= 2:
+            continue
+        nart[arts[k]] = nart.get(arts[k], 0) + 1
+        ncat[cats[k]] = ncat.get(cats[k], 0) + 1
+        picks.append([j, round(float(row[j]), 3), round(float(comp["harm"][row_i, j]), 2),
+                      round(float(comp["vibe"][row_i, j]), 2)])
+    return picks
+
+
 def partners(d):
     out = []
     for s in range(0, d["n"], 256):
@@ -113,20 +179,23 @@ def partners(d):
         comp = compat_block(d, idx)
         sc = comp["score"].copy()
         sc[np.arange(len(idx)), idx] = -1
-        for row_i, gi in enumerate(idx):
-            order = np.argsort(-sc[row_i])
-            picks, same_track = [], 0
-            for j in order:
-                if d["track"][j] == d["track"][gi]:
-                    if same_track >= 3:
-                        continue
-                    same_track += 1
-                picks.append([int(j), round(float(sc[row_i, j]), 3),
-                              round(float(comp["harm"][row_i, j]), 2), round(float(comp["vibe"][row_i, j]), 2)])
-                if len(picks) >= TOPK:
-                    break
-            out.append(picks)
+        out.extend(_picks(d, gi, comp, sc, row_i) for row_i, gi in enumerate(idx))
     return out
+
+
+def partners_for(sample_id):
+    """'Goes well with' picks for one sample (e.g. an edit just saved), as [id, score, harmony, vibe]:
+    the same scoring as a full build, so a clip moved to a new key gets picks for its new key right away."""
+    from .db import connect
+    d = load(connect())
+    gi = next((k for k, r in enumerate(d["rows"]) if r["id"] == sample_id), None)
+    if gi is None:
+        return []
+    idx = np.array([gi])
+    comp = compat_block(d, idx)
+    sc = comp["score"].copy()
+    sc[0, gi] = -1
+    return [[d["rows"][j]["id"], s, h, v] for j, s, h, v in _picks(d, gi, comp, sc, 0)]
 
 
 KIT_ROLES = [("Pads & Atmospheres",), ("Chords & Keys", "Melodies & Leads"), ("Textures & Field",),
@@ -228,6 +297,12 @@ def build(n_kits=60):
         d["ref_sim"] = sims.max(1)
         d["ref_match"] = [names[j] for j in sims.argmax(1)]
         print(f"reference set: {len(names)} sounds")
+    if PAIRING == "learned":
+        from .pairing import train, vectors
+        ok = np.array([r["source"] != "edit" and not r["parent_id"] for r in d["rows"]])
+        st = train(d["emb"], d["cat"], d["track"], ok)
+        if st is not None:
+            d["Fa"], d["Gb"] = vectors(d["emb"], d["cat"], st)
     print("computing compatibility…")
     parts = partners(d)
     kits = make_kits(d, tags, n_kits)

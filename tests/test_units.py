@@ -71,3 +71,24 @@ def test_tune_pulls_a_flat_note_into_key():
     z = tune(y, "A", strength=1.0, speed_ms=0)
     before, after = abs(1200 * np.log2(_f0(y) / 440)), abs(1200 * np.log2(_f0(z) / 440))
     assert after < before / 2
+
+
+def test_stems_are_aligned(tmp_path, monkeypatch):
+    """Stems of different lengths come out trimmed to one length, with one shared gain, plus a reference mix."""
+    import base64, io
+    import soundfile as sf
+    from digitalcrate import combos
+    monkeypatch.setattr(combos.C, "ABLETON_SAMPLES", tmp_path)
+
+    def wav(n, amp):
+        b = io.BytesIO()
+        sf.write(b, np.full((n, 2), amp, np.float32), 44100, format="WAV", subtype="FLOAT")
+        return base64.b64encode(b.getvalue()).decode()
+    r = combos.write_stems("Test", [dict(label="MEL a", wav=wav(44100, .9)), dict(label="KEYS b", wav=wav(44000, .6))],
+                           key="Fm", bpm=80, reveal=False)
+    files = sorted((tmp_path / "Sketches" / "Test (Fm, 80 bpm)").glob("*.wav"))
+    assert [f.name for f in files] == ["00 mix (reference).wav", "01 MEL a.wav", "02 KEYS b.wav"]
+    a, b = (sf.read(str(f))[0] for f in files[1:])
+    assert len(a) == len(b) == 44000
+    assert abs(a.max() / b.max() - 1.5) < 1e-3  # balance kept
+    assert sf.read(str(files[0]))[0].max() <= 0.891

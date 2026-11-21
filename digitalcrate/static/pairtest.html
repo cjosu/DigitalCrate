@@ -1,0 +1,68 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pair test</title>
+<style>
+:root{--bg:#0e1013;--panel:#161a20;--line:#262b33;--fg:#e6e6e6;--mute:#8b93a1;--acc:#e0a458;--acc2:#7fb0c9}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:20px 16px 80px}
+main{max-width:860px;margin:auto}h1{font-size:20px;margin:0 0 4px}p.lead{color:var(--mute);margin:0 0 14px}
+.top{position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2;display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:14px}
+.top .prog{color:var(--mute);font-size:12px;margin-left:auto}
+.item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 14px}
+.item.cur{border-color:var(--acc)}
+.item h2{font-size:14px;margin:0 0 8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.keep{margin-left:10px!important}.row{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center;padding:6px 0;border-top:1px solid #1d2128}
+button{background:#1d2229;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--acc)}button.on{background:var(--acc);color:#000;border-color:var(--acc)}
+.meth{color:var(--mute);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.meth b{color:var(--acc2);font-weight:600}
+.stars button{padding:2px 8px;font-size:12px;margin-left:2px}
+table{border-collapse:collapse;font-size:13px;margin-top:6px}td,th{padding:4px 10px;border-bottom:1px solid var(--line);text-align:left}
+.sub{color:var(--mute);font-size:12px}
+</style></head><body><main>
+<h1>Goes-well-with: blind pair test</h1>
+<p class="lead">Each block is one sample. Below it, partners picked by two different recommendation models, shuffled and unlabelled.
+Press ▶ to hear the sample and a partner together, looping and matched in loudness. Rate how well they belong together, from 1 (clash, or no reason to be together) to 5 (I'd use these together).
+Keys: <b>↑/↓</b> move between partners, <b>space</b> play/stop, <b>1–5</b> rate. About 25 blocks; partial results count too.</p>
+<div class="top"><button id="stop">■ stop</button><button id="reveal">reveal picks</button><button id="res">results</button><button id="fresh" title="draw a new set of samples (keeps your votes on the old set)">new set</button><span class="prog" id="prog"></span></div>
+<div id="out"></div><div id="items"></div></main>
+<script>
+const AC=new AudioContext();let M,V={},REVEAL=false,cur=null,FOCUS=0;const BUF={},RMS={};
+const url=p=>'/'+p.split('/').map(encodeURIComponent).join('/');
+async function buf(p){if(!BUF[p])BUF[p]=fetch(url(p)).then(r=>r.arrayBuffer()).then(a=>AC.decodeAudioData(a)).then(b=>{let s=0,n=0;for(let c=0;c<b.numberOfChannels;c++){const d=b.getChannelData(c);for(let i=0;i<d.length;i+=4){s+=d[i]*d[i];n++}}RMS[p]=Math.sqrt(s/n)+1e-6;return b});return BUF[p]}
+function stop(){if(cur){cur.srcs.forEach(s=>{try{s.stop()}catch(e){}});cur.btn.classList.remove('on');cur=null}}
+async function play(paths,btn){AC.resume();if(cur&&cur.btn===btn){stop();return}stop();
+  const bs=await Promise.all(paths.map(buf));const t=AC.currentTime+.05;
+  const srcs=bs.map((b,k)=>{const s=AC.createBufferSource();s.buffer=b;s.loop=true;const g=AC.createGain();g.gain.value=Math.min(4,.1/RMS[paths[k]])*(paths.length>1?.75:1);s.connect(g).connect(AC.destination);s.start(t);return s});
+  btn.classList.add('on');cur={srcs,btn}}
+const rows=()=>[...document.querySelectorAll('.row')];
+function focusRow(k){const r=rows();if(!r.length)return;FOCUS=Math.max(0,Math.min(r.length-1,k));document.querySelectorAll('.item').forEach(x=>x.classList.remove('cur'));
+  const el=r[FOCUS];el.closest('.item').classList.add('cur');el.scrollIntoView({block:'nearest'})}
+function render(){const el=document.getElementById('items');el.innerHTML='';
+  M.trials.forEach((t,ti)=>{const box=document.createElement('div');box.className='item';
+    box.innerHTML=`<h2><span>${ti+1}.</span><span class="sub">${REVEAL?t.label:'sample '+(ti+1)}</span><button class="solo">▶ sample alone</button></h2>`;
+    box.querySelector('.solo').onclick=e=>play([t.src],e.target);
+    t.items.forEach((it,k)=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<button class="pl">▶ partner ${'ABCDEFGH'[k]}</button><span class="meth">${REVEAL?`<b>${it.methods.join(' + ')}</b> · ${it.label}`:''}</span><span class="stars">${[1,2,3,4,5].map(s=>`<button data-s="${s}" class="${V[it.trial]==s?'on':''}">${s}</button>`).join('')}<button class="keep" title="save this pair as a sketch in DigitalCrate (Kits tab)">♡ save</button></span>`;
+      r.querySelector('.keep').onclick=async e=>{const j=await (await fetch('/api/pair/save',{method:'POST',body:JSON.stringify({src:t.src,partner:it.path})})).json();e.target.textContent=j.error?'error':'♥ saved';e.target.title=j.name||j.error||''};
+      r.querySelector('.pl').onclick=e=>{FOCUS=rows().indexOf(r);focusRow(FOCUS);play([t.src,it.path],e.target)};
+      r.querySelectorAll('.stars button[data-s]').forEach(b=>b.onclick=()=>rate(it.trial,+b.dataset.s,r));
+      r._trial=it.trial;r._play=()=>r.querySelector('.pl').click();box.appendChild(r)});
+    el.appendChild(box)});prog();focusRow(FOCUS)}
+async function rate(trial,s,r){const v=V[trial]==s?0:s;await fetch('/api/pairtest/vote',{method:'POST',body:JSON.stringify({trial,rating:v})});
+  if(v)V[trial]=v;else delete V[trial];r.querySelectorAll('.stars button[data-s]').forEach(b=>b.classList.toggle('on',+b.dataset.s===v));prog()}
+function prog(){let n=0,d=0;M.trials.forEach(t=>t.items.forEach(it=>{n++;if(V[it.trial])d++}));document.getElementById('prog').textContent=`${d} / ${n} rated`}
+async function results(){const r=await (await fetch('/api/pairtest/results')).json(),o=document.getElementById('out');
+  if(!r.methods||!Object.keys(r.methods).length){o.innerHTML='<div class="item">No ratings yet.</div>';return}
+  const name={clap:'current (sound similarity)',learned:'new (learned from your arrangements)'};
+  o.innerHTML=`<div class="item"><h2>Results so far</h2><table><tr><th>model</th><th>mean rating</th><th>95% range</th><th>ratings</th></tr>${Object.entries(r.methods).map(([k,v])=>`<tr><td>${name[k]||k}</td><td>${v.mean}</td><td>${v.ci[0]} – ${v.ci[1]}</td><td>${v.n}</td></tr>`).join('')}</table>
+  <div class="sub" style="margin-top:8px">per sample, whose picks you rated higher: new ${r.wins.learned} · current ${r.wins.clap} · tie ${r.wins.tie}</div></div>`}
+document.getElementById('stop').onclick=stop;
+document.getElementById('reveal').onclick=e=>{REVEAL=!REVEAL;e.target.textContent=REVEAL?'hide picks':'reveal picks';render()};
+document.getElementById('res').onclick=results;
+document.getElementById('fresh').onclick=async e=>{e.target.textContent='building…';await load(true);e.target.textContent='new set'};
+window.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;const r=rows();
+  if(e.code==='Space'){e.preventDefault();if(cur)stop();else r[FOCUS]&&r[FOCUS]._play();return}
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();focusRow(FOCUS+(e.key==='ArrowDown'?1:-1));if(cur)r[FOCUS]._play();return}
+  const s=+e.key;if(s>=1&&s<=5&&r[FOCUS]){rate(r[FOCUS]._trial,s,r[FOCUS]).then(()=>{if(FOCUS<r.length-1){focusRow(FOCUS+1);if(cur)r[FOCUS]._play()}})}});
+async function load(fresh){let ex=[];try{ex=JSON.parse(localStorage.getItem('atlasExcl')||'["Electronic"]')}catch(e){}
+  const j=await (await fetch(`/api/pairtest?excl=${encodeURIComponent(ex.join('|'))}${fresh?'&new=1':''}`)).json();
+  if(j.error){document.getElementById('items').innerHTML=`<div class="item">${j.error}</div>`;return}M=j;V=j.votes||{};FOCUS=0;render()}
+load(false);
+</script></body></html>

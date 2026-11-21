@@ -24,7 +24,7 @@ CATS = ["Vocals", "Vocal Atmospheres", "Pads & Atmospheres", "Chords & Keys", "M
         "Textures & Field", "Bass & Sub", "Percussion"]
 KINDS = ["loop", "free", "phrase", "oneshot"]
 TECH_FILE = C.DATA_DIR / "technique_taste.json"
-N_PCA = 32
+N_PCA = 64  # 32 -> 64 lifted held-out accuracy (research/taste_variants.py)
 
 
 def _db():
@@ -52,23 +52,27 @@ def item_labels(con, recent_hours=None):
     now = time.time()
     lab = {}
     fav = {r["path"] for r in con.execute("SELECT path FROM favorites")}
+    durs = {r["path"]: r["dur"] or 0 for r in con.execute("SELECT path, dur FROM samples")}
     for r in con.execute("SELECT * FROM events ORDER BY ts"):
         age_d = (now - r["ts"]) / 86400
         w_time = np.exp(-age_d / 60)  # slow decay: taste drifts over months
         if recent_hours and (now - r["ts"]) < recent_hours * 3600:
             w_time *= 4
-        d = lab.setdefault(r["path"], {"pos": 0.0, "neg": 0.0, "dislike": None})
+        d = lab.setdefault(r["path"], {"pos": 0.0, "neg": 0.0, "dislike": None, "secs": 0.0, "plays": 0, "skip": 0.0})
         t, v = r["type"], r["value"]
         if t == "dislike":
             d["dislike"] = bool(v)
         elif t == "unstar":
             d["neg"] += 0.5 * w_time
         elif t == "listen":
+            # "played 70% through" is automatic for a half-second one-shot and rare for a long loop, so it
+            # mostly taught the model "short = liked". Count real listening time and replays instead.
             frac = v or 0
-            if frac >= 0.7:
-                d["pos"] += 0.25 * w_time
-            elif frac < 0.15:
-                d["neg"] += 0.25 * w_time
+            dur = durs.get(r["path"], 0)
+            d["secs"] += frac * dur * w_time
+            d["plays"] += w_time
+            if dur > 3 and frac < 0.15:
+                d["skip"] += w_time
     out = {}
     for p, d in lab.items():
         if d["dislike"]:
@@ -76,6 +80,10 @@ def item_labels(con, recent_hours=None):
         elif p in fav:
             continue
         else:
+            if d["plays"] >= 3 or d["secs"] >= 12:
+                d["pos"] += 0.5
+            elif d["plays"] and d["skip"] >= d["plays"] - 1e-9:
+                d["neg"] += 0.5
             net = d["pos"] - d["neg"]
             if abs(net) > 0.05:
                 out[p] = (1 if net > 0 else 0, min(1.0, abs(net)))
@@ -240,23 +248,27 @@ def fit(recent_hours=None, verbose=False):
 
 
 def report(res, labels, lp, emb, fz, meta):
+    """Honest check: hide a fifth of the samples you've rated or played, fit on the rest, and ask whether your
+    hidden favourites outrank the hidden ones you heard but didn't star. (Scoring the training labels themselves
+    would mostly measure "short clips get played to the end".)"""
     print(f"labels: {res['n_labels']} ({res['n_pos']} positive)")
-    if res["n_labels"] < 30:
-        print("held-out evaluation needs ~30+ rated items; keep starring / dismissing.")
+    fav = {r["path"] for r in _db().execute("SELECT path FROM favorites")}
+    if len([p for p in lp if p in fav]) < 15:
+        print("held-out evaluation needs ~15+ favourites; keep starring.")
         return
-    def roc_auc_score(y, p):
-        from scipy.stats import rankdata
-        r = rankdata(p); n1 = y.sum(); n0 = len(y) - n1
-        return (r[y == 1].sum() - n1 * (n1 + 1) / 2) / max(1, n1 * n0)
+    from scipy.stats import rankdata
     X = np.stack([fz(emb[p], meta[p]) for p in lp])
-    y = np.array([labels[p][0] for p in lp])
-    w = np.array([labels[p][1] for p in lp])
-    pred = np.zeros(len(lp))
+    y = np.array([labels[p][0] for p in lp]); w = np.array([labels[p][1] for p in lp])
+    star = np.array([p in fav for p in lp])
+    aucs = []
     for f in range(5):
         te = np.arange(len(lp)) % 5 == f
         b, c = fit_blr(X[~te], y[~te], w[~te])
-        pred[te] = predict(X[te], b, c)[0]
-    print(f"5-fold AUC of the sound-taste model: {roc_auc_score(y, pred):.2f} (0.5 = guessing)")
+        s = predict(X[te], b, c)[0]
+        r = rankdata(s); t = star[te]; n1 = t.sum(); n0 = len(t) - n1
+        if n1 and n0:
+            aucs.append((r[t].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
+    print(f"held-out AUC (favourites vs heard-but-not-starred): {np.mean(aucs):.2f} (0.5 = guessing)")
 
 
 # ---------------------------------------------------------------- technique taste

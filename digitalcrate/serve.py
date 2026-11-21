@@ -129,6 +129,17 @@ def bounce(req):
     return row
 
 
+
+def _with_partners(row):
+    """Attach fresh 'goes well with' picks to a newly saved sample. If scoring fails, the browser
+    falls back to the source clip's picks, so the save itself still succeeds."""
+    try:
+        from .build import partners_for
+        row["partners"] = partners_for(row["id"])
+    except Exception as e:
+        print("partners for new sample failed:", e)
+    return row
+
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -171,6 +182,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path.split("?")[0] in ("/pairtest", "/drumlabel"):
+            return self._file(Path(__file__).resolve().parent / "static" / (self.path.split("?")[0][1:] + ".html"),
+                              "text/html", {"Cache-Control": "no-store"})
         if self.path.split("?")[0] == "/shootout":
             return self._file(Path(__file__).resolve().parent / "static" / "shootout.html", "text/html",
                               {"Cache-Control": "no-store"})
@@ -223,6 +237,17 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/shootout":
                 from .shootout import manifest, votes, results
                 return self._json(dict(manifest(q.get("round")), votes=votes(), results=results()))
+            if u.path == "/api/pairtest":
+                from .listening import pair_manifest, _db as listen_db
+                m = pair_manifest([g for g in q.get("excl", "").split("|") if g], new=q.get("new") == "1")
+                v = {r["trial"]: r["rating"] for r in listen_db().execute("SELECT * FROM pair_votes")}
+                return self._json(dict(m, votes=v))
+            if u.path == "/api/pairtest/results":
+                from .listening import pair_results
+                return self._json(pair_results())
+            if u.path == "/api/drumlabel":
+                from .listening import drum_manifest, drum_labels
+                return self._json(dict(drum_manifest(new=q.get("new") == "1"), labels=drum_labels()))
             if u.path == "/api/sketches":
                 return self._json([dict(r) for r in _sketch_db().execute("SELECT * FROM sketches ORDER BY updated_at DESC")])
         except Exception as e:
@@ -252,7 +277,7 @@ class Handler(SimpleHTTPRequestHandler):
                 row = save(path, req.get("params", {}), req.get("name") or None)
                 log_event(row["path"], "star", 1, row["id"])  # you made it: counts as a like
                 set_fav(row["path"], True, row["id"], f"edit of {req.get('label', path)}")
-                return self._json({"row": row})
+                return self._json({"row": _with_partners(row)})
             elif self.path == "/api/recat":
                 from .recat import recategorise
                 res = recategorise(req["id"], req["category"], req["subtype"])
@@ -270,13 +295,25 @@ class Handler(SimpleHTTPRequestHandler):
                 from .link import set_tempo
                 set_tempo(req["bpm"])
             elif self.path == "/api/bounce":
-                return self._json({"row": bounce(req)})
+                return self._json({"row": _with_partners(bounce(req))})
             elif self.path == "/api/sketch/save":
                 con = _sketch_db()
                 con.execute("""INSERT INTO sketches(name, state, updated_at) VALUES (?,?,CURRENT_TIMESTAMP)
                                ON CONFLICT(name) DO UPDATE SET state=excluded.state, updated_at=CURRENT_TIMESTAMP""",
                             (req["name"], json.dumps(req["state"])))
                 con.commit()
+            elif self.path == "/api/pair/save":
+                from .combos import save_pair
+                return self._json(save_pair(unquote(req["src"]), unquote(req["partner"]), req.get("name") or None))
+            elif self.path == "/api/stems":
+                from .combos import write_stems
+                return self._json(write_stems(req["name"], req["stems"], req.get("key"), req.get("bpm")))
+            elif self.path == "/api/pairtest/vote":
+                from .listening import pair_vote
+                return self._json({"ok": pair_vote(req["trial"], req.get("rating"))})
+            elif self.path == "/api/drumlabel/vote":
+                from .listening import drum_vote
+                return self._json({"ok": drum_vote(req["id"], req.get("pieces"))})
             elif self.path == "/api/shootout/vote":
                 from .shootout import vote
                 return self._json({"ok": vote(req["clip"], req.get("rating"))})
