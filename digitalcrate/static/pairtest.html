@@ -50,9 +50,9 @@ async function rate(trial,s,r){const v=V[trial]==s?0:s;await fetch('/api/pairtes
 function prog(){let n=0,d=0;M.trials.forEach(t=>t.items.forEach(it=>{n++;if(V[it.trial])d++}));document.getElementById('prog').textContent=`${d} / ${n} rated`}
 async function results(){const r=await (await fetch('/api/pairtest/results')).json(),o=document.getElementById('out');
   if(!r.methods||!Object.keys(r.methods).length){o.innerHTML='<div class="item">No ratings yet.</div>';return}
-  const name={clap:'current (sound similarity)',learned:'new (learned from your arrangements)'};
+  const name={clap:'current (sound similarity)',learned:'learned from your arrangements',blend:'new: blend of sound + arrangement'};
   o.innerHTML=`<div class="item"><h2>Results so far</h2><table><tr><th>model</th><th>mean rating</th><th>95% range</th><th>ratings</th></tr>${Object.entries(r.methods).map(([k,v])=>`<tr><td>${name[k]||k}</td><td>${v.mean}</td><td>${v.ci[0]} – ${v.ci[1]}</td><td>${v.n}</td></tr>`).join('')}</table>
-  <div class="sub" style="margin-top:8px">per sample, whose picks you rated higher: new ${r.wins.learned} · current ${r.wins.clap} · tie ${r.wins.tie}</div></div>`}
+  <div class="sub" style="margin-top:8px">round ${r.round} · per sample, whose picks you rated higher: new ${r.wins.new} · current ${r.wins.current} · tie ${r.wins.tie}</div></div>`}
 document.getElementById('stop').onclick=stop;
 document.getElementById('reveal').onclick=e=>{REVEAL=!REVEAL;e.target.textContent=REVEAL?'hide picks':'reveal picks';render()};
 document.getElementById('res').onclick=results;

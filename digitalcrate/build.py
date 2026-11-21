@@ -35,10 +35,14 @@ for (a, b), v in _R.items():
     ROLE[CATS.index(a), CATS.index(b)] = ROLE[CATS.index(b), CATS.index(a)] = v
 
 KEY_NEUTRAL = 0.75
-# "learned": vibe from the arrangement model in pairing.py, plus variety across categories and artists.
-# "clap": the original plain sound similarity (kept for comparison; set DIGITALCRATE_PAIRING=clap).
-PAIRING = __import__("os").environ.get("DIGITALCRATE_PAIRING", "learned")
-TOPK = 30
+# "clap": plain sound similarity (default: it won blind round 1 against "learned", 3.86 vs 3.70, 126 ratings).
+# "learned": the arrangement model in pairing.py with forced variety across categories/artists (lost round 1:
+#   your ratings favour same-artist pairs, which the variety rules pushed out).
+# "blend": 40% sound similarity + 60% arrangement score, no variety rules (best fit to round 1; on trial in round 2).
+# The arrangement model is trained on every build either way, so the pair test can compare.
+PAIRING = __import__("os").environ.get("DIGITALCRATE_PAIRING", "clap")
+TOPK = 24        # best partners overall
+PER_CAT = 4      # at least this many from each category (when any fit at all)
 
 
 def load(con, reference=False):
@@ -60,7 +64,7 @@ def load(con, reference=False):
     d["quality"] = np.array([r["quality"] for r in rows])
     d["artist"] = np.array([(r["artist"] or "").lower() for r in rows])
     d["Fa"] = d["Gb"] = None
-    if n and PAIRING == "learned":
+    if n:
         from .pairing import vectors
         v = vectors(d["emb"], d["cat"])
         if v is not None:
@@ -79,7 +83,7 @@ def camelot_score(num_a, minor_a, num_b, minor_b):
 
 def compat_block(d, idx, cols=None, mode=None):
     """Compatibility of samples idx (rows) vs cols (default: all). Returns dict of component matrices."""
-    mode = mode or ("learned" if d.get("Fa") is not None else "clap")
+    mode = mode or (PAIRING if d.get("Fa") is not None else "clap")
     cols = np.arange(d["n"]) if cols is None else cols
     i, j = idx[:, None], cols[None, :]
     cam = camelot_score(d["num"][i], d["minor"][i], d["num"][j], d["minor"][j])
@@ -97,12 +101,16 @@ def compat_block(d, idx, cols=None, mode=None):
     r = np.minimum.reduce([r, np.abs(r - 1), np.abs(r + 1)])
     tempo = np.where(both, np.clip(1 - (r - 0.02) / 0.2, 0.4, 1.0), 1.0)
     role = ROLE[d["cat"][i], d["cat"][j]]
-    if mode == "learned":
+    if mode in ("learned", "blend"):
         # arrangement fit, scaled per row: median candidate -> 0, the row's top 1% -> 1
         v = d["Fa"][idx] @ d["Gb"][cols].T
         lo, hi = np.percentile(v, [50, 99], axis=1, keepdims=True)
         vibe = np.clip((v - lo) / (hi - lo + 1e-9), 0, 1)
-        score = harm * tempo * (0.35 * role + 0.65 * vibe)
+        if mode == "blend":
+            vibe = 0.6 * vibe + 0.4 * np.clip((d["emb"][idx] @ d["emb"][cols].T - 0.25) / 0.55, 0, 1)
+            score = harm * tempo * (0.4 * role + 0.6 * vibe)
+        else:
+            score = harm * tempo * (0.35 * role + 0.65 * vibe)
     else:
         vibe = np.clip((d["emb"][idx] @ d["emb"][cols].T - 0.25) / 0.55, 0, 1)
         score = harm * tempo * (0.4 * role + 0.6 * vibe)
@@ -128,17 +136,31 @@ def _picks(d, gi, comp, sc, row_i):
     if comp.get("mode") == "learned":
         return _picks_varied(d, gi, comp, sc, row_i)
     order = np.argsort(-sc[row_i])
-    picks, same_track = [], 0
+    picks, same_track, chosen = [], 0, set()
+    per_cat = {}
+
+    def take(j):
+        picks.append([int(j), round(float(sc[row_i, j]), 3),
+                      round(float(comp["harm"][row_i, j]), 2), round(float(comp["vibe"][row_i, j]), 2)])
+        chosen.add(int(j))
+        per_cat[d["cat"][j]] = per_cat.get(d["cat"][j], 0) + 1
+    # the best overall, whatever their category or artist (your ratings favour those)...
     for j in order:
         if d["track"][j] == d["track"][gi]:
             if same_track >= 3:
                 continue
             same_track += 1
-        picks.append([int(j), round(float(sc[row_i, j]), 3),
-                      round(float(comp["harm"][row_i, j]), 2), round(float(comp["vibe"][row_i, j]), 2)])
+        take(j)
         if len(picks) >= TOPK:
             break
-    return picks
+    # ...plus the best few of every other category, so the list always has something different to offer.
+    # The browser spreads categories out when it shows them and has chips to view one category at a time.
+    for j in order[: 3000]:
+        c = d["cat"][j]
+        if int(j) in chosen or per_cat.get(c, 0) >= PER_CAT or d["track"][j] == d["track"][gi]:
+            continue
+        take(j)
+    return sorted(picks, key=lambda p: -p[1])
 
 
 def _picks_varied(d, gi, comp, sc, row_i):
@@ -297,7 +319,7 @@ def build(n_kits=60):
         d["ref_sim"] = sims.max(1)
         d["ref_match"] = [names[j] for j in sims.argmax(1)]
         print(f"reference set: {len(names)} sounds")
-    if PAIRING == "learned":
+    if True:  # train the arrangement model every build (used by "learned"/"blend" and the pair test)
         from .pairing import train, vectors
         ok = np.array([r["source"] != "edit" and not r["parent_id"] for r in d["rows"]])
         st = train(d["emb"], d["cat"], d["track"], ok)

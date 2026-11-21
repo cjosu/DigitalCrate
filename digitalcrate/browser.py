@@ -516,6 +516,16 @@ $('list').addEventListener('click',async e=>{const stb=e.target.closest('[data-s
  if(t.dataset.play!=null){toggle(+t.dataset.play,t);return}
  select(+t.dataset.i,'list')});
 let HIST=[];
+// Goes-well-with: the best partners overall plus the best few of each category. "All" spreads categories out
+// (each repeat of a category is discounted 15% for ordering only); a chip shows one category, best first.
+function goPool(i){return (P[i]||[]).filter(([j])=>!st.excl.has(S[j][F.genre]))}
+function goList(i){const pool=goPool(i);if(st.gcat){const f=pool.filter(([j])=>S[j][F.cat]===st.gcat);if(f.length)return f}
+ const left=pool.slice(),out=[],n={};while(left.length&&out.length<30){let bk=0,bv=-1;
+  left.forEach((p,k)=>{const v=p[1]*Math.pow(0.85,n[S[p[0]][F.cat]]||0);if(v>bv){bv=v;bk=k}});const p=left.splice(bk,1)[0];n[S[p[0]][F.cat]]=(n[S[p[0]][F.cat]]||0)+1;out.push(p)}
+ return out}
+function goChips(i){const cnt={};goPool(i).forEach(([j])=>{const c=S[j][F.cat];cnt[c]=(cnt[c]||0)+1});const cs=CATS.filter(c=>cnt[c]);if(cs.length<2)return'';
+ const cur=st.gcat&&cnt[st.gcat]?st.gcat:'';
+ return `<div class="chips" style="margin:6px 0 8px"><button data-gcat="" class="${cur?'':'on'}">All</button>${cs.map(c=>`<button data-gcat="${esc(c)}" class="${cur===c?'on':''}" title="${esc(c)}"><span class="badge" style="background:${col(c)};margin-right:4px">${AB[c]}</span>${cnt[c]}</button>`).join('')}</div>`}
 function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==i)HIST.push({i:st.sel,scroll:$('detail').scrollTop});else if(from==='list')HIST=[];
  st.sel=i;vcur=0;document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',+r.dataset.i===i));const s=S[i];
  const back=HIST.length?`<div style="margin-bottom:10px"><button id="back">← back to ${esc(S[HIST[HIST.length-1].i][F.artist])} — ${esc(S[HIST[HIST.length-1].i][F.title])}</button> <span class="sub">${HIST.length>1?HIST.length+' steps · ':''}Backspace</span></div>`:'';
@@ -544,7 +554,7 @@ function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==
  <div style="min-width:0"><div class="name"><span class="badge" style="background:${col(t[F.cat])}">${AB[t[F.cat]]}</span>${Math.floor(t[F.start]/60)}:${String(t[F.start]%60).padStart(2,'0')} · ${esc(t[F.sub])} · ${t[F.dur]}s${t[F.note]?' · '+t[F.note]:''}</div>
  <div class="meta">${t[F.cam]||'—'} ${esc(t[F.key])}${t[F.tags].length?' · '+t[F.tags].map(esc).join(', '):''}</div></div>
  <div style="display:flex;gap:6px;align-items:center">${star(t[F.path],t[F.id],lbl(j))}${nope(t[F.path],t[F.id])}${xp(t[F.path])}<button data-pair="${j}" title="play together">⧉</button><button data-go="${j}" title="open">→</button></div></div>`}).join('')
- :P[i].filter(([j])=>!st.excl.has(S[j][F.genre])).map(([j,sc,h,v])=>{const t=S[j];return`<div class="prow"><button class="play" data-play="${j}">▶</button>
+ :goChips(i)+goList(i).map(([j,sc,h,v])=>{const t=S[j];return`<div class="prow"><button class="play" data-play="${j}">▶</button>
  <div style="min-width:0"><div class="name"><span class="badge" style="background:${col(t[F.cat])}">${AB[t[F.cat]]}</span>${t[F.cam]||'—'} ${esc(t[F.key])} · ${t[F.bpm]?t[F.bpm]:'free'} · ${t[F.dur]}s</div>
  <div class="meta">${esc(t[F.artist])} — ${esc(t[F.title])}</div></div>
  <div style="display:flex;gap:6px;align-items:center"><span class="score" title="harmony ${h} · vibe ${v}">${Math.round(sc*100)}</span>${star(t[F.path],t[F.id],lbl(j))}${nope(t[F.path],t[F.id])}${xp(t[F.path])}<button data-pair="${j}" title="play together">⧉</button><button data-go="${j}" title="open">→</button></div></div>`}).join('')}`;mark()}
@@ -575,6 +585,7 @@ $('detail').addEventListener('click',e=>{if(e.target.id==='back'){goBack();retur
  if(e.target.id==='rsave'){recat(st.sel);return}
  if(e.target.id==='edopen'){openEditor(st.sel);return}
  const g2=e.target.closest('[data-go2]');if(g2){e.preventDefault();select(+g2.dataset.go2,'go');return}
+ const gc=e.target.closest('[data-gcat]');if(gc){st.gcat=gc.dataset.gcat;const sc=$('detail').scrollTop;select(st.sel,'back');$('detail').scrollTop=sc;return}
  const rb=e.target.closest('[data-rel]');if(rb){st.rel=rb.dataset.rel;const sc=$('detail').scrollTop;select(st.sel,'back');$('detail').scrollTop=sc;return}
  const vb=e.target.closest('[data-vk]');if(vb){const k=+vb.dataset.vk;
  if(players.has('v'+k)){stopAll();vb.classList.remove('playing')}else playVar(k);return}
