@@ -232,7 +232,9 @@ dock.insertAdjacentHTML('beforeend','<div class="sk" id="sk" hidden></div>');doc
 $('skbtn').onclick=()=>{SK.open=!SK.open;drawSK();drawProj()};
 const barLen=()=>240/(PROJ.bpm||120);
 // a non-loop lane repeats every N bars: the shortest of 1/2/4/8/16 that fits the whole clip (so it never piles up on itself)
-const skEvery=dur=>[1,2,4,8,16].find(n=>n*barLen()>=0.85*dur)||16;  // covers most of the clip; the tail fades into the next pass
+// repeat on the clip's own length in whole bars, so it comes back as it ends (powers of two left every lane
+// silent together for bars at a time); a slightly longer clip's tail crossfades into the next pass
+const skEvery=dur=>Math.max(1,Math.min(16,Math.round(dur/barLen())));
 async function skAdd(i){if(!SERVED){toast('the sketchpad needs the local server');return}if(SK.lanes.length>=8){toast('the sketchpad holds 8 lanes');return}
  if(SK.lanes.some(l=>l.path===S[i][F.path])){toast('already in the sketch');return}
  const patch={};if(!PROJ.key&&S[i][F.cam])patch.key=keyFromCam(S[i][F.cam]);if(!PROJ.bpm)patch.bpm=S[i][F.bpm]||120;if(Object.keys(patch).length){Object.assign(PROJ,patch);try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
@@ -262,14 +264,14 @@ async function skReload(){if(!SK.lanes.length)return;const seq=++reloadSeq,was=S
 function skGains(){const solo=SK.lanes.some(l=>l.solo);SK.lanes.forEach(l=>{if(l.g)l.g.gain.setTargetAtTime(l.mute||(solo&&!l.solo)?0:laneGain(l),AC.currentTime,0.02)})}
 // a lane can be trimmed to part of its clip: trim = [from, to] as fractions of the (conformed) clip
 const skRegion=l=>{const d=l.buf.duration,[a,b]=l.trim||[0,1];return [a*d,Math.max(0.01,(b-a)*d)]};
-function skVoice(ctx,dest,l,t,dur,arr){const s=ctx.createBufferSource();s.buffer=l.buf;const g=ctx.createGain();s.connect(g);g.connect(dest);
+function skVoice(ctx,dest,l,t,dur,arr,xf=0){const s=ctx.createBufferSource();s.buffer=l.buf;const g=ctx.createGain();s.connect(g);g.connect(dest);
  let off=skRegion(l)[0];const lead=l.every===0||!skPulse(l)?0:skAttack(l);t+=l.nudge||0;
  if(lead>0){if(t-lead>=ctx.currentTime+0.005)t-=lead;else{off+=lead;dur=Math.max(0.01,dur-lead)}}
- const fi=Math.min(Math.max(0.004,(l.fin||0)/1000),dur/2),fo=Math.min(Math.max(0.004,(l.fout||0)/1000),dur/2);
+ const fi=Math.min(Math.max(0.004,(l.fin||0)/1000),dur/2),fo=Math.min(Math.max(0.004,xf,(l.fout||0)/1000),dur/2);
  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+fi);g.gain.setValueAtTime(1,Math.max(t+fi,t+dur-fo));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,off,dur);
  if(ctx===AC){(l.on||(l.on=[])).push({t0:t,off,dur});if(l.on.length>8)l.on.shift()}  /* remembered for the playhead */if(arr){arr.push(s);s.onended=()=>{const k=arr.indexOf(s);if(k>=0)arr.splice(k,1)}}}
 function skBar(ctx,dest,l,bar,t,L,arr){if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
- else{if(bar%l.every)return;skVoice(ctx,dest,l,t+l.offset*L/4,Math.min(R,l.every*L),arr)}}  // a pass ends where the next begins
+ else{if(bar%l.every)return;const cut=R>l.every*L;skVoice(ctx,dest,l,t+l.offset*L/4,cut?l.every*L+0.15:R,arr,cut?0.15:0)}}  // a longer clip fades out under the next pass
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
  stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)
 SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
@@ -345,7 +347,7 @@ function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
   <div class="lwave">${fit?`<button class="tbtn realign fitb" data-skfit="${k}" title="the clip has a steady pulse of about ${pu.bpm} bpm: stretch it onto ${PROJ.bpm} bpm so every attack stays on the grid">⟷ match tempo</button>`:''}${l.src?`<button class="tbtn realign fitb" data-skunfit="${k}" title="back to the clip's own tempo">⟷ undo match</button>`:''}${l.trim||l.nudge?`<button class="tbtn realign" data-skalign="${k}" title="put the first strong attack of the selection on the beat (clears any nudge)">↺ re-align</button>`:''}${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
   <div class="fader" title="volume relative to the other lanes (all start equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
   <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn${l.more?' on':''}" data-skmore="${k}" title="timing, key, fades, open, remove">⋯</button>
-  ${l.more?`<div class="lmore">${loop?'<span class="sub">loop: locked to the bar</span>':`<label class="sub">repeat <select data-ske="${k}">${[1,2,4,8,16].map(n=>`<option value="${n}" ${l.every===n?'selected':''}>every ${n} bar${n>1?'s':''}</option>`).join('')}</select></label>
+  ${l.more?`<div class="lmore">${loop?'<span class="sub">loop: locked to the bar</span>':`<label class="sub">repeat <select data-ske="${k}">${Array.from({length:16},(_,j)=>j+1).map(n=>`<option value="${n}" ${l.every===n?'selected':''}>every ${n} bar${n>1?'s':''}</option>`).join('')}</select></label>
    <label class="sub">start <select data-sko="${k}">${Array.from({length:32},(_,b)=>b/2).map(b=>`<option value="${b}" ${l.offset===b?'selected':''}>+${b} beat${b===1?'':'s'}</option>`).join('')}</select></label>`}
    ${s[F.cat]!=='Percussion'&&s[F.cam]?`<button class="tbtn${l.nat?' on':''}" data-sknat="${k}" title="keep this lane's own key instead of moving it to the project key">orig key (${s[F.cam]})</button>`:''}
    <span class="sub" title="slide this lane in time (or ⌥-drag its waveform)">nudge <button class="tbtn" data-sknudge="${k}" data-d="-1">◀</button><output>${Math.round((l.nudge||0)*1000)} ms</output><button class="tbtn" data-sknudge="${k}" data-d="1">▶</button></span>
