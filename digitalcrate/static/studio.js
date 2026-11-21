@@ -439,7 +439,7 @@ document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kit
 
 // ================= detail panel: ＋ sketch · pads · MIDI · project info =================
 const _select=select;
-select=function(i,from){_select(i,from);augment(i)};
+select=function(i,from){if(CH.play&&CH.i!==i)chStop();_select(i,from);augment(i)};
 function augment(i){const eo=$('edopen');if(!eo)return;eo.parentNode.style.flexWrap='wrap';
  eo.insertAdjacentHTML('afterend',` <button data-sk="${i}" title="add to the sketchpad">＋ sketch</button><button id="padsopen" title="play its syllables / notes from the keyboard, record a pattern">🎹 pads</button>${S[i][F.cat]!=='Percussion'&&S[i][F.cam]?'<button id="midiopen" title="notes & chords → MIDI">♪ MIDI</button>':''}${S[i][F.cat]!=='Percussion'&&!String(S[i][F.path]).startsWith('_Reference')?'<button id="chordsopen" title="chord progressions that suit this sample, played on a synth pad">🎼 chords</button>':''}`);
  eo.parentNode.insertAdjacentHTML('afterend','<div class="sub" id="pjinfo" style="margin:-4px 0 8px"></div>');
@@ -488,6 +488,8 @@ function drawChords(){const r=CH.res,box=$('chordbox');if(!r)return;
  $('chlvl').oninput=e=>{CH.lvl=+e.target.value;if(CH.play)CH.play.pg.gain.value=CH.lvl};$('chstop').onclick=chStop}
 function chStop(){if(!CH.play)return;const p=CH.play;CH.play=null;clearTimeout(p.timer);const now=AC.currentTime;p.master.gain.setTargetAtTime(0,now,0.05);setTimeout(()=>{try{p.master.disconnect()}catch(e){}},400);
  try{p.src.stop(now+0.2)}catch(e){}document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.remove('playing'))}
+// anything else starting to play (a sample, play-together, a variation, the sketch, the stop button) stops the chords too
+const _stopAllChords=stopAll;stopAll=function(){_stopAllChords.apply(this,arguments);chStop()};
 async function chPlay(k){chStop();stopAll();skStop();AC.resume();const r=CH.res,o=r.options[k],s=S[CH.i];
  const buf=await AC.decodeAudioData(await (await fetch(url(s[F.path]))).arrayBuffer());
  const L=o.chords.length*r.step,master=AC.createGain();master.connect(AC.destination);const pg=AC.createGain();pg.gain.value=CH.lvl;const rv=padReverb(AC),wet=AC.createGain();wet.gain.value=0.35;
