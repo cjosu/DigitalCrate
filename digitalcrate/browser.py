@@ -103,12 +103,16 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 .toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-size:12px;z-index:20}
 .xp{border:0;padding:2px 4px;font-size:13px;color:#4a515c}.xp:hover{color:var(--acc)}.xp.done{color:var(--acc)}
 .hint{font-size:11px;color:var(--mute);margin-top:6px}
+.cattabs{display:flex;flex-wrap:wrap;gap:0;flex-basis:100%;border-bottom:1px solid var(--line);margin:4px -16px -12px;padding:0 16px}
+.cattabs button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 6px 7px;font-size:12.5px;white-space:nowrap;color:var(--mute)}
+.cattabs button:hover{color:var(--ink)}.cattabs button.on{background:none;color:var(--ink);border-bottom-color:var(--c,var(--ink))}
+.cattabs button .n{font-size:11px;opacity:.6;margin-left:4px;font-variant-numeric:tabular-nums}
+.cattabs button i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--c);margin-right:5px;vertical-align:1px}
+.subrow{flex-basis:100%;margin-top:12px}
 </style></head><body>
 <div class="app">
 <aside>
   <h1>DigitalCrate</h1><div class="sub" id="count"></div>
-  <h2>Category</h2><div class="chips" id="cats"></div>
-  <div id="subsBox" hidden><h2>Subtype</h2><div class="chips" id="subs"></div></div>
   <h2>Key <span class="sub" id="keylbl"></span></h2>
   <svg class="wheel" id="wheel" viewBox="-110 -110 220 220" width="220" height="220"></svg>
   <div class="chips" style="margin-top:6px"><button id="nbr" class="on" title="include Camelot neighbours">+ neighbours</button><button id="clrkey">clear</button></div>
@@ -124,7 +128,8 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
   <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabK">Kits</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button></div>
     <input type="search" id="search" placeholder="search artist, title, mood, instrument, id…">
     <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select>
-    <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button></div>
+    <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button>
+    <div class="cattabs" id="cats" title="⌘/ctrl-click to pick several"></div><div id="subsBox" class="chips subrow" hidden></div></div>
   <div id="tbanner" class="prov" style="margin:8px 16px" hidden></div>
   <div id="list"></div>
   <div class="np" id="np" hidden></div>
@@ -393,14 +398,23 @@ const CATS=[...new Set(S.map(s=>s[F.cat]))], KINDS=['loop','phrase','free','ones
 const MOODS=[...new Set(S.flatMap(s=>s[F.tags]))].sort();
 function chips(el,items,set,label=x=>x){el.innerHTML=items.map(x=>`<button data-v="${esc(x)}">${esc(label(x))}</button>`).join('');
  el.onclick=e=>{const v=e.target.dataset.v;if(v==null)return;set.has(v)?set.delete(v):set.add(v);e.target.classList.toggle('on');st.shown=200;render()}}
-chips($('cats'),CATS,st.cats,c=>`${c} (${S.filter(s=>s[F.cat]===c).length})`);
+const CATORD=Object.keys(AB);CATS.sort((a,b)=>(CATORD.indexOf(a)+99*(CATORD.indexOf(a)<0))-(CATORD.indexOf(b)+99*(CATORD.indexOf(b)<0)));
+const SHORT={'Vocal Atmospheres':'Vocal Atmos','Pads & Atmospheres':'Pads','Chords & Keys':'Keys','Melodies & Leads':'Leads','Textures & Field':'Textures','Bass & Sub':'Bass','Percussion':'Drums'};
+function drawCats(){const el=$('cats');const show=st.tab==='S'||st.tab==='G';el.hidden=!show;$('subsBox').hidden=!show||!st.cats.size;if(!show)return;
+ // counts follow every other filter, so each tab says how many you'd get by switching to it
+ const sc=st.cats,ss=st.subs;st.cats=new Set();st.subs=new Set();let base;try{base=filtered()}finally{st.cats=sc;st.subs=ss}
+ const cnt={};base.forEach(i=>{const c=S[i][F.cat];cnt[c]=(cnt[c]||0)+1});
+ const tab=(v,lbl,n,on,c)=>`<button data-v="${esc(v)}" title="${esc(v||'every category')}" class="${on?'on':''}" style="${c?`--c:var(--${c})`:''}">${c?'<i></i>':''}${esc(lbl)}<span class="n">${n.toLocaleString()}</span></button>`;
+ el.innerHTML=tab('','All',base.length,!st.cats.size)+CATS.filter(c=>cnt[c]||st.cats.has(c)).map(c=>tab(c,SHORT[c]||c,cnt[c]||0,st.cats.has(c),AB[c])).join('');drawSubs()}
+$('cats').onclick=e=>{const b=e.target.closest('button');if(!b)return;const v=b.dataset.v;
+ if(!v)st.cats.clear();else if(e.metaKey||e.ctrlKey){st.cats.has(v)?st.cats.delete(v):st.cats.add(v)}else{const only=st.cats.size===1&&st.cats.has(v);st.cats.clear();if(!only)st.cats.add(v)}
+ st.subs.clear();st.shown=200;render();$('list').scrollTop=0;document.querySelector('main').scrollTop=0};
 chips($('kinds'),KINDS,st.kinds);
-function drawSubs(){const box=$('subsBox');if(!st.cats.size){box.hidden=true;st.subs.clear();return}box.hidden=false;
+function drawSubs(){const box=$('subsBox');if(!st.cats.size){box.hidden=true;st.subs.clear();return}
  const cnt={};S.forEach(s=>{if(st.cats.has(s[F.cat]))cnt[s[F.sub]]=(cnt[s[F.sub]]||0)+1});
  [...st.subs].forEach(x=>{if(!cnt[x])st.subs.delete(x)});
- $('subs').innerHTML=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(x=>`<button data-v="${esc(x)}" class="${st.subs.has(x)?'on':''}">${esc(x)} (${cnt[x]})</button>`).join('')}
-$('subs').onclick=e=>{const v=e.target.dataset.v;if(v==null)return;st.subs.has(v)?st.subs.delete(v):st.subs.add(v);e.target.classList.toggle('on');st.shown=200;render()};
-$('cats').addEventListener('click',()=>setTimeout(()=>{drawSubs();render()},0));
+ box.innerHTML=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).map(x=>`<button data-v="${esc(x)}" class="${st.subs.has(x)?'on':''}">${esc(x)} (${cnt[x]})</button>`).join('')}
+$('subsBox').onclick=e=>{const v=e.target.dataset.v;if(v==null)return;st.subs.has(v)?st.subs.delete(v):st.subs.add(v);e.target.classList.toggle('on');st.shown=200;render()};
 const GENRES=[...new Set(S.map(s=>s[F.genre]))].sort((a,b)=>S.filter(s=>s[F.genre]===b).length-S.filter(s=>s[F.genre]===a).length);
 chips($('genres'),GENRES,st.genres,g=>`${g} (${S.filter(s=>s[F.genre]===g).length})`);
 st.excl=new Set((()=>{try{const v=localStorage.getItem('atlasExcl');return v?JSON.parse(v):['Electronic']}catch(e){return['Electronic']}})());
@@ -457,7 +471,7 @@ const BYID=new Map(S.map((s,i)=>[s[F.id],i]));
 const BYTRACK=new Map();S.forEach((s,i)=>{if(!BYTRACK.has(s[F.tid]))BYTRACK.set(s[F.tid],[]);BYTRACK.get(s[F.tid]).push(i)});
 BYTRACK.forEach(l=>l.sort((a,b)=>S[a][F.start]-S[b][F.start]||S[b][F.dur]-S[a][F.dur]));
 const byPath=new Map(S.map((s,i)=>[s[F.path],i]));
-function render(){paintWheel();const L=$('list');$('refresh').hidden=true;drawBanner();
+function render(){paintWheel();drawCats();const L=$('list');$('refresh').hidden=true;drawBanner();
  if(st.tab==='R'){const cnt={};S.forEach(s=>cnt[s[F.tid]]=(cnt[s[F.tid]]||0)+1);
   const tr=Object.entries(D.tracks).filter(([t])=>cnt[t]).sort((a,b)=>b[1][0]-a[1][0]).slice(0,60);
   $('count').textContent='recently processed sources';

@@ -100,7 +100,7 @@ function setTab(k){st.tab=k;document.querySelectorAll('.tabs button').forEach(b=
 Object.entries(MYTABS).forEach(([k,id])=>$(id).onclick=()=>setTab(k));
 Object.values(tabs).forEach(id=>$(id).addEventListener('click',()=>Object.values(MYTABS).forEach(m=>$(m).classList.remove('on'))));
 const _render=render;
-render=function(){drawSBanner();if(st.tab==='C'){paintWheel();drawBanner();return renderCrate()}if(st.tab==='G'){paintWheel();drawBanner();return renderGalaxy()}
+render=function(){drawSBanner();if('CGY'.includes(st.tab)&&typeof drawCats==='function')drawCats();if(st.tab==='C'){paintWheel();drawBanner();return renderCrate()}if(st.tab==='G'){paintWheel();drawBanner();return renderGalaxy()}
  if(st.tab==='Y'){paintWheel();drawBanner();return renderScout()}
  _render();if(st.tab==='K')renderKitExtras();if(st.tab==='S'&&SOUND&&SOUND.at)annotateAt()};
 function annotateAt(){document.querySelectorAll('#list .row[data-i]').forEach(r=>{const p=S[+r.dataset.i][F.path],a=SOUND.at.get(p);const m=r.querySelector('.meta');

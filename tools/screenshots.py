@@ -93,14 +93,13 @@ with sync_playwright() as p:
     page.dispatch_event("#pjbpm", "change")
     if not page.is_checked("#pjon"):
         page.click("#pjon")
-    for cat in ("Pads & Atmospheres", "Chords & Keys"):  # show material that gets conformed
-        page.locator("#cats > *", has_text=cat).first.click()
+    page.locator('#cats [data-v="Pads & Atmospheres"]').click()  # show material that gets conformed
+    page.locator('#cats [data-v="Chords & Keys"]').click(modifiers=["Meta"])
     page.wait_for_timeout(800)
     sel(page, MEL)
     page.wait_for_timeout(1500)
     shot(page, "04-project-mode")
-    for cat in ("Pads & Atmospheres", "Chords & Keys"):
-        page.locator("#cats > *", has_text=cat).first.click()
+    page.locator('#cats [data-v=""]').click()
     page.wait_for_timeout(500)
 
     # 5. sketchpad
