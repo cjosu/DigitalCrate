@@ -98,6 +98,17 @@ def _profiles(rel, step, n_steps, notes):
     return P, mid
 
 
+GEN_ROMAN = ["I", "bII", "II", "bIII", "III", "IV", "bV", "V", "bVI", "VI", "bVII", "VII"]
+
+
+def _roman(root, q, tonic):
+    r = GEN_ROMAN[(root - tonic) % 12]
+    minorish = (q.startswith("m") and not q.startswith("maj")) or q == "dim"
+    if minorish:
+        r = r.replace("I", "i").replace("V", "v")
+    return r + SUFFIX.get(q, q)
+
+
 def _spell(pc, tonic, mode):
     return (NAMES if (mode, tonic) in SHARP_KEYS else FLATS)[pc]
 
@@ -190,6 +201,174 @@ def _voicing(ch, prev, low, high):
     return [bass] + sorted(best)
 
 
+def own_chords(rel, win=0.5):
+    """The sample's own chords: (start, end, root, quality) per change, from CQT chroma in short windows; plus how much
+    of the sounding time carries a confident chord. Gaps take the chord before them."""
+    import librosa
+    from .edit import _load
+    from .midi import CHORDS as MCH, NAMES as MN
+    y = _load(rel).mean(0)
+    sr, hop = C.SR, int(0.1 * C.SR)
+    ch = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop)
+    rms = librosa.feature.rms(y=y, frame_length=2 * hop, hop_length=hop)[0][: ch.shape[1]]
+    T = np.arange(ch.shape[1]) * 0.1
+    a = rms / (rms.max() + 1e-9)
+    segs, active, sure = [], 0, 0
+    for t0 in np.arange(0, T[-1] + 1e-9, win):
+        m = (T >= t0) & (T < t0 + win)
+        if not m.any() or a[m].mean() < 0.05:
+            continue
+        active += 1
+        w = (ch[:, m] * a[m]).sum(1)
+        w = w / (w.sum() + 1e-9)
+        best, bs = None, 0.35
+        for root in range(12):
+            for q, iv in MCH.items():
+                tpl = np.zeros(12); tpl[[(root + i) % 12 for i in iv]] = 1
+                sc = (w * tpl).sum() - 0.6 * (w * (1 - tpl)).sum() - 0.02 * len(iv)
+                if sc > bs:
+                    best, bs = (root, q), sc
+        if best is None:
+            if segs:
+                segs[-1][1] = t0 + win
+            continue
+        sure += 1
+        if segs and segs[-1][2:] == list(best):
+            segs[-1][1] = t0 + win
+        else:
+            segs.append([t0, t0 + win, *best])
+    if segs:
+        segs[0][0] = 0.0
+        for k in range(1, len(segs)):
+            segs[k - 1][1] = segs[k][0]
+        segs[-1][1] = len(y) / sr
+    # very short blips (one window between two equal chords) fold into their neighbours
+    out = []
+    for sg in segs:
+        if out and sg[1] - sg[0] <= win + 1e-6 and out[-1][2:] == sg[2:]:
+            out[-1][1] = sg[1]
+        elif out and sg[1] - sg[0] <= win + 1e-6 and len(out) and segs.index(sg) + 1 < len(segs) and segs[segs.index(sg) + 1][2:] == out[-1][2:]:
+            out[-1][1] = sg[1]
+        else:
+            out.append(list(sg))
+    # back-to-back chords on the same root and of the same kind (Fm9 then Fm7) are one chord: keep the longer label
+    merged = []
+    for sg in out:
+        if merged and merged[-1][2] == sg[2] and _family(merged[-1][3]) == _family(sg[3]):
+            if sg[1] - sg[0] > merged[-1][1] - merged[-1][0]:
+                merged[-1][3] = sg[3]
+            merged[-1][1] = sg[1]
+        else:
+            merged.append(sg)
+    return merged, (sure / active if active else 0.0)
+
+
+FAMILY = {"min": ["m9", "m11", "m7", "madd9", "m"], "maj": ["maj9", "maj7", "add9", ""], "dom": ["9", "13", "7"],
+          "sus": ["sus2", "sus4"], "dim": ["m7b5", "dim"]}
+
+
+def _family(q):
+    if q in ("7",):
+        return "dom"
+    if q.startswith("sus"):
+        return "sus"
+    if q in ("dim", "m7b5"):
+        return "dim"
+    if q.startswith("m") and not q.startswith("maj"):
+        return "min"
+    return "maj"
+
+
+def _follow_vocab(root, q, style, P):
+    """Chords for one of the sample's own chords: the same chord in this style's colours, plus substitutes that share
+    at least three of its notes (relative / mediant chords) — the ones whose tones the sample's sound actually fits."""
+    fam = _family(q)
+    own = {(root + i) % 12 for i in (QUAL.get(q) or QUAL["m" if fam == "min" else ""])}
+    pref = STYLE_QUALS[style]["min" if fam == "min" else "dom" if fam == "dom" else "maj"]
+    same = [dict(root=root, q=qq, own=True) for qq in dict.fromkeys(pref + FAMILY.get(fam, [])) if qq in QUAL][:4]
+    subs = []
+    for r2 in range(12):
+        if r2 == root:
+            continue
+        for f2 in ("min", "maj"):
+            for qq in STYLE_QUALS[style][f2][:2]:
+                t2 = {(r2 + i) % 12 for i in QUAL[qq]}
+                if len(t2 & own) >= 3:
+                    subs.append(dict(root=r2, q=qq, own=False))
+    subs = sorted(subs, key=lambda c: -_fit(c, P))[:6]
+    return same + subs
+
+
+def _suggest_following(row, segs, style, notes, tonic, mode, n_options):
+    """Options for a sample with its own chord changes: chords change where the sample's do."""
+    rel = row["path"]
+    total = float(row["dur"] or segs[-1][1])
+    import librosa
+    from .edit import _load
+    y = _load(rel).mean(0)
+    chroma = librosa.feature.chroma_cqt(y=y, sr=C.SR, hop_length=2048)
+    fr = librosa.frames_to_time(np.arange(chroma.shape[1]), sr=C.SR, hop_length=2048)
+    P = []
+    for a, b, *_ in segs:
+        m = (fr >= a) & (fr < b)
+        c = chroma[:, m].mean(1) if m.any() else np.zeros(12)
+        c = np.where(c > np.percentile(c, 50), c, 0)
+        P.append(c / (c.sum() + 1e-9))
+    V = [_follow_vocab(r, q, style, P[k]) for k, (a, b, r, q) in enumerate(segs)]
+    E = [[_fit(c, P[k]) for c in V[k]] for k in range(len(segs))]
+
+    def common(a, b):
+        return len({(a["root"] + i) % 12 for i in QUAL[a["q"]]} & {(b["root"] + i) % 12 for i in QUAL[b["q"]]})
+
+    def run(only_own=None):
+        beam = [(E[0][j], [j]) for j in range(len(V[0])) if only_own is None or V[0][j]["own"] == only_own]
+        for k in range(1, len(segs)):
+            nb = []
+            for sc, path in beam:
+                for j, c in enumerate(V[k]):
+                    if only_own is not None and c["own"] != only_own:
+                        continue
+                    prev = V[k - 1][path[-1]]
+                    tr = 0.05 * common(prev, c) - (0.15 if (prev["root"], prev["q"]) == (c["root"], c["q"]) else 0)
+                    nb.append((sc + E[k][j] + tr, path + [j]))
+            beam = sorted(nb, key=lambda x: -x[0])[:200]
+        return beam
+    picks = []
+    fol = run(True)
+    if fol:
+        picks.append(("follows its chords", fol[0]))
+    roots = lambda path: [V[k][j]["root"] for k, j in enumerate(path)]
+    for sc, path in run(None):
+        rp = roots(path)
+        # different enough: from "follows" in at least half the chords, and from every other option somewhere
+        if picks and sum(a != b for a, b in zip(rp, roots(picks[0][1][1]))) < max(1, (len(segs) + 1) // 2):
+            continue
+        if any(rp == roots(q) for _, (s2, q) in picks[1:]):
+            continue
+        picks.append(("reharmonised", (sc, path)))
+        if len(picks) >= n_options:
+            break
+    mid = float(np.median([p for _, _, p, _ in notes])) if notes else 64.0
+    low, high = (48, 67) if mid >= 62 else (57, 76)
+    best = max((p[1][0] for p in picks), default=1)
+    options = []
+    for label, (sc, path) in picks:
+        prev, chords = None, []
+        for k, j in enumerate(path):
+            c = V[k][j]
+            ch = dict(root=c["root"], q=c["q"])
+            v = _voicing(ch, prev, low, high)
+            prev = v[1:]
+            # the sample changes key as it goes, so say which of its chords this sits on rather than a Roman numeral
+            chords.append(dict(name=_spell(c["root"], tonic, mode) + c["q"], roman="on " + _spell(segs[k][2], tonic, mode) + segs[k][3],
+                               notes=v, fit=round(float(E[k][j]), 2), t=round(segs[k][0], 3),
+                               d=round(segs[k][1] - segs[k][0], 3)))
+        options.append(dict(label=label, chords=chords, score=round(float(sc / (best + 1e-9)), 3),
+                            fit=round(float(np.mean([c["fit"] for c in chords])), 2)))
+    own = [_spell(r, tonic, mode) + q for a, b, r, q in segs]
+    return options, own, total, (low, high)
+
+
 def suggest(rel, bpm=None, bars_per_chord=1, n_options=4):
     from .conform import parse_key
     from .midi import transcribe
@@ -216,6 +395,16 @@ def suggest(rel, bpm=None, bars_per_chord=1, n_options=4):
         sc = [(np.corrcoef(prof, np.roll(t, k))[0, 1], k, m) for k in range(12) for t, m in ((maj, "major"), (mnr, "minor"))]
         _, tonic, mode = max(sc)
     style, top_moods = _style(row)
+    # a sample with chords of its own (keys, pads): follow *its* changes and harmony, not a fixed key on a grid
+    if row["category"] in ("Chords & Keys", "Pads & Atmospheres", "Vocal Atmospheres"):
+        segs, sure = own_chords(rel)
+        if segs and sure >= 0.6:
+            options, own, total, reg = _suggest_following(row, segs, style, notes, tonic, mode, n_options)
+            if options:
+                return dict(key=_spell(tonic, tonic, mode) + ("m" if mode == "minor" else ""), mode=mode, style=style,
+                            moods=top_moods, timbre=_timbre(row, style), pads=PADS, tempo=round(tempo, 2), step=0,
+                            steps=len(segs), bars_per_chord=bars_per_chord, loop=bool(loop), register=list(reg),
+                            follows=True, own=own, total=round(total, 3), options=options)
     V = _vocab(tonic, mode, style)
     moves = MOVES_MAJOR if mode == "major" else MOVES_MINOR
     E = np.array([[_fit(ch, P[k]) for ch in V] for k in range(n_steps)])
@@ -264,8 +453,8 @@ def suggest(rel, bpm=None, bars_per_chord=1, n_options=4):
                 bars_per_chord=bars_per_chord, loop=bool(loop), register=[low, high], options=options)
 
 
-def write_midi(name, chords, step, tempo, reveal=True):
-    """chords: [[midi notes]] one per step -> a .mid in the Ableton User Library (Chords/)."""
+def write_midi(name, chords, step, tempo, reveal=True, times=None):
+    """chords: [[midi notes]] one per step (or at times=[[start, length]]) -> a .mid in the User Library (Chords/)."""
     import re
     import subprocess
     import pretty_midi
@@ -273,7 +462,8 @@ def write_midi(name, chords, step, tempo, reveal=True):
     inst = pretty_midi.Instrument(0, name="chords")
     for k, notes in enumerate(chords):
         for n in notes:
-            inst.notes.append(pretty_midi.Note(velocity=80, pitch=int(n), start=k * step, end=(k + 1) * step))
+            a, d = times[k] if times else (k * step, step)
+            inst.notes.append(pretty_midi.Note(velocity=80, pitch=int(n), start=float(a), end=float(a) + float(d)))
     pm.instruments.append(inst)
     dest = C.ABLETON_SAMPLES / "Chords"
     dest.mkdir(parents=True, exist_ok=True)

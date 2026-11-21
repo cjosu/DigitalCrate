@@ -314,7 +314,8 @@ class Handler(SimpleHTTPRequestHandler):
                 con.commit()
             elif self.path == "/api/chords/midi":
                 from .harmony import write_midi
-                return self._json(write_midi(req["name"], req["chords"], float(req["step"]), float(req["tempo"])))
+                return self._json(write_midi(req["name"], req["chords"], float(req["step"] or 0), float(req["tempo"]),
+                                             times=req.get("times")))
             elif self.path == "/api/pair/save":
                 from .combos import save_pair
                 return self._json(save_pair(unquote(req["src"]), unquote(req["partner"]), req.get("name") or None))
