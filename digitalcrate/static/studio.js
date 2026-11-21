@@ -220,7 +220,7 @@ dock.insertAdjacentHTML('beforeend','<div class="sk" id="sk" hidden></div>');doc
 $('skbtn').onclick=()=>{SK.open=!SK.open;drawSK();drawProj()};
 const barLen=()=>240/(PROJ.bpm||120);
 // a non-loop lane repeats every N bars: the shortest of 1/2/4/8/16 that fits the whole clip (so it never piles up on itself)
-const skEvery=dur=>[1,2,4,8,16].find(n=>n*barLen()>=dur-0.05)||16;
+const skEvery=dur=>[1,2,4,8,16].find(n=>n*barLen()>=0.85*dur)||16;  // covers most of the clip; the tail fades into the next pass
 async function skAdd(i){if(!SERVED){toast('the sketchpad needs the local server');return}if(SK.lanes.length>=8){toast('the sketchpad holds 8 lanes');return}
  if(SK.lanes.some(l=>l.path===S[i][F.path])){toast('already in the sketch');return}
  const patch={};if(!PROJ.key&&S[i][F.cam])patch.key=keyFromCam(S[i][F.cam]);if(!PROJ.bpm)patch.bpm=S[i][F.bpm]||120;if(Object.keys(patch).length){Object.assign(PROJ,patch);try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
@@ -237,7 +237,9 @@ const laneGain=l=>(l.norm||1)*Math.pow(10,(l.db||0)/20);
 const dbTxt=db=>`${db>0?'+':''}${(+db).toFixed(1)} dB`;
 // where the sound really starts inside a (trimmed) clip: phrases often open with a breath or silence, so the
 // attack, not the file's first sample, is what gets placed on the beat
-function skAttack(l){const [r0,R]=skRegion(l),key=`${r0}|${R}`;if(l.att&&l.att.key===key)return l.att.v;const sr=l.buf.sampleRate,a=Math.floor(r0*sr),b=Math.min(l.buf.length,a+Math.floor(Math.min(R,4)*sr));
+function skAttack(l){const [r0,R]=skRegion(l),key=`${r0}|${R}`;if(l.att&&l.att.key===key)return l.att.v;
+ // the first attack tick in the selection (the same ticks drawn on the waveform), else the first loud sample
+ const first=skOnsets(l).find(p=>p>=r0&&p<r0+Math.min(R,4));if(first!=null){const v=Math.max(0,first-r0-0.01);l.att={key,v};return v}const sr=l.buf.sampleRate,a=Math.floor(r0*sr),b=Math.min(l.buf.length,a+Math.floor(Math.min(R,4)*sr));
  let pk=0;const chs=[...Array(l.buf.numberOfChannels).keys()].map(c=>l.buf.getChannelData(c));for(const d of chs)for(let k=a;k<b;k+=2)pk=Math.max(pk,Math.abs(d[k]));
  let at=a;outer:for(let k=a;k<b;k+=2)for(const d of chs)if(Math.abs(d[k])>0.2*pk){at=k;break outer}
  const v=Math.min(1,Math.max(0,(at-a)/sr-0.01));l.att={key,v};return v}
@@ -270,17 +272,37 @@ function skWave(c,buf,trim){if(!c||!buf)return;const dpr=devicePixelRatio||1,W=c
  // the project's beats as this lane plays them: the attack (or a loop's start) sits on a beat, shifted by any nudge
  if(ln){const L=barLen(),bt=L/4,[r0]=skRegion(ln),o=r0+(ln.every===0?0:skAttack(ln))-(ln.nudge||0),X=p=>p/buf.duration*W;
   for(let k=Math.ceil(-o/bt);o+k*bt<=buf.duration;k++){const x=X(o+k*bt);if(x<0)continue;const bar=((k%4)+4)%4===0;g.fillStyle=bar?'rgba(224,164,88,.7)':'rgba(224,164,88,.22)';g.fillRect(x,0,(bar?1.5:1)*dpr,H)}
-  g.fillStyle='rgba(255,255,255,.55)';skOnsets(ln).forEach(p=>g.fillRect(X(p)-0.5*dpr,H-5*dpr,dpr,5*dpr))}
+  g.fillStyle='rgba(255,255,255,.55)';skOnsets(ln).forEach(p=>g.fillRect(X(p)-0.5*dpr,H-5*dpr,dpr,5*dpr));
+  const xo=X(o<0?o+Math.ceil(-o/bt)*bt:o);g.fillStyle='#e0a458';g.beginPath();g.moveTo(xo-4*dpr,0);g.lineTo(xo+4*dpr,0);g.lineTo(xo,6*dpr);g.fill()}  // ▼ = the point on the beat
  if(trim){g.fillStyle='rgba(224,164,88,.12)';g.fillRect(xa,0,xb-xa,H);g.fillStyle='#e0a458';[xa,xb].forEach(x=>{g.fillRect(x-dpr,0,2*dpr,H);g.fillRect(x-3*dpr,H/2-6*dpr,6*dpr,12*dpr)})}
  const l=SK.lanes[+c.dataset.skw];if(l&&(l.fin||l.fout)){const px=ms=>ms/1000/buf.duration*W;g.strokeStyle='#ffffff';g.lineWidth=1.2*dpr;g.beginPath();
   if(l.fin){g.moveTo(xa,H-2*dpr);g.lineTo(Math.min(xb,xa+px(l.fin)),2*dpr)}if(l.fout){g.moveTo(Math.max(xa,xb-px(l.fout)),2*dpr);g.lineTo(xb,H-2*dpr)}g.stroke()}
  const copy=document.createElement('canvas');copy.width=W;copy.height=H;copy.getContext('2d').drawImage(c,0,0);c._base=copy}
 // playhead: a white line on each lane's waveform at the point that's sounding, like the editor's
 // attacks inside a clip (spectral-flux-ish on a coarse energy envelope), cached per buffer
-function skOnsets(l){if(l.ons&&l.ons.buf===l.buf)return l.ons.v;const b=l.buf,sr=b.sampleRate,hop=512,d=b.getChannelData(0),n=Math.floor(d.length/hop),e=new Float32Array(n);
- for(let i=0;i<n;i++){let s=0;for(let k=i*hop;k<(i+1)*hop;k+=2)s+=d[k]*d[k];e[i]=Math.log(1e-6+s)}
- const f=new Float32Array(n);for(let i=1;i<n;i++)f[i]=Math.max(0,e[i]-e[i-1]);const mean=f.reduce((a,x)=>a+x,0)/n,thr=mean*3,v=[];let last=-99;
- for(let i=2;i<n-1;i++)if(f[i]>thr&&f[i]>=f[i-1]&&f[i]>=f[i+1]&&i-last>4){v.push(i*hop/sr);last=i}l.ons={buf:b,v};return v}
+function skOnsets(l){if(l.ons&&l.ons.buf===l.buf)return l.ons.v;const b=l.buf,sr=b.sampleRate,hop=256,n=Math.floor(b.length/hop),e=new Float32Array(n);
+ const chs=[...Array(b.numberOfChannels).keys()].map(c=>b.getChannelData(c));
+ for(let i=0;i<n;i++){let s=0;for(const d of chs)for(let k=i*hop;k<(i+1)*hop;k++)s+=d[k]*d[k];e[i]=10*Math.log10(1e-12+s/(hop*chs.length))}
+ // rise in level (dB) over ~20 ms against the level just before; ignore anything far below the clip's peak,
+ // where small noise wobbles look like big jumps on a log scale
+ let pk=-200;for(let i=0;i<n;i++)pk=Math.max(pk,e[i]);const floor=pk-30,w=Math.max(1,Math.round(0.02*sr/hop)),gap=Math.round(0.09*sr/hop);
+ const f=new Float32Array(n);for(let i=w;i<n;i++){let pre=-200;for(let k=i-w;k<i;k++)pre=Math.max(pre,e[k]);f[i]=e[i]>floor?Math.max(0,e[i]-pre):0}
+ const v=[];let last=-1e9;for(let i=w;i<n-1;i++)if(f[i]>=4&&f[i]>=f[i-1]&&f[i]>=f[i+1]){if(i-last>gap){v.push(i*hop/sr);last=i}else if(f[i]>f[Math.round(v[v.length-1]*sr/hop)]){v[v.length-1]=i*hop/sr;last=i}}
+ l.ons={buf:b,v};return v}
+// re-align: try putting each attack near the start of the selection on the beat (and small shifts around it),
+// keep the placement where the most of the clip's attacks fall on the project's 8th-note grid
+function skAlign(l){const [r0,R]=skRegion(l),e8=barLen()/8,o0=r0+(l.every===0?0:skAttack(l));
+ const ons=skOnsets(l).filter(p=>p>=r0&&p<=r0+R);if(ons.length<4){l.nudge=0;return 'too few attacks to find a pulse: first attack put on the beat'}
+ const hit=c=>ons.reduce((s,p)=>{const ph=(((p-c)/e8)%1+1)%1,d=Math.min(ph,1-ph)*e8;return s+Math.exp(-((d/0.025)**2))},0);
+ const cands=ons.filter(p=>p<=r0+Math.min(R,barLen()*2));let best=o0,bs=hit(o0);
+ for(const c of cands)for(let dl=-0.04;dl<=0.0401;dl+=0.01){const s=hit(c+dl);if(s>bs+1e-9){bs=s;best=c+dl}}
+ // what random placement would score, to tell a real pulse from noise
+ let rnd=0;for(let k=0;k<16;k++)rnd+=hit(o0+k*e8/16);rnd/=16;
+ const on=ons.filter(p=>{const ph=(((p-best)/e8)%1+1)%1;return Math.min(ph,1-ph)*e8<0.035}).length;
+ if(bs<rnd*1.5){l.nudge=0;return `no clear pulse in this selection (${on} of ${ons.length} attacks near the grid, about what chance gives): first attack put on the beat`}
+ // any whole number of 8ths fits the grid equally well: apply only the smallest shift, so the clip stays where it was
+ let dlt=best-o0;dlt-=Math.round(dlt/e8)*e8;
+ l.nudge=-dlt;return `aligned: ${on} of ${ons.length} attacks on the grid${Math.abs(l.nudge)>0.001?` (moved ${Math.round(l.nudge*1000)} ms)`:''}`}
 function skHeads(){const now=AC.currentTime,dpr=devicePixelRatio||1;SK.lanes.forEach((l,k)=>{const c=document.querySelector(`[data-skw="${k}"]`);if(!c||!c._base||!l.buf)return;
  const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);g.drawImage(c._base,0,0);
  const v=(l.on||[]).filter(v=>now>=v.t0&&now<v.t0+v.dur).pop();if(!v||!SK.playing)return;
@@ -326,7 +348,7 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skclear'){skStop();SK.lanes=[];SK.name='';drawSK();drawProj();return}
  if(t.dataset.skm!=null){const l=SK.lanes[+t.dataset.skm];l.mute=!l.mute;skGains();drawSK();return}
  if(t.dataset.sks!=null){const l=SK.lanes[+t.dataset.sks];l.solo=!l.solo;skGains();drawSK();return}
- if(t.dataset.skalign!=null){const l=SK.lanes[+t.dataset.skalign];l.nudge=0;l.att=null;drawSK();return}
+ if(t.dataset.skalign!=null){const l=SK.lanes[+t.dataset.skalign];if(!l.buf)return;const r=skAlign(l);drawSK();toast(r);return}
  if(t.dataset.sknudge!=null){const l=SK.lanes[+t.dataset.sknudge],step=e.shiftKey?barLen()/16:0.01;l.nudge=Math.max(-2,Math.min(2,(l.nudge||0)+(+t.dataset.d)*step));drawSK();return}
  if(t.dataset.skmore!=null){const l=SK.lanes[+t.dataset.skmore];l.more=!l.more;drawSK();return}
  if(t.dataset.sknat!=null){const l=SK.lanes[+t.dataset.sknat];l.nat=!l.nat;drawSK();await skLoad(l);drawSK();return}

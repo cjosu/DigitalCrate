@@ -42,7 +42,7 @@ def save_pair(src, partner, name=None):
 
     def lane(r):
         loop = r["kind"] == "loop"
-        every = 0 if loop else next((n for n in (1, 2, 4, 8, 16) if n * bar >= r["dur"] - 0.05), 16)
+        every = 0 if loop else next((n for n in (1, 2, 4, 8, 16) if n * bar >= 0.85 * r["dur"]), 16)
         return dict(path=r["path"], vol=0.8, mute=False, solo=False, every=every, offset=0)
     base = name or f"{a['artist']} + {b['artist']}"
     names = {r["name"] for r in con.execute("SELECT name FROM sketches")}
