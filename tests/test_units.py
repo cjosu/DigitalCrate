@@ -92,3 +92,17 @@ def test_stems_are_aligned(tmp_path, monkeypatch):
     assert len(a) == len(b) == 44000
     assert abs(a.max() / b.max() - 1.5) < 1e-3  # balance kept
     assert sf.read(str(files[0]))[0].max() <= 0.891
+
+
+def test_harmony_theory():
+    """Chord names are spelled for the key, Roman numerals are right, and fit prefers chords whose tones sound."""
+    from digitalcrate.harmony import _vocab, _fit
+    v = _vocab(5, "minor", "soulful")  # F minor
+    names = {c["name"]: c["roman"] for c in v}
+    assert names.get("Dbmaj9") == "bVImaj9" and names.get("Fm9") == "i9" and "C#maj9" not in names
+    w = np.zeros(12); w[[0, 4, 7]] = 1 / 3  # C E G sounding
+    plain = _vocab(0, "major", "plain")
+    best = max(plain, key=lambda c: _fit(c, w))
+    assert best["root"] == 0 and best["q"] in ("", "add9")
+    clash = next(c for c in plain if c["root"] == 4)  # E minor over C E G: C is a semitone above B -> penalised
+    assert _fit(clash, w) < _fit(best, w)

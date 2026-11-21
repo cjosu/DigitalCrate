@@ -121,6 +121,7 @@ def bounce(req):
     if req.get("key"):
         p["tune_key"] = req["key"]   # sketch/pads conformed to a project key: store that key
     ov = dict(kind=req.get("kind", "loop"), bpm=req.get("bpm"), bars=req.get("bars"), tag=req.get("tag", "bounce"),
+              category=req.get("category"),
               ops=dict(bounce=req.get("ops") or {}))
     row = store(parent, parent["path"], y, p, req.get("name") or None, override=ov, prefix=req.get("prefix", "Bounce"))
     from .taste import log_event
@@ -217,6 +218,9 @@ class Handler(SimpleHTTPRequestHandler):
                 f, info = render(q["path"], q.get("key") or None, float(q["bpm"]) if q.get("bpm") else None,
                                  float(q["src"]) if q.get("src") else None)
                 return self._file(f, "audio/wav", {"X-Conform": json.dumps(info)})
+            if u.path == "/api/chords":
+                from .harmony import suggest
+                return self._json(suggest(q["path"], float(q["bpm"]) if q.get("bpm") else None, int(q.get("bpc", 1))))
             if u.path == "/api/pulse":
                 from .conform import pulse
                 return self._json(pulse(q["path"]))
@@ -308,6 +312,9 @@ class Handler(SimpleHTTPRequestHandler):
                                ON CONFLICT(name) DO UPDATE SET state=excluded.state, updated_at=CURRENT_TIMESTAMP""",
                             (req["name"], json.dumps(req["state"])))
                 con.commit()
+            elif self.path == "/api/chords/midi":
+                from .harmony import write_midi
+                return self._json(write_midi(req["name"], req["chords"], float(req["step"]), float(req["tempo"])))
             elif self.path == "/api/pair/save":
                 from .combos import save_pair
                 return self._json(save_pair(unquote(req["src"]), unquote(req["partner"]), req.get("name") or None))

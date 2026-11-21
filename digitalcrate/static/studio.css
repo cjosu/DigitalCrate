@@ -30,4 +30,8 @@
 .onoff span{position:absolute;inset:0;background:#2a2f37;border-radius:17px;transition:.15s}.onoff span:before{content:"";position:absolute;width:13px;height:13px;left:2px;top:2px;background:#8b93a1;border-radius:50%;transition:.15s}
 .onoff input:checked+span{background:var(--acc)}.onoff input:checked+span:before{transform:translateX(13px);background:#000}
 .lane .lwave{position:relative}.realign{position:absolute;right:2px;top:-2px;z-index:1;font-size:10px;padding:1px 5px;background:#12151a}
-.fitb{right:auto;left:2px}
+.lbtns{position:absolute;right:2px;top:-3px;z-index:1;display:flex;gap:4px}.lbtns .realign{position:static}
+.chopt{display:grid;grid-template-columns:30px 1fr auto;gap:6px 8px;align-items:center;padding:6px 0;border-top:1px solid #1d2128}
+.chbtn{grid-column:2/-1;display:flex;gap:6px}
+.chs{display:flex;flex-wrap:wrap;gap:4px}.chd{display:inline-flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:6px;padding:2px 6px;min-width:44px}
+.chd b{font-size:12px;color:var(--acc)}.chd i{font-style:normal;font-size:10px;color:var(--mute)}

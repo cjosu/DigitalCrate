@@ -141,6 +141,7 @@ def store(parent, rel, y, p, name=None, override=None, prefix="Edit", folder="Ed
     from .process import MOOD_PROMPTS, _safe
     con = connect()
     override = override or {}
+    cat = override.get("category") or parent["category"]  # e.g. a chord pad rendered over a vocal is Chords & Keys
     p = dict(dict(start=0.0, end=None, stretch=1.0, semis=0.0, formant=False, reverse=False, fade_in=0, fade_out=0,
                   normalize=True, loop_xfade=0), **p)
     dur = y.shape[1] / SR
@@ -162,21 +163,21 @@ def store(parent, rel, y, p, name=None, override=None, prefix="Edit", folder="Ed
     if parent["kind"] == "loop" and whole and not p["reverse"]:
         kind, bars = "loop", parent["bars"]
     else:
-        kind, bars = ("oneshot" if dur < 1.5 else ("phrase" if parent["category"] == "Vocals" else "free")), None
+        kind, bars = ("oneshot" if dur < 1.5 else ("phrase" if cat == "Vocals" else "free")), None
     subtype = parent["subtype"]
-    if parent["category"] == "Vocals" and kind == "oneshot":
+    if cat == "Vocals" and kind == "oneshot":
         subtype = "Chops"
     kind = override.get("kind", kind)
     bars = override.get("bars", bars)
     bpm = override.get("bpm", bpm)
-    if kind == "loop" and parent["category"] not in ("Vocals", "Percussion"):
+    if kind == "loop" and cat not in ("Vocals", "Percussion"):
         subtype = "Loops"
     sid = hashlib.sha1(f"{rel}{json.dumps(p, sort_keys=True)}{time.time()}".encode()).hexdigest()[:6]
     tag = _safe(name, 30) if name else override.get("tag") or _ops_tag(p)
     keystr = "nokey" if parent["key_from"] == "none" else f"{int(cam[:-1]):02d}{cam[-1]}-{key_label(pc, scale)}"
     bpmstr = f"{bpm:.0f}bpm" if bpm else "free"
     fname = f"{prefix}_{keystr}_{bpmstr}_{_safe(parent['artist'], 20)}-{_safe(parent['title'], 24)}_{tag}_{sid}.wav"
-    out = C.LIB_ROOT / folder / parent["category"] / fname
+    out = C.LIB_ROOT / folder / cat / fname
     out.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(out), y.T, SR, subtype="PCM_24")
     # embedding + mood similarities for related-sample matching and the taste model
@@ -200,7 +201,7 @@ def store(parent, rel, y, p, name=None, override=None, prefix="Edit", folder="Ed
            key, scale, camelot, key_strength, key_from, note, chroma, centroid, flatness, pratio, dominance, drum_leak,
            loudness, quality, clap, type_probs, mood_sims, instrument, path, env, tags, parent_id, root_id, ops)
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (sid, parent["track_id"], "edit", parent["rendered_from"], parent["category"], subtype, kind,
+        (sid, parent["track_id"], "edit", parent["rendered_from"], cat, subtype, kind,
          parent["start"] + p["start"], dur, bpm, bars, PITCHES[pc], scale, cam, parent["key_strength"],
          parent["key_from"], note, json.dumps(np.round(chroma, 3).tolist()), parent["centroid"], parent["flatness"],
          parent["pratio"], parent["dominance"], parent["drum_leak"], parent["loudness"], parent["quality"],
@@ -208,7 +209,7 @@ def store(parent, rel, y, p, name=None, override=None, prefix="Edit", folder="Ed
          json.dumps(dict(zip(MOOD_PROMPTS, np.round(moods, 4).tolist()))), parent["instrument"],
          str(out.relative_to(C.LIB_ROOT)), json.dumps(env), parent["tags"], parent["id"], root, json.dumps(ops)))
     con.commit()
-    return dict(id=sid, path=str(out.relative_to(C.LIB_ROOT)), category=parent["category"], subtype=subtype,
+    return dict(id=sid, path=str(out.relative_to(C.LIB_ROOT)), category=cat, subtype=subtype,
                 kind=kind, cam=cam if parent["key_from"] != "none" else "",
                 key=(PITCHES[pc] + ("m" if scale == "minor" else "")) if parent["key_from"] != "none" else "",
                 bpm=round(bpm) if bpm else 0, dur=round(dur, 1), note=note or "", bars=bars or 0,

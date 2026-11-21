@@ -130,16 +130,19 @@ def conformed_name(rel, info):
 
 
 PULSE_CACHE = C.DATA_DIR / "pulse_cache.json"
+PULSE_CONF = 2.75
 
 
 def pulse(rel):
     """Does this clip have a steady pulse, and at what tempo? Essentia's RhythmExtractor2013 (multifeature): a pulse
     needs confidence >= 2.5 (its scale runs 0-5.3) and steady beats. Clips without one are pads/textures with
-    nothing to line up. Cached per file."""
+    nothing to line up. Cached per file (the yes/no is re-decided on every call, so the cutoff can be tuned).
+    2.75: clear pulses (plucked keys, bossa guitar) pass; loose fingerpicking and swells (2.2-2.6) don't."""
     import json
     cache = json.loads(PULSE_CACHE.read_text()) if PULSE_CACHE.exists() else {}
     if rel in cache:
-        return cache[rel]
+        c = cache[rel]
+        return dict(c, ok=bool(c["conf"] >= PULSE_CONF and c["steady"] <= 0.06))
     import essentia.standard as es
     from scipy.signal import resample_poly
     from .edit import _load
@@ -152,7 +155,7 @@ def pulse(rel):
         ibi = np.diff(beats)
         steady = float(np.std(ibi) / np.mean(ibi)) if len(ibi) > 3 else 9.0
         out = dict(bpm=round(float(bpm), 1), conf=round(float(conf), 2), steady=round(steady, 3),
-                   ok=bool(conf >= 2.5 and steady <= 0.06))
+                   ok=bool(conf >= PULSE_CONF and steady <= 0.06))
     cache[rel] = out
     PULSE_CACHE.write_text(json.dumps(cache))
     return out

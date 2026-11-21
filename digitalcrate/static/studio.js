@@ -344,7 +344,7 @@ function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
   return`<div class="lane${l.mute?' muted':''}" data-ln="${k}">
   <label class="onoff" title="turn this lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label>
   <div class="lname" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · ${esc(s[F.sub]||'')} ${s[F.cam]||''}"><div class="name"><span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span>${esc(s[F.artist]||'')}</div><div class="meta">${esc(s[F.title]||'')} · ${tags}</div></div>
-  <div class="lwave">${fit?`<button class="tbtn realign fitb" data-skfit="${k}" title="the clip has a steady pulse of about ${pu.bpm} bpm: stretch it onto ${PROJ.bpm} bpm so every attack stays on the grid">⟷ match tempo</button>`:''}${l.src?`<button class="tbtn realign fitb" data-skunfit="${k}" title="back to the clip's own tempo">⟷ undo match</button>`:''}${l.trim||l.nudge?`<button class="tbtn realign" data-skalign="${k}" title="put the first strong attack of the selection on the beat (clears any nudge)">↺ re-align</button>`:''}${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
+  <div class="lwave"><div class="lbtns">${fit?`<button class="tbtn realign fitb" data-skfit="${k}" title="the clip has a steady pulse of about ${pu.bpm} bpm: stretch it onto ${PROJ.bpm} bpm so every attack stays on the grid">⟷ match tempo</button>`:''}${l.src?`<button class="tbtn realign fitb" data-skunfit="${k}" title="back to the clip's own tempo">⟷ undo match</button>`:''}${l.trim||l.nudge?`<button class="tbtn realign" data-skalign="${k}" title="put the first strong attack of the selection on the beat (clears any nudge)">↺ re-align</button>`:''}</div>${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
   <div class="fader" title="volume relative to the other lanes (all start equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
   <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn${l.more?' on':''}" data-skmore="${k}" title="timing, key, fades, open, remove">⋯</button>
   ${l.more?`<div class="lmore">${loop?'<span class="sub">loop: locked to the bar</span>':`<label class="sub">repeat <select data-ske="${k}">${Array.from({length:16},(_,j)=>j+1).map(n=>`<option value="${n}" ${l.every===n?'selected':''}>every ${n} bar${n>1?'s':''}</option>`).join('')}</select></label>
@@ -441,16 +441,75 @@ document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kit
 const _select=select;
 select=function(i,from){_select(i,from);augment(i)};
 function augment(i){const eo=$('edopen');if(!eo)return;eo.parentNode.style.flexWrap='wrap';
- eo.insertAdjacentHTML('afterend',` <button data-sk="${i}" title="add to the sketchpad">＋ sketch</button><button id="padsopen" title="play its syllables / notes from the keyboard, record a pattern">🎹 pads</button>${S[i][F.cat]!=='Percussion'&&S[i][F.cam]?'<button id="midiopen" title="notes & chords → MIDI">♪ MIDI</button>':''}`);
+ eo.insertAdjacentHTML('afterend',` <button data-sk="${i}" title="add to the sketchpad">＋ sketch</button><button id="padsopen" title="play its syllables / notes from the keyboard, record a pattern">🎹 pads</button>${S[i][F.cat]!=='Percussion'&&S[i][F.cam]?'<button id="midiopen" title="notes & chords → MIDI">♪ MIDI</button>':''}${S[i][F.cat]!=='Percussion'&&!String(S[i][F.path]).startsWith('_Reference')?'<button id="chordsopen" title="chord progressions that suit this sample, played on a synth pad">🎼 chords</button>':''}`);
  eo.parentNode.insertAdjacentHTML('afterend','<div class="sub" id="pjinfo" style="margin:-4px 0 8px"></div>');
- $('editor').insertAdjacentHTML('afterend','<div class="ed" id="pads" hidden></div><div class="ed" id="midibox" hidden></div>');
+ $('editor').insertAdjacentHTML('afterend','<div class="ed" id="pads" hidden></div><div class="ed" id="midibox" hidden></div><div class="ed" id="chordbox" hidden></div>');
  document.querySelectorAll('#detail [data-pair]').forEach(b=>b.insertAdjacentHTML('beforebegin',`<button data-sk="${b.dataset.pair}" title="add to the sketchpad">＋</button><button data-savepair="${b.dataset.pair}" title="save this pair as a sketch (Kits tab), ready to open or export as aligned stems">💾</button>`));
  if(PROJ.key||PROJ.bpm)projInfo(i);if(PADS.i!==i)padsClose()}
 $('detail').addEventListener('click',async e=>{const sp=e.target.closest('[data-savepair]');if(sp){e.stopPropagation();const j=+sp.dataset.savepair;
   try{const r=await api('api/pair/save',{src:S[st.sel][F.path],partner:S[j][F.path]});sp.textContent='✓';toast(`saved “${r.name}” · open it from the Kits tab`)}catch(err){toast('error: '+err.message)}return}
- if(e.target.id==='padsopen'){openPads(st.sel);return}if(e.target.id==='midiopen'){openMidi(st.sel);return}});
+ if(e.target.id==='padsopen'){openPads(st.sel);return}if(e.target.id==='midiopen'){openMidi(st.sel);return}if(e.target.id==='chordsopen'){openChords(st.sel);return}});
 
 // ---------- MIDI
+// ================= chords: progressions that suit a sample, heard on a synth pad =================
+// pad voices: each note = a few detuned oscillators through a lowpass, slow attack, long release, into a shared reverb
+const PADV={warm:{osc:[['sawtooth',-7],['sawtooth',7]],cut:900,q:0.7,att:0.6,rel:1.6,gain:0.16},
+ glass:{osc:[['triangle',0],['sine',1200]],cut:4200,q:0.4,att:0.35,rel:2.2,gain:0.2},
+ strings:{osc:[['sawtooth',-12],['sawtooth',0],['sawtooth',12]],cut:2300,q:0.6,att:0.9,rel:1.8,gain:0.11,vib:5},
+ rhodes:{osc:[['sine',0],['triangle',1200]],cut:3000,q:0.5,att:0.01,rel:1.2,gain:0.24,decay:1.6}};
+function padReverb(ctx){const n=Math.floor(ctx.sampleRate*3),b=ctx.createBuffer(2,n,ctx.sampleRate);
+ for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let k=0;k<n;k++)d[k]=(Math.random()*2-1)*Math.pow(1-k/n,3)}const cv=ctx.createConvolver();cv.buffer=b;return cv}
+function padChord(ctx,dest,notes,t,dur,kind){const v=PADV[kind]||PADV.warm;
+ notes.forEach((n,ni)=>{const f=440*Math.pow(2,(n-69)/12),g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=v.cut*(ni===0?0.6:1);lp.Q.value=v.q;
+  const lvl=v.gain*(ni===0?0.8:1)/Math.sqrt(notes.length);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(lvl,t+v.att);
+  if(v.decay)g.gain.setTargetAtTime(lvl*0.35,t+v.att,v.decay/3);g.gain.setValueAtTime(v.decay?lvl*0.35:lvl,t+dur);g.gain.linearRampToValueAtTime(0,t+dur+v.rel);
+  lp.connect(g);g.connect(dest);
+  v.osc.forEach(([type,cents])=>{const o=ctx.createOscillator();o.type=type;o.frequency.value=f;o.detune.value=cents;
+   if(v.vib){const l=ctx.createOscillator(),lg=ctx.createGain();l.frequency.value=v.vib;lg.gain.value=4;l.connect(lg);lg.connect(o.detune);l.start(t);l.stop(t+dur+v.rel)}
+   o.connect(lp);o.start(t);o.stop(t+dur+v.rel+0.05)})})}
+function padProgression(ctx,dest,opt,step,t0,kind,reps=1){for(let r=0;r<reps;r++)opt.chords.forEach((c,k)=>padChord(ctx,dest,c.notes,t0+(r*opt.chords.length+k)*step,step,kind))}
+const CH={i:null,res:null,bpc:1,pad:null,lvl:0.8,play:null};
+async function openChords(i,keep){const box=$('chordbox');if(!keep){if(!box.hidden&&CH.i===i){chStop();box.hidden=true;return}}box.hidden=false;CH.i=i;
+ box.innerHTML='<div class="sub">listening to the notes and working out chords…</div>';
+ const s=S[i],bpm=s[F.kind]==='loop'?'':(PROJ.bpm||90);
+ try{const r=await api(`api/chords?path=${encodeURIComponent(s[F.path])}&bpc=${CH.bpc}${bpm?'&bpm='+bpm:''}`);if(st.sel!==i)return;CH.res=r;CH.pad=CH.pad||r.timbre;drawChords()}
+ catch(e){box.innerHTML='<div class="sub">chords failed: '+esc(e.message)+'</div>'}}
+function drawChords(){const r=CH.res,box=$('chordbox');if(!r)return;
+ box.innerHTML=`<div class="edrow"><b>🎼 ${esc(r.key)}</b><span class="sub">${esc(r.style)} flavour (${r.moods.map(esc).join(', ')}) · ${r.steps} chords × ${r.bars_per_chord} bar at ${r.tempo} bpm${r.loop?'':' (project tempo)'}</span></div>
+ <div class="edrow sub"><label>chord every <select id="chbpc"><option value="1" ${CH.bpc===1?'selected':''}>1 bar</option><option value="2" ${CH.bpc===2?'selected':''}>2 bars</option></select></label>
+  <label>pad <select id="chpad">${r.pads.map(p=>`<option ${p===CH.pad?'selected':''}>${p}</option>`).join('')}</select></label>
+  <label>pad level <input type="range" id="chlvl" min="0" max="1.5" step="0.05" value="${CH.lvl}" style="width:80px"></label><button id="chstop">■ stop</button></div>
+ ${r.options.map((o,k)=>`<div class="chopt"><button class="play" data-chplay="${k}" title="the sample with this progression">▶</button>
+  <div class="chs">${o.chords.map(c=>`<span class="chd" title="fit ${c.fit}"><b>${esc(c.name)}</b><i>${esc(c.roman)}</i></span>`).join('')}</div>
+  <span class="sub" title="how well the chords' notes match what the sample plays">${Math.round(o.fit*100)}%</span>
+  <div class="chbtn"><button data-chmidi="${k}" title="the chords as a MIDI clip, in your Ableton User Library/Chords">⇩ MIDI</button><button data-chsk="${k}" title="render the pad as a new sample and put it in the sketchpad with this sample">＋ sketch</button></div></div>`).join('')||'<div class="sub">no confident suggestions for this one</div>'}
+ <div class="hint">Chords follow the sample's key and what it plays in each bar; the flavour comes from its mood. Voiced ${r.register[0]<55?'below':'above'} the sample's own register so they don't mask it.</div>`;
+ $('chbpc').onchange=e=>{CH.bpc=+e.target.value;chStop();openChords(CH.i,true)};$('chpad').onchange=e=>{CH.pad=e.target.value;if(CH.play)chPlay(CH.play.k)};
+ $('chlvl').oninput=e=>{CH.lvl=+e.target.value;if(CH.play)CH.play.pg.gain.value=CH.lvl};$('chstop').onclick=chStop}
+function chStop(){if(!CH.play)return;const p=CH.play;CH.play=null;clearTimeout(p.timer);const now=AC.currentTime;p.master.gain.setTargetAtTime(0,now,0.05);setTimeout(()=>{try{p.master.disconnect()}catch(e){}},400);
+ try{p.src.stop(now+0.2)}catch(e){}document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.remove('playing'))}
+async function chPlay(k){chStop();stopAll();skStop();AC.resume();const r=CH.res,o=r.options[k],s=S[CH.i];
+ const buf=await AC.decodeAudioData(await (await fetch(url(s[F.path]))).arrayBuffer());
+ const L=o.chords.length*r.step,master=AC.createGain();master.connect(AC.destination);const pg=AC.createGain();pg.gain.value=CH.lvl;const rv=padReverb(AC),wet=AC.createGain();wet.gain.value=0.35;
+ pg.connect(master);pg.connect(rv);rv.connect(wet);wet.connect(master);
+ const src=AC.createBufferSource();src.buffer=buf;src.loop=true;src.loopEnd=Math.min(buf.duration,L);const sg=AC.createGain();sg.gain.value=Math.min(4,skNorm(buf))*0.8;src.connect(sg);sg.connect(master);
+ const t0=AC.currentTime+0.1;src.start(t0);CH.play={k,master,pg,src,timer:null};
+ const sched=n=>{if(!CH.play||CH.play.k!==k)return;padProgression(AC,pg,o,r.step,t0+n*L,CH.pad);CH.play.timer=setTimeout(()=>sched(n+1),Math.max(50,(t0+(n+1)*L-AC.currentTime-1)*1000))};sched(0);
+ document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.toggle('playing',+b.dataset.chplay===k))}
+document.addEventListener('click',async e=>{const p=e.target.closest('[data-chplay]');if(p){if(CH.play&&CH.play.k===+p.dataset.chplay)chStop();else chPlay(+p.dataset.chplay);return}
+ const m=e.target.closest('[data-chmidi]');if(m){const r=CH.res,o=r.options[+m.dataset.chmidi],s=S[CH.i];
+  try{await api('api/chords/midi',{name:`${s[F.artist]} - ${s[F.title]} - ${o.chords.map(c=>c.name).join(' ')}`,chords:o.chords.map(c=>c.notes),step:r.step,tempo:r.tempo});m.textContent='✓ MIDI';toast('MIDI clip saved to your Ableton User Library › Chords')}catch(err){toast('error: '+err.message)}return}
+ const sk=e.target.closest('[data-chsk]');if(sk){const r=CH.res,o=r.options[+sk.dataset.chsk],i=CH.i,s=S[i];sk.textContent='rendering…';
+  // render the pad offline, store it as a new Chords & Keys loop (key + tempo + provenance), then add both lanes
+  const sr=44100,L=o.chords.length*r.step,ctx=new OfflineAudioContext(2,Math.ceil((L+3)*sr),sr),pg=ctx.createGain();pg.gain.value=1;const rv=padReverb(ctx),wet=ctx.createGain();wet.gain.value=0.35;
+  pg.connect(ctx.destination);pg.connect(rv);rv.connect(wet);wet.connect(ctx.destination);padProgression(ctx,pg,o,r.step,0,CH.pad);
+  // fold the release/reverb tail past the loop end back onto its start, so the loop is seamless
+  const full=await ctx.startRendering(),n=Math.round(L*sr),out=new AudioBuffer({numberOfChannels:2,length:n,sampleRate:sr});
+  for(let c=0;c<2;c++){const a=full.getChannelData(c),b=out.getChannelData(c);b.set(a.subarray(0,n));for(let k=n;k<a.length;k++)b[(k-n)%n]+=a[k]}
+  try{const res=await api('api/bounce',{parent:s[F.path],wav:wavB64(out),kind:'loop',bpm:r.tempo,bars:o.chords.length*r.bars_per_chord,key:r.key,prefix:'Chords',category:'Chords & Keys',
+    name:o.chords.map(c=>c.name).join(' '),tag:`chords ${CH.pad}`,ops:{chords:o.chords.map(c=>c.name),pad:CH.pad,from:s[F.id]}});
+   const j=addRow(i,res.row);if(!SK.lanes.some(l=>l.path===s[F.path]))await skAdd(i);await skAdd(j);sk.textContent='✓ in sketch';toast('chord pad saved (★) and added to the sketchpad with the sample')}
+  catch(err){sk.textContent='＋ sketch';toast('error: '+err.message)}}});
 async function openMidi(i){const box=$('midibox');if(!box.hidden){box.hidden=true;return}box.hidden=false;box.innerHTML='<div class="sub">transcribing notes & chords (basic-pitch)…</div>';
  try{const s=S[i],r=await api(`api/midi?path=${encodeURIComponent(s[F.path])}${s[F.kind]==='loop'&&s[F.bpm]?'&bpm='+s[F.bpm]:''}`);if(st.sel!==i)return;
   const name=s[F.path].split('/').pop().replace(/\.wav$/,'')+'.mid';
