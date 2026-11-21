@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68,<80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "digitalcrate"
+version = "0.1.0"
+description = "Mine your own music collection for clean, key- and tempo-tagged samples, and browse them in a local web app."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = "AGPL-3.0-only"
+classifiers = [
+    "Operating System :: MacOS",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Topic :: Multimedia :: Sound/Audio :: Editors",
+]
+# Exact, tested versions live in requirements.lock. These are the direct dependencies, for reference and for
+# `uv pip install -e .`; basic-pitch declares resampy<0.4.3, which is why the override below exists.
+dependencies = [
+    "numpy>=2.4", "scipy>=1.17", "soundfile>=0.14", "librosa>=0.11", "resampy==0.4.3", "mutagen>=1.48",
+    "tqdm>=4.70", "scikit-learn>=1.9", "essentia==2.1b6.dev1389", "torch>=2.15", "torchaudio>=2.11",
+    "demucs==4.1.0", "audio-separator>=0.48", "transformers>=5.23", "basic-pitch==0.4.0", "pretty-midi>=0.2.11",
+    "python-stretch==0.3.1", "aalink>=0.2.3", "yt-dlp", "setuptools<80",
+]
+
+[project.optional-dependencies]
+# only the stretch / tuning shootout's extra candidates need these
+shootout = ["onnxruntime>=1.32", "pyworld==0.3.5", "praat-parselmouth==0.4.7"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+digitalcrate = "digitalcrate.__main__:main"
+
+[tool.setuptools]
+packages = ["digitalcrate"]
+
+[tool.setuptools.package-data]
+digitalcrate = ["static/*"]
+
+[tool.uv]
+override-dependencies = ["resampy==0.4.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

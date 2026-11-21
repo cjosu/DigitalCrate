@@ -1,0 +1,26 @@
+# Top-level dependencies, for reading. To install, use requirements.lock (see README):
+# basic-pitch's metadata pins resampy<0.4.3, which a normal resolver can't satisfy alongside 0.4.3.
+# Python 3.11 (tomllib, essentia wheels). Tested on macOS 15 / Apple Silicon.
+numpy==2.4.6
+scipy==1.17.1
+soundfile==0.14.0
+librosa==0.11.0
+resampy==0.4.3              # 0.4.2 needs pkg_resources
+mutagen==1.48.1
+tqdm==4.70.1
+scikit-learn==1.9.1
+essentia==2.1b6.dev1389     # tempo, beat grid, key
+torch==2.15.0
+torchaudio==2.11.1
+demucs==4.1.0               # stem separation
+audio-separator==0.48.0     # MelBand RoFormer vocals, MDX23C DrumSep
+transformers==5.23.0        # CLAP
+basic-pitch==0.4.0          # audio -> MIDI
+pretty-midi==0.2.11.post0
+onnxruntime==1.32.0         # neural vocoder (shootout)
+python-stretch==0.3.1       # Signalsmith Stretch (shootout)
+pyworld==0.3.5              # WORLD vocoder (shootout)
+setuptools<80               # pyworld still imports pkg_resources
+aalink==0.2.3               # Ableton Link
+yt-dlp==2026.10.26          # YouTube sources + scout
+praat-parselmouth==0.4.7     # PSOLA vocal tuning (shootout round 2)

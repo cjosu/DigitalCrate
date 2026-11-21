@@ -1,0 +1,18 @@
+# Copy to digitalcrate.toml (or ~/.config/digitalcrate/digitalcrate.toml) and point it at your folders.
+# Each value can also be set with an environment variable (shown on the right).
+
+music = "~/Music/Library"                       # DIGITALCRATE_MUSIC     your record collection — read only, never modified
+library = "~/SampleLibrary"                     # DIGITALCRATE_LIBRARY   samples, database and the browser are written here
+found_sounds = "~/Found Sounds"                 # DIGITALCRATE_FOUND     YouTube downloads and reference tracks
+ableton_samples = "~/Music/Ableton/User Library/Samples/DigitalCrate"   # DIGITALCRATE_ABLETON_SAMPLES  export destination
+
+# Extra reference-only artists (never sampled, used only as style queries), e.g. your own releases.
+# reference_artists = ["Your Artist Name"]      # substring match
+# reference_exact = ["Alias"]                    # exact match
+
+# Fix genres where file tags are wrong or missing: artist = family. Families: Choral & Sacred, Classical, Jazz,
+# Soul & R&B, Hip-Hop, Folk, World, Soundtrack, Ambient, Electronic, Experimental, Rock & Indie, Pop, Other.
+# Tables must come after the plain keys above.
+# [genres]
+# "Boards of Canada" = "Electronic"
+# "Brian Eno" = "Ambient"

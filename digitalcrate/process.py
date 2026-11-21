@@ -1,0 +1,387 @@
+"""Per-track pipeline: decode -> tempo/key -> (separate) -> detect -> score -> CLAP classify -> render."""
+import hashlib
+import json
+import re
+import time
+import traceback
+from pathlib import Path
+
+import numpy as np
+from tqdm import tqdm
+
+from . import config as C
+from .audio import decode, write_wav, to_mono48, camelot, key_label, PITCHES
+from .analyze import track_tempo_key, SourceFeat, bar_starts, segment_stats, sample_key, sec_to_frames
+from .extract import find_candidates, measure
+from .db import connect
+from . import models
+from .policy import classify_track, sample_dir
+
+# ---------------------------------------------------------------- CLAP vocab
+
+TYPE_PROMPTS = {
+    "vocal_female": "a woman singing, solo female vocals",
+    "vocal_male": "a man singing, solo male vocals",
+    "vocal_choir": "a choir of voices singing together",
+    "vocal_spoken": "a person talking, spoken word speech",
+    "pad": "an ambient synthesizer pad, sustained atmospheric chords",
+    "strings": "a string section playing sustained notes",
+    "drone": "a dark low droning sound",
+    "chords_keys": "piano or electric piano chords",
+    "organ": "an organ playing chords",
+    "guitar": "a guitar playing",
+    "melody": "a melodic synthesizer lead line",
+    "brass": "brass horns or saxophone",
+    "texture": "vinyl crackle, tape hiss and noisy texture",
+    "field": "a field recording of rain, street ambience or nature sounds",
+    "bass": "a deep bass line",
+    "drums": "drums and percussion, a drum beat",
+    "silence": "near silence, very quiet",
+}
+TYPE_KEYS = list(TYPE_PROMPTS)
+VOCAL_TYPES = ["vocal_female", "vocal_male", "vocal_choir", "vocal_spoken"]
+INST_CATEGORY = {
+    "pad": "Pads & Atmospheres", "strings": "Pads & Atmospheres", "drone": "Pads & Atmospheres",
+    "chords_keys": "Chords & Keys", "organ": "Chords & Keys", "guitar": "Chords & Keys",
+    "melody": "Melodies & Leads", "brass": "Melodies & Leads",
+    "texture": "Textures & Field", "field": "Textures & Field",
+    "bass": "Bass & Sub",
+}
+
+MOOD_PROMPTS = {
+    "dark": "dark, ominous music",
+    "melancholic": "sad, melancholic, mournful music",
+    "ethereal": "ethereal, angelic, heavenly sound",
+    "warm": "warm, soft, analog sound",
+    "eerie": "eerie, haunting, ghostly sound",
+    "dreamy": "dreamy, hazy, blurred sound",
+    "euphoric": "euphoric, uplifting, rave music",
+    "lofi": "lo-fi, dusty, degraded old recording",
+    "cold": "cold, metallic, industrial sound",
+    "soulful": "soulful r&b singing",
+    "hypnotic": "hypnotic, repetitive, minimal",
+    "dubby": "dub techno, echo and reverb chords",
+    "nocturnal": "night time city, rain at night",
+    "pastoral": "pastoral, organic, acoustic, forest",
+    "bright": "bright, shiny, clear sound",
+}
+
+SUBTYPE_PREFIX = {
+    ("Vocals", "Phrases"): "VoxPhrase", ("Vocals", "Chops"): "VoxChop",
+    ("Vocals", "Spoken"): "VoxSpoken", ("Vocals", "Choir & Group"): "VoxChoir",
+    "Vocal Atmospheres": "VoxAtmos", "Pads & Atmospheres": "Pad", "Chords & Keys": "Keys",
+    "Melodies & Leads": "Melody", "Textures & Field": "Texture", "Bass & Sub": "Bass",
+}
+KIND_SUBTYPE = {"loop": "Loops", "free": "Free", "oneshot": "One-Shots", "phrase": "Free"}
+
+
+def _safe(s, n=40):
+    s = re.sub(r"[^\w\-\. ]+", "", str(s or "Unknown")).strip().replace(" ", "")
+    return s[:n] or "Unknown"
+
+
+def classify(c, probs, source_has_stems):
+    """Return (category, subtype) or None to reject."""
+    p = dict(zip(TYPE_KEYS, probs))
+    if p["drums"] > 0.35 or p["silence"] > 0.5:
+        return None
+    voc = sum(p[k] for k in VOCAL_TYPES)
+    allowed = [k for k in INST_CATEGORY
+               if not (k == "bass" and (c["source"] == "other" or p["bass"] < 0.6))]
+    inst = max(allowed, key=lambda k: p[k])
+    c["instrument"] = max(TYPE_KEYS, key=lambda k: p[k] if k not in ("drums", "silence") else -1)
+    if c["group"] in ("vocal_phrase", "vocal_chop") or (not source_has_stems and voc > 0.55):
+        if c["kind"] == "oneshot" or c["group"] == "vocal_chop":
+            return "Vocals", "Chops"
+        vt = max(VOCAL_TYPES, key=lambda k: p[k])
+        if voc < 0.25:  # vocal stem but sounds like an instrument: likely bleed
+            return None
+        return "Vocals", {"vocal_spoken": "Spoken", "vocal_choir": "Choir & Group"}.get(vt, "Phrases")
+    if c["group"] == "vocal_atmos":
+        return "Vocal Atmospheres", KIND_SUBTYPE[c["kind"]]
+    if source_has_stems and c["source"] == "other" and voc > 0.5:
+        return None  # vocal bleed into 'other'
+    return INST_CATEGORY[inst], KIND_SUBTYPE[c["kind"]]
+
+
+def _dedupe(cands, thresh=0.93):
+    keep = []
+    for c in sorted(cands, key=lambda c: -c["quality"]):
+        if all(float(c["emb"] @ k["emb"]) < thresh for k in keep
+               if k["category"] == c["category"] and k["subtype"] == c["subtype"]):
+            keep.append(c)
+    return keep
+
+
+def _cap(cands):
+    out, counts = [], {}
+    for c in sorted(cands, key=lambda c: -c["quality"]):
+        g = c["group"]
+        spacing = 2.5 if g in ("vocal_chop", "oneshot") else 0.5
+        if any(k["group"] == g and abs(k["start"] - c["start"]) < spacing for k in out):
+            continue
+        if counts.get(g, 0) < C.MAX_PER_TRACK[g]:
+            out.append(c)
+            counts[g] = counts.get(g, 0) + 1
+    return out
+
+
+def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"):
+    t0 = time.time()
+    policy = row["policy"] or classify_track(row["artist"], row["genre"], row["path"])
+    y = decode(row["path"])
+    if y.shape[1] < C.SR * 8:
+        con.execute("UPDATE tracks SET status='skipped', error='too short' WHERE id=?", (row["id"],))
+        return 0
+    tk = track_tempo_key(y)
+    mix = SourceFeat(y)
+    bar_times = bar_starts(tk["beats"], mix) if tk["tempo_ok"] else np.array([])
+
+    clean_frac = float(((mix.pratio < C.MIX_PRATIO_DRUMS) & mix.active()).sum() / max(1, mix.active().sum()))
+    do_sep = separate_mode == "always" or (separate_mode == "auto" and clean_frac < 0.9)
+    stems, feats = None, None
+    if do_sep:
+        stems = models.separate(y)
+        if vocals != "demucs":
+            stems["vocals"] = models.roformer_vocals(row["path"], y.shape[1], vocals)
+        feats = {k: SourceFeat(v, hpss=k in ("vocals", "other")) for k, v in stems.items()}
+    t_sep = time.time()
+
+    cands, masks = find_candidates(tk, mix, feats, bar_times)
+    if policy == "vocals_only":  # the beat is someone else's sample: keep the original vocal only
+        cands = [c for c in cands if c["group"] in ("vocal_phrase", "vocal_chop")]
+    cands = [measure(c, mix, feats, masks) for c in cands]
+    cands = [c for c in cands if c["quality"] >= C.MIN_QUALITY * 0.75]
+    # pre-cap generously before the (costly) embedding step
+    cands = sorted(cands, key=lambda c: -c["quality"])
+    pre, counts = [], {}
+    for c in cands:
+        if counts.get(c["group"], 0) < 4 * C.MAX_PER_TRACK[c["group"]]:
+            pre.append(c)
+            counts[c["group"]] = counts.get(c["group"], 0) + 1
+    cands = pre
+
+    def audio_of(c, which=None):
+        src = which or c["rendered_from"]
+        sig = y if src == "mix" else stems[src]
+        pad_pre = 0.0 if c["kind"] == "loop" else 0.03
+        pad_post = 0.0 if c["kind"] == "loop" else 0.25
+        a = max(0, int((c["start"] - pad_pre) * C.SR))
+        b = min(sig.shape[1], int((c["end"] + pad_post) * C.SR))
+        return sig[:, a:b]
+
+    # CLAP embeddings + zero-shot
+    vocab_t = None
+    if cands:
+        cl = models.clap()
+        clips = []
+        for c in cands:
+            m = audio_of(c).mean(0)
+            if len(m) > C.SR * 10:
+                mid = len(m) // 2
+                m = m[mid - C.SR * 5: mid + C.SR * 5]
+            clips.append(to_mono48(m))
+        embs = cl.embed_audio(clips)
+        T = cl.embed_text(tuple(TYPE_PROMPTS.values()))
+        M = cl.embed_text(tuple(MOOD_PROMPTS.values()))
+        scale = float(cl.model.logit_scale_a.exp().clamp(max=100))
+        logits = scale * embs @ T.T
+        probs = np.exp(logits - logits.max(1, keepdims=True))
+        probs /= probs.sum(1, keepdims=True)
+        moods = embs @ M.T
+        kept = []
+        for c, e, pr, md in zip(cands, embs, probs, moods):
+            cat = classify(c, pr, stems is not None)
+            if cat is None:
+                continue
+            c["category"], c["subtype"] = cat
+            c["emb"], c["probs"], c["moods"] = e, pr, md
+            c["quality"] *= 1 - 0.8 * float(pr[TYPE_KEYS.index("drums")])
+            if c["quality"] >= C.MIN_QUALITY:
+                kept.append(c)
+        cands = _cap(_dedupe(kept))
+
+    # render + store
+    con.execute("DELETE FROM samples WHERE track_id=? AND parent_id IS NULL AND category != 'Percussion'", (row["id"],))
+    feat_by = {"mix": mix, **(feats or {})}
+    from .recat import overrides
+    user_overrides = overrides()
+    n = 0
+    for c in cands:
+        f0, f1 = sec_to_frames(c["start"]), max(sec_to_frames(c["end"]), sec_to_frames(c["start"]) + 2)
+        st = segment_stats(feat_by[c["feat_src"]], f0, f1)
+        pc, scale, kstr, kfrom = sample_key(st["chroma"], tk["pc"], tk["scale"])
+        if c["category"] == "Textures & Field" and kstr < 0.6:
+            kfrom = "none"
+        note = PITCHES[int(np.argmax(st["chroma"]))] if c["kind"] == "oneshot" else None
+        bpm = tk["bpm"] if tk["tempo_ok"] else None
+        sid = hashlib.sha1(f"{row['path']}|{c['source']}|{c['start']:.2f}|{c['kind']}".encode()).hexdigest()[:6]
+        if sid in user_overrides:  # your manual recategorisation always wins
+            c["category"], c["subtype"] = user_overrides[sid]
+        cam = camelot(pc, scale)
+        keystr = "nokey" if kfrom == "none" else f"{int(cam[:-1]):02d}{cam[-1]}-{key_label(pc, scale)}"
+        if c["category"] == "Vocals" and c["subtype"] == "Chops" and note:
+            keystr = f"{keystr}-{note}"
+        bpmstr = f"{bpm:.0f}bpm" if bpm else "free"
+        pref = SUBTYPE_PREFIX.get((c["category"], c["subtype"]), SUBTYPE_PREFIX.get(c["category"], "Smp"))
+        if c["kind"] == "loop":
+            pref += f"-Loop{c['bars']}"
+        mm, ss = divmod(int(c["start"]), 60)
+        fname = f"{pref}_{keystr}_{bpmstr}_{_safe(row['artist'], 24)}-{_safe(row['title'], 32)}_{mm}m{ss:02d}s_{sid}.wav"
+        path = sample_dir(policy) / c["category"] / c["subtype"] / fname
+        fade_out = 0.003 if c["kind"] == "loop" else 0.12
+        clip = audio_of(c)
+        write_wav(path, clip, fade_in=0.003, fade_out=fade_out)
+        a = np.abs(clip).max(0)
+        env = [float(x.max()) for x in np.array_split(a, 64)] if len(a) >= 64 else [0.0] * 64
+        env = (np.array(env) / (max(env) + 1e-9) * 99).astype(int).tolist()
+        con.execute(
+            """INSERT OR REPLACE INTO samples(id, track_id, source, rendered_from, category, subtype, kind,
+               start, dur, bpm, bars, key, scale, camelot, key_strength, key_from, note, chroma, centroid,
+               flatness, pratio, dominance, drum_leak, loudness, quality, clap, type_probs, mood_sims,
+               instrument, path, env) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (sid, row["id"], c["source"], c["rendered_from"], c["category"], c["subtype"], c["kind"],
+             c["start"], c["end"] - c["start"], bpm, c.get("bars"), PITCHES[pc], scale, cam, kstr, kfrom, note,
+             json.dumps(np.round(st["chroma"], 3).tolist()), st["centroid"], st["flatness"], st["pratio"],
+             c["dominance"], c["drum_leak"], st["loudness"], round(c["quality"], 3),
+             c["emb"].astype(np.float16).tobytes(),
+             json.dumps(dict(zip(TYPE_KEYS, np.round(c["probs"], 3).tolist()))),
+             json.dumps(dict(zip(MOOD_PROMPTS, np.round(c["moods"], 4).tolist()))),
+             c.get("instrument"), str(path.relative_to(C.LIB_ROOT)), json.dumps(env)))
+        n += 1
+
+    vocal_frac = float(masks["vocals"].mean()) if "vocals" in masks else None
+    con.execute(
+        """UPDATE tracks SET status='done', error=NULL, bpm=?, bpm_conf=?, tempo_ok=?, key=?, scale=?, camelot=?,
+           key_strength=?, separated=?, clean_frac=?, vocal_frac=?, processed_at=datetime('now') WHERE id=?""",
+        (tk["bpm"], tk["bpm_conf"], int(tk["tempo_ok"]), PITCHES[tk["pc"]], tk["scale"], tk["camelot"],
+         tk["key_strength"], int(do_sep), clean_frac, vocal_frac, row["id"]))
+    con.commit()
+    if verbose:
+        tqdm.write(f"  {row['artist']} - {row['title']}: {n} samples, {tk['bpm']:.0f}bpm {tk['camelot']} "
+                   f"(sep {t_sep - t0:.0f}s, total {time.time() - t0:.0f}s)")
+    return n
+
+
+def remove_track_files(con, track_id):
+    for r in con.execute("SELECT path FROM samples WHERE track_id=? AND parent_id IS NULL AND category != 'Percussion'", (track_id,)):
+        p = C.LIB_ROOT / r["path"]
+        if p.exists():
+            p.unlink()
+    con.execute("DELETE FROM samples WHERE track_id=? AND parent_id IS NULL AND category != 'Percussion'", (track_id,))
+    con.commit()
+
+
+def _envelope(path, secs=60):
+    """Loudness envelope of the first minute: 50 ms frames, 8 kHz mono. Cheap, and robust to encoding."""
+    import subprocess
+    out = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-t", str(secs), "-i", str(path), "-map", "0:a:0",
+                          "-f", "f32le", "-ac", "1", "-ar", "8000", "-"], capture_output=True, check=True).stdout
+    y = np.frombuffer(out, np.float32)
+    n = len(y) // 400
+    return np.sqrt((y[:n * 400].reshape(n, 400) ** 2).mean(1) + 1e-9)
+
+
+def duplicate_of(con, row):
+    """An already-mined track that is the same recording (same artist and title ignoring case, length within 1 s,
+    and the same loudness envelope; generic titles like "III. Adagio" or "Untitled" need the audio check)."""
+    cands = con.execute("""SELECT id, path FROM tracks WHERE status='done' AND id != ?
+                           AND lower(trim(artist))=lower(trim(?)) AND lower(trim(title))=lower(trim(?))
+                           AND abs(duration - ?) < 1""",
+                        (row["id"], row["artist"] or "", row["title"] or "", row["duration"] or 0)).fetchall()
+    if not cands:
+        return None
+    try:
+        a = np.log(_envelope(row["path"]))
+        for c in cands:
+            b = np.log(_envelope(c["path"]))
+            n = min(len(a), len(b))
+            if n > 100 and np.corrcoef(a[:n], b[:n])[0, 1] > 0.97:
+                return c["id"]
+    except Exception:
+        return None
+    return None
+
+
+def run(where_sql="1=1", params=(), separate_mode="auto", limit=None, reprocess=False, verbose=True,
+        vocals="demucs", include_reference=False, order_by="artist, album, path"):
+    con = connect()
+    status_clause = "" if reprocess else "AND status IN ('new','error')"
+    if not include_reference:
+        status_clause += " AND COALESCE(policy,'source') != 'reference'"
+    q = f"SELECT * FROM tracks WHERE ({where_sql}) {status_clause} ORDER BY {order_by}"
+    rows = con.execute(q, params).fetchall()
+    if "scout" in order_by:  # ranked runs: max 3 tracks per album, 6 per artist, so no source floods the library
+        per_album, per_artist, kept = {}, {}, []
+        for r in rows:
+            a, al = r["artist"] or "?", (r["artist"] or "?") + "|" + (r["album"] or "?")
+            if per_album.get(al, 0) < 3 and per_artist.get(a, 0) < 6:
+                kept.append(r)
+                per_album[al] = per_album.get(al, 0) + 1
+                per_artist[a] = per_artist.get(a, 0) + 1
+        rows = kept
+    if limit:
+        rows = rows[:limit]
+    print(f"{len(rows)} tracks to process (separation: {separate_mode}, vocals: {vocals})")
+    total = 0
+    for row in tqdm(rows, desc="process"):
+        try:
+            dup = duplicate_of(con, row)
+            if dup:
+                remove_track_files(con, row["id"])
+                con.execute("UPDATE tracks SET status='duplicate', error=? WHERE id=?", (f"same recording as track {dup}", row["id"]))
+                con.commit()
+                tqdm.write(f"  skip {row['artist']} - {row['title']}: same recording as track {dup}")
+                continue
+            remove_track_files(con, row["id"])
+            total += process_track(con, row, separate_mode, verbose, vocals)
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            con.execute("UPDATE tracks SET status='error', error=? WHERE id=?",
+                        (f"{e}\n{traceback.format_exc()[-800:]}", row["id"]))
+            con.commit()
+            tqdm.write(f"  ERROR {row['path']}: {e}")
+    print(f"done: {total} samples written")
+
+
+def reclassify():
+    """Re-derive category/subtype from stored CLAP probabilities (no audio work); move/rename files."""
+    con = connect()
+    rows = con.execute("""SELECT s.*, t.separated FROM samples s JOIN tracks t ON t.id=s.track_id""").fetchall()
+    moved = dropped = 0
+    from .recat import overrides
+    ov = overrides()
+    for r in rows:
+        if r["id"] in ov or r["parent_id"] or r["category"] == "Percussion":
+            continue  # manual overrides and your edits are never re-derived
+        probs = json.loads(r["type_probs"])
+        if r["category"] == "Vocal Atmospheres":
+            group = "vocal_atmos"
+        elif r["source"] == "vocals":
+            group = "vocal_chop" if r["kind"] == "oneshot" else "vocal_phrase"
+        else:
+            group = "oneshot" if r["kind"] == "oneshot" else "long"
+        c = dict(group=group, kind=r["kind"], source=r["source"])
+        cat = classify(c, [probs[k] for k in TYPE_KEYS], bool(r["separated"]))
+        old = C.LIB_ROOT / r["path"]
+        if cat is None:
+            old.unlink(missing_ok=True)
+            con.execute("DELETE FROM samples WHERE id=?", (r["id"],))
+            dropped += 1
+            continue
+        if cat == (r["category"], r["subtype"]) and c.get("instrument") == r["instrument"]:
+            continue
+        pref = SUBTYPE_PREFIX.get(cat, SUBTYPE_PREFIX.get(cat[0], "Smp"))
+        if r["kind"] == "loop":
+            pref += f"-Loop{r['bars']}"
+        base = C.LIB_ROOT / "_Reference" if r["path"].startswith("_Reference/") else C.LIB_ROOT
+        new = base / cat[0] / cat[1] / (pref + "_" + old.name.split("_", 1)[1])
+        if old.exists() and new != old:
+            new.parent.mkdir(parents=True, exist_ok=True)
+            old.rename(new)
+        con.execute("UPDATE samples SET category=?, subtype=?, instrument=?, path=? WHERE id=?",
+                    (cat[0], cat[1], c.get("instrument"), str(new.relative_to(C.LIB_ROOT)), r["id"]))
+        moved += 1
+    con.commit()
+    print(f"reclassified {moved}, dropped {dropped}")

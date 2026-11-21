@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Stretch shootout</title>
+<style>
+:root{--bg:#0e1013;--panel:#161a20;--line:#262b33;--fg:#e6e6e6;--mute:#8b93a1;--acc:#7fd1b9;--acc2:#c792ea}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:20px 16px 80px}
+main{max-width:900px;margin:auto}h1{font-size:20px;margin:0 0 4px}p.lead{color:var(--mute);margin:0 0 18px}
+.item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 14px}
+.item h2{font-size:14px;margin:0 0 2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.item h2 .task{color:var(--acc);font-weight:600}.item .sub{color:var(--mute);font-size:12px;margin-bottom:8px}
+.row{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:5px 0;border-top:1px solid #1d2128}
+button{background:#1d2229;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--acc)}button.on{background:var(--acc);color:#000;border-color:var(--acc)}
+.play{width:44px;font-weight:700}.meth{color:var(--mute);font-size:12px}.meth b{color:var(--acc2);font-weight:600}
+.stars button{padding:2px 7px;font-size:12px;margin-left:2px}.bar{height:4px;background:var(--line);border-radius:2px;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--acc);border-radius:2px}
+.top{position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2;display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:14px}
+.top .prog{color:var(--mute);font-size:12px;margin-left:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+.help{font-size:12px;color:var(--mute)}
+</style></head><body><main>
+<h1 id="ttl">Stretch & repitch shootout</h1>
+<p class="lead">Each sample is transformed by every candidate method. The letters are shuffled and every clip is matched for loudness.
+Click a letter to play it. Click another letter while it plays to switch at the same point in the sound.
+Rate each clip from 1 (artifacts are obvious) to 5 (sounds untouched). You can reveal the methods at any time. Note that Re-Pitch is easy to spot: on a pitch task it also changes the length.</p>
+<div class="top"><button id="stop">■ stop</button><button id="loop" class="on">loop</button><button id="reveal">reveal methods</button>
+<span class="help">keys: 1–8 play A–H of the last sample you touched · space stops</span><span class="prog" id="prog"></span></div>
+<div id="items"></div><div id="res"></div></main>
+<script>
+const AC=new AudioContext();let M,VOTES={},REVEAL=false,LOOP=true,cur=null,lastItem=0;const BUF={};
+async function buf(f){if(!BUF[f])BUF[f]=fetch('/_data/shootout/'+f).then(r=>r.arrayBuffer()).then(a=>AC.decodeAudioData(a));return BUF[f]}
+function stop(){if(cur){try{cur.src.stop()}catch(e){}cur.btn.classList.remove('on');cancelAnimationFrame(cur.raf);cur=null}}
+async function play(f,btn,bar){AC.resume();let frac=0;
+  if(cur&&cur.btn===btn){stop();return}
+  if(cur){const b=cur.b;frac=((AC.currentTime-cur.t0)%b.duration)/b.duration;stop()}
+  const b=await buf(f);const src=AC.createBufferSource();src.buffer=b;src.loop=LOOP;src.connect(AC.destination);
+  const off=frac*b.duration;src.start(0,off);btn.classList.add('on');
+  cur={src,btn,b,t0:AC.currentTime-off};src.onended=()=>{if(cur&&cur.src===src){stop()}};
+  const tick=()=>{if(!cur||cur.src!==src)return;bar.style.width=(((AC.currentTime-cur.t0)%b.duration)/b.duration*100)+'%';cur.raf=requestAnimationFrame(tick)};tick()}
+function render(){const el=document.getElementById('items');el.innerHTML='';let n=0,d=0;
+  M.items.forEach((it,ii)=>{const box=document.createElement('div');box.className='item';
+    box.innerHTML=`<h2>${it.label}<span class="task">${it.task}</span><button class="orig">▶ original</button></h2><div class="sub">${it.material} · ${it.path}</div><div class="bar"><i></i></div>`;
+    const bar=box.querySelector('.bar i');
+    box.querySelector('.orig').onclick=e=>{lastItem=ii;play(it.orig,e.target,bar)};
+    it.clips.forEach(c=>{n++;if(VOTES[c.clip])d++;const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<button class="play">${c.letter}</button><span class="meth">${REVEAL?'<b>'+M.about[c.method]+'</b>':'?'}</span><span class="stars">${[1,2,3,4,5].map(k=>`<button data-k="${k}" class="${VOTES[c.clip]==k?'on':''}">${k}</button>`).join('')}</span>`;
+      const pb=r.querySelector('.play');pb.dataset.item=ii;pb.onclick=()=>{lastItem=ii;play(c.file,pb,bar)};
+      r.querySelectorAll('.stars button').forEach(sb=>sb.onclick=async()=>{const k=+sb.dataset.k;const v=VOTES[c.clip]==k?0:k;
+        await fetch('/api/shootout/vote',{method:'POST',body:JSON.stringify({clip:c.clip,rating:v})});
+        if(v)VOTES[c.clip]=v;else delete VOTES[c.clip];r.querySelectorAll('.stars button').forEach(x=>x.classList.toggle('on',+x.dataset.k===v));prog()});
+      box.appendChild(r)});el.appendChild(box)});prog();results()}
+function prog(){let n=0,d=0;M.items.forEach(it=>it.clips.forEach(c=>{n++;if(VOTES[c.clip])d++}));document.getElementById('prog').textContent=`${d} / ${n} rated`}
+async function results(){const el=document.getElementById('res');if(!REVEAL){el.innerHTML='';return}
+  const r=await (await fetch('/api/shootout'+location.search)).json();
+  el.innerHTML='<div class="item"><h2>Results so far</h2><table><tr><th>material</th><th>method</th><th>avg</th><th>votes</th></tr>'+
+   r.results.filter(x=>M.about[x.method]&&(location.search.includes('tune')?x.material==='tune':x.material!=='tune')).map(x=>`<tr><td>${x.material}</td><td>${M.about[x.method]}</td><td>${x.avg.toFixed(2)}</td><td>${x.n}</td></tr>`).join('')+'</table></div>'}
+document.getElementById('stop').onclick=stop;
+document.getElementById('loop').onclick=e=>{LOOP=!LOOP;e.target.classList.toggle('on',LOOP);if(cur)cur.src.loop=LOOP};
+document.getElementById('reveal').onclick=e=>{REVEAL=!REVEAL;e.target.textContent=REVEAL?'hide methods':'reveal methods';render()};
+window.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(e.code==='Space'){e.preventDefault();stop();return}
+  const k=+e.key;if(k>=1&&k<=8){const bs=document.querySelectorAll(`.play[data-item="${lastItem}"]`);if(bs[k-1])bs[k-1].click()}});
+if(location.search.includes('tune')){document.getElementById('ttl').textContent='Vocal tuning shootout';document.querySelector('p.lead').innerHTML='Each phrase is tuned to its own key by every candidate engine, at two settings. One of the letters is the <b>untouched original</b>, hidden among them: if an engine scores as high as the original, its processing is inaudible. Click a letter to play it, and click another while it plays to switch at the same point. Rate each clip from 1 (artifacts are obvious) to 5 (sounds untouched).'}
+fetch('/api/shootout'+location.search).then(r=>r.json()).then(j=>{M=j;VOTES=j.votes||{};render()});
+</script></body></html>
