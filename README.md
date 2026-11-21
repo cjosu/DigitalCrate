@@ -5,9 +5,6 @@ you own, cuts out the *clean* moments (exposed vocals, pads, chords, textures, d
 key, tempo, instrument and mood. It then gives you a browser-based studio for finding, auditioning, combining and
 reshaping those sounds before you drop them into Ableton Live.
 
-It was built for making slow, hazy, voice-haunted electronic music (think Gas, Burial or Grouper fed through a techno
-lens), but nothing in it is genre-specific.
-
 ![The browser: thousands of samples, a key wheel, and the "goes well with" panel](docs/img/01-browser.png)
 
 ---
@@ -46,9 +43,8 @@ lens), but nothing in it is genre-specific.
   - generative "mangle" variations.
 - **Exports to Ableton:** organised sample folders, key/tempo-conformed copies, MIDI files, and ready-made
   **Drum Racks** (`.adg`).
-- **Scouts YouTube for raw singing.** It listens to a minute of each search result and ranks it for clean,
+- **Scans YouTube for raw singing audio.** It listens to a minute of each search result and ranks it for clean,
   unaccompanied voice.
-- **Ships a blind A/B shootout** for comparing time-stretch and pitch-shift engines on your own material.
 
 ## Quick start
 
