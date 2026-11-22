@@ -516,7 +516,8 @@ class Handler(SimpleHTTPRequestHandler):
                          req.get("action"))
             elif self.path == "/api/drumkit":
                 from .drumkit import complete
-                return self._json(complete(req.get("paths") or [], int(req.get("per", 3)), req.get("kinds")))
+                return self._json(complete(req.get("paths") or [], int(req.get("per", 30)), req.get("kinds"),
+                                           req.get("steer"), bool(req.get("everything"))))
             elif self.path.startswith("/api/collections/"):
                 from . import collections_ as CO
                 op = self.path.rsplit("/", 1)[1]

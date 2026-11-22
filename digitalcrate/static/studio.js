@@ -411,19 +411,30 @@ function drumLaneHTML(l,k){const n=16*l.bars;
   <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><span class="dlab" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')}">${esc(s[F.sub]||'hit')}</span>
   <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}" data-dstep="${k}:${r}:${j}" ${v?`style="opacity:${(0.35+0.65*v).toFixed(2)}"`:''}></button>`).join('')}</div>
   <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
-function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading)return '<div class="sub dfind">listening for hits that match this kit…</div>';if(f.error)return `<div class="sub dfind">${esc(f.error)}</div>`;
- if(!f.missing.length)return '<div class="sub dfind">every kind of hit is covered: kick, snare, clap, hats, cymbals, shaker, tom, percussion</div>';
- return `<div class="dfind"><div class="sub">Missing from this kit, picked to sound like the same recording (room, tape, brightness):</div>${f.missing.map(m=>`<div class="dfrow"><span class="dlab">${esc(m.label)}</span><div class="dfpicks">${m.picks.map(p=>{const i=byPath.get(p.path);if(i==null)return'';const s=S[i];
-  return `<span class="dfpick"><button class="tbtn" data-dfplay="${esc(p.path)}" title="hear it">▶</button><span class="sub" title="${esc(s[F.artist])} — ${esc(s[F.title])} · ${esc(p.sub)}">${esc(s[F.artist]).slice(0,18)}${p.same_song?' · same song':''}</span><button class="tbtn" data-dfadd="${i}" title="add it as a pad (with a starter part)">＋</button></span>`}).join('')}</div></div>`).join('')}</div>`}
-async function drumFind(l){l.find={loading:true};drawSK();try{const r=await api('api/drumkit',{paths:l.pads.map(p=>p.path)});l.find=r.error?{error:r.error}:r}catch(e){l.find={error:"couldn't search: "+e.message}}drawSK()}
+function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading&&!f.missing)return '<div class="sub dfind">listening for hits that match this kit…</div>';if(f.error)return `<div class="sub dfind">${esc(f.error)}</div>`;
+ const rows=f.missing.filter(m=>f.all||!m.have);
+ const pick=(m,p)=>{const i=byPath.get(p.path);if(i==null)return'';const s=S[i];const steer=f.steer[m.kind]===p.path;
+  return `<span class="dfpick${steer?' steer':''}"><button class="tbtn" data-dfplay="${esc(p.path)}" title="hear it">▶</button><span class="sub" title="${esc(s[F.artist])} — ${esc(s[F.title])} · ${esc(p.sub)}">${esc(s[F.artist]).slice(0,18)}${p.same_song?' · same song':''}</span>
+   <button class="tbtn" data-dfsteer="${k}|${m.kind}|${esc(p.path)}" title="more like this: re-rank ${esc(m.label.toLowerCase())} toward this one's sound (click again to undo)">≈</button><button class="tbtn" data-dfno="${k}|${m.kind}|${esc(p.path)}" title="not this one: the next slides in">✕</button><button class="tbtn" data-dfadd="${i}" title="add it as a pad (with a starter part)">＋</button></span>`};
+ return `<div class="dfind"><div class="sub" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span>${rows.length?'Picked to sound like the same recording (room, tape, brightness):':'Every kind is covered.'}</span>
+  <label><input type="checkbox" data-dfall="${k}" ${f.all?'checked':''}> also kinds you have (alternatives)</label>${f.loading?'<span>…</span>':''}</div>
+  ${rows.map(m=>{const vis=m.picks.filter(p=>!f.hidden.has(p.path)),o=Math.min(f.off[m.kind]||0,Math.max(0,vis.length-3)),page=vis.slice(o,o+3);
+  return `<div class="dfrow"><span class="dlab">${esc(m.label)}${m.have?' <span class="sub">(have)</span>':''}${m.steered?' <span class="sub">· steered</span>':''}</span><div class="dfpicks">${page.map(p=>pick(m,p)).join('')||'<span class="sub">no more</span>'}
+   <span class="dfnav">${o>0?`<button class="tbtn" data-dfmore="${k}|${m.kind}|-3" title="back">‹</button>`:''}<span class="sub">${vis.length?`${o+1}–${Math.min(o+3,vis.length)} of ${vis.length}`:''}</span>${o+3<vis.length?`<button class="tbtn" data-dfmore="${k}|${m.kind}|3" title="three more">↻ more</button>`:''}</span></div></div>`}).join('')}</div>`}
+async function drumFind(l,keep){const prev=l.find||{};l.find={...prev,loading:true,missing:keep?prev.missing:null,off:keep?prev.off||{}:{},hidden:prev.hidden||new Set(),steer:prev.steer||{},all:!!prev.all};drawSK();
+ try{const r=await api('api/drumkit',{paths:l.pads.map(p=>p.path),steer:l.find.steer,everything:true});
+  if(r.error)l.find={error:r.error};else{const off={...l.find.off};r.missing.forEach(m=>{if(m.steered)off[m.kind]=0});Object.assign(l.find,{missing:r.missing,loading:false,off})}}catch(e){l.find={error:"couldn't search: "+e.message}}drawSK()}
 // the playing step lights up
 function drumHeads(){const now=AC.currentTime;SK.lanes.forEach((l,k)=>{if(l.type!=='drums')return;const g=document.querySelector(`[data-dgrid="${k}"]`);if(!g)return;
  const L=barLen(),v=(l.sched||[]).filter(x=>now>=x.t&&now<x.t+L).pop(),cur=SK.playing&&v?(v.bar%l.bars)*16+Math.floor((now-v.t)/(L/16)):-1;
  if(g._cur===cur)return;g._cur=cur;g.querySelectorAll('.dstep.now').forEach(b=>b.classList.remove('now'));if(cur>=0)g.querySelectorAll(`[data-dstep$=":${cur}"]`).forEach(b=>b.classList.add('now'))})}
-$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dstart],[data-dclear],[data-dfind],[data-dfplay],[data-dfadd]');if(!t)return;e.stopPropagation();
+$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dstart],[data-dclear],[data-dfind],[data-dfplay],[data-dfadd],[data-dfmore],[data-dfno],[data-dfsteer]');if(!t)return;e.stopPropagation();
+ if(t.dataset.dfmore!=null){const [k,kind,d]=t.dataset.dfmore.split('|'),f=SK.lanes[+k].find;f.off[kind]=Math.max(0,(f.off[kind]||0)+(+d));drawSK();return}
+ if(t.dataset.dfno!=null){const [k,,p]=t.dataset.dfno.split('|');SK.lanes[+k].find.hidden.add(p);drawSK();return}
+ if(t.dataset.dfsteer!=null){const [k,kind,p]=t.dataset.dfsteer.split('|'),l=SK.lanes[+k];if(l.find.steer[kind]===p)delete l.find.steer[kind];else l.find.steer[kind]=p;drumFind(l,true);return}
  if(t.dataset.dfind!=null){const l=SK.lanes[+t.dataset.dfind];if(l.find&&!l.find.loading){l.find=null;drawSK();return}drumFind(l);return}
  if(t.dataset.dfplay!=null){stopAll();const a=new Audio(url(t.dataset.dfplay));a.play();players.set('df',a);a.onended=()=>players.delete('df');return}
- if(t.dataset.dfadd!=null){const l=drumLane();await drumAdd(+t.dataset.dfadd);if(l&&l.find)drumFind(l);return}
+ if(t.dataset.dfadd!=null){const l=drumLane();await drumAdd(+t.dataset.dfadd);if(l&&l.find)drumFind(l,true);return}
  if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];p.steps[j]=!v?1:v>0.7?0.55:0;
   t.classList.toggle('on',!!p.steps[j]);t.style.opacity=p.steps[j]?(0.35+0.65*p.steps[j]).toFixed(2):'';return}
  if(t.dataset.dpad){const [k,r]=t.dataset.dpad.split(':').map(Number),p=SK.lanes[k].pads[r];if(!p.buf)return;AC.resume();const s=AC.createBufferSource(),g=AC.createGain();s.buffer=p.buf;g.gain.value=0.8*(p.norm||1);s.connect(g);g.connect(AC.destination);s.start();return}
@@ -438,6 +449,7 @@ document.addEventListener('click',async e=>{if(!e.target.closest('#racksk'))retu
  const per={},order=['kick','snare','hat','shaker','tom','perc'],ids=[];  // a playable kit: up to 2 of each kind, 12 pads at most
  RACK.ids.forEach(i=>{const k=drumKind(i);(per[k]||(per[k]=[])).push(i)});order.forEach(k=>(per[k]||[]).slice(0,2).forEach(i=>ids.length<12&&ids.push(i)));const l=drumLane(true);if(!l){toast('the sketchpad holds 8 lanes');return}
  for(const i of ids)await drumAdd(i,{quiet:true});toast(`${ids.length} pads in the drum lane · press ▶ in the sketchpad`)},true);
+$('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.dfall!=null){const l=SK.lanes[+t.dataset.dfall];l.find.all=t.checked;drawSK()}},true);
 $('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dswing!=null)SK.lanes[+t.dataset.dswing].swing=+t.value},true);
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
  stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)

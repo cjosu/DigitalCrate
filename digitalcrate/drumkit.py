@@ -42,8 +42,10 @@ def kind_of(subtype):
     return KIND.get(subtype)
 
 
-def complete(paths, per=3, kinds=None):
-    """For each kind the kit lacks (or `kinds`), the `per` best-fitting hits, one per song."""
+def complete(paths, per=30, kinds=None, steer=None, everything=False):
+    """For each kind the kit lacks (all kinds with `everything`, or just `kinds`), up to `per` best-fitting hits,
+    one per song, best first: the page shows three at a time. steer: {kind: path} re-ranks that kind toward one
+    hit's character ("more like this"), still anchored to the kit."""
     con = connect()
     H = _hits(con)
     have = [H["pos"][p] for p in paths if p in H["pos"]]
@@ -64,9 +66,14 @@ def complete(paths, per=3, kinds=None):
     score = fit + 0.05 * (H["q"] - 0.5) + 0.03 * np.clip(taste, -2, 3) + 0.02 * np.isin(H["track"], list(kit_tracks))
     out = []
     for k, label in ORDER:
-        if (kinds and k not in kinds) or (not kinds and k in covered):
+        if (kinds and k not in kinds) or (not kinds and not everything and k in covered):
             continue
-        idx = [i for i in np.argsort(-score) if H["kind"][i] == k and H["paths"][i] not in disliked and i not in have]
+        sc = score
+        if steer and steer.get(k) in H["pos"]:  # lean toward this hit's character, half and half with the kit's
+            s2 = style + H["R"][H["pos"][steer[k]]]
+            s2 /= np.linalg.norm(s2) + 1e-9
+            sc = H["R"] @ s2 + (score - fit)
+        idx = [i for i in np.argsort(-sc) if H["kind"][i] == k and H["paths"][i] not in disliked and i not in have]
         picks, songs = [], set()
         for i in idx:
             if H["track"][i] in songs:
@@ -77,5 +84,5 @@ def complete(paths, per=3, kinds=None):
             if len(picks) >= per:
                 break
         if picks:
-            out.append(dict(kind=k, label=label, picks=picks))
+            out.append(dict(kind=k, label=label, picks=picks, have=k in covered, steered=bool(steer and k in steer)))
     return dict(missing=out, covered=sorted(covered))

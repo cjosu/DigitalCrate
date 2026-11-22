@@ -54,3 +54,4 @@
 .dfind{margin-top:6px;padding:6px 8px;border:1px dashed #2f353e;border-radius:8px;display:flex;flex-direction:column;gap:4px}
 .dfrow{display:grid;grid-template-columns:150px 1fr;gap:6px;align-items:center}.dfpicks{display:flex;flex-wrap:wrap;gap:4px 14px}
 .dfpick{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+.dfnav{display:inline-flex;gap:4px;align-items:center;margin-left:auto}.dfpick.steer{outline:1px solid var(--acc);border-radius:6px;padding:0 3px}
