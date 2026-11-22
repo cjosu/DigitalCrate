@@ -256,6 +256,8 @@ pytest --slow    # end to end on a synthetic track in a throwaway library: scan 
 
 ## Limitations
 
+- **macOS on Apple Silicon only.** Essentia has no Windows packages and the lyrics model needs Apple Silicon; other
+  parts (backups, background jobs, Ableton and plugin locations) are written for macOS too.
 - Developed against **Ableton Live 12**; Drum Racks are built from its factory rack. Link needs more testing with a
   running Live set.
 - Separation is very good, not perfect: listen before you commit. Automatic drum labels are often wrong.
