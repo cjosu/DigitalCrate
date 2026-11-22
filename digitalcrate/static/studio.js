@@ -392,15 +392,26 @@ async function drumAdd(i,{quiet=false,starter=true}={}){const l=drumLane(true);i
  const kind=drumKind(i),first=!l.pads.some(p=>drumKind(p.i)===kind);  // a starter pattern for the first pad of each kind
  const pad={i,path:S[i][F.path],db:0,mute:false,steps:starter&&first?drumStarter(kind):new Array(DSTEPS).fill(0)};
  l.pads.push(pad);SK.open=true;drawSK();drawProj();await drumLoad(l);drawSK();if(!quiet)toast(`pad ${l.pads.length} in the drum lane (${kind})`)}
+// offline (bounce, stems): a whole bar at once. Live playback uses drumTick, step by step, so edits are heard at once.
 function drumBar(ctx,dest,l,bar,t,L,arr){const base=(bar%l.bars)*16,st=L/16,solo=l.pads.some(p=>p.solo);
  if(ctx===AC){(l.sched||(l.sched=[])).push({t,bar});if(l.sched.length>8)l.sched.shift()}
  l.pads.forEach(p=>{if(!p.buf||p.mute||(solo&&!p.solo))return;for(let s=0;s<16;s++){const v=p.steps[base+s];if(!v)continue;
-  const tt=Math.max(t+s*st+(s%2?l.swing*st:0),ctx.currentTime),src=ctx.createBufferSource(),g=ctx.createGain();src.buffer=p.buf;
+  drumHit(ctx,dest,p,t+s*st+(s%2?l.swing*st:0),v,arr)}})}
+function drumTick(l){const L=barLen(),st=L/16,solo=l.pads.some(p=>p.solo);if(l.nextAbs==null)l.nextAbs=Math.max(0,Math.ceil((AC.currentTime-SK.start)/st));
+ l.live=l.live||new Map();
+ const look=document.hidden?1.5:0.12;  // background tabs tick about once a second: look further ahead there
+ while(SK.start+l.nextAbs*st<AC.currentTime+look){const abs=l.nextAbs++,bar=Math.floor(abs/16),s=abs%16,base=(bar%l.bars)*16;
+  if(s===0){(l.sched||(l.sched=[])).push({t:SK.start+bar*L,bar});if(l.sched.length>8)l.sched.shift()}
+  const t=SK.start+abs*st+(s%2?l.swing*st:0);
+  l.pads.forEach((p,r)=>{const v=p.steps[base+s];if(!v||!p.buf||p.mute||(solo&&!p.solo))return;const src=drumHit(AC,l.g,p,t,v,SK.voices);if(src)l.live.set(r+':'+(base+s),{src,t})})}
+ if(l.live.size>256)[...l.live.keys()].slice(0,128).forEach(k=>l.live.delete(k))}
+function drumHit(ctx,dest,p,t,v,arr){if(!p.buf)return null;
+  const tt=Math.max(t,ctx.currentTime),src=ctx.createBufferSource(),g=ctx.createGain();src.buffer=p.buf;
   const rate=padRate(p),a=p.start||0,len=Math.max(0.005,((p.end||p.buf.duration)-a)/rate),amp=v*(p.norm||1)*Math.pow(10,(p.db||0)/20);
   src.playbackRate.value=rate;src.connect(g);g.connect(dest);g.gain.setValueAtTime(amp,tt);
   if(p.decay){g.gain.setTargetAtTime(0,tt+0.005,p.decay/4.6);src.start(tt,a,Math.min(len,p.decay*1.5))}  // -40 dB at `decay`
   else{g.gain.setValueAtTime(amp,tt+Math.max(0,len-0.004));g.gain.linearRampToValueAtTime(0,tt+len);src.start(tt,a,len)}
-  if(arr){arr.push(src);src.onended=()=>{const k=arr.indexOf(src);if(k>=0)arr.splice(k,1)}}}})}
+  if(arr){arr.push(src);src.onended=()=>{const k=arr.indexOf(src);if(k>=0)arr.splice(k,1)}}return src}
 function drumLaneHTML(l,k){const n=16*l.bars;
  return `<div class="lane dlane${l.mute?' muted':''}" data-ln="${k}">
  <label class="onoff" title="turn the drum lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label>
@@ -440,7 +451,8 @@ $('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep
  if(t.dataset.dfplay!=null){stopAll();const a=new Audio(url(t.dataset.dfplay));a.play();players.set('df',a);a.onended=()=>players.delete('df');return}
  if(t.dataset.dfadd!=null){const l=drumLane();await drumAdd(+t.dataset.dfadd);if(l&&l.find)drumFind(l,true);return}
  if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];p.steps[j]=!v?1:v>0.7?0.55:0;
-  t.classList.toggle('on',!!p.steps[j]);t.style.opacity=p.steps[j]?(0.35+0.65*p.steps[j]).toFixed(2):'';return}
+  t.classList.toggle('on',!!p.steps[j]);t.style.opacity=p.steps[j]?(0.35+0.65*p.steps[j]).toFixed(2):'';
+  const q=SK.lanes[k].live&&SK.lanes[k].live.get(r+':'+j);if(q&&!p.steps[j]&&q.t>AC.currentTime){try{q.src.stop()}catch(err){}}return}
  if(t.dataset.dpad){const [k,r]=t.dataset.dpad.split(':').map(Number),p=SK.lanes[k].pads[r];if(!p.buf)return;AC.resume();
   const one={...SK.lanes[k],pads:[{...p,steps:[1],mute:false,solo:false}],bars:1,swing:0};drumBar(AC,AC.destination,one,0,AC.currentTime+0.01,barLen(),null);return}
  if(t.dataset.dmute){const [k,r]=t.dataset.dmute.split(':').map(Number),p=SK.lanes[k].pads[r];p.mute=!p.mute;drawSK();return}
@@ -496,8 +508,12 @@ const _edSavePad=edSave;edSave=async function(...a){const fp=ED&&ED.fromPad,n0=S
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
  stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)
 SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
- SK.lanes.forEach(l=>{l.g=AC.createGain();l.g.connect(SK.master)});skGains();SK.start=linkNextBar();SK.nextBar=0;SK.playing=true;SK.voices=[];skTick();requestAnimationFrame(skAnim);drawSK()}
-function skTick(){if(!SK.playing)return;const L=barLen(),ahead=1.2+Math.max(0,...SK.lanes.map(l=>l.buf&&l.every?Math.min(8,skAttack(l)):0));while(SK.start+SK.nextBar*L<AC.currentTime+ahead){const t=SK.start+SK.nextBar*L;SK.lanes.forEach(l=>{if(l.g)skBar(AC,l.g,l,SK.nextBar,t,L,SK.voices)});SK.nextBar++}SK.timer=setTimeout(skTick,90)}
+ SK.lanes.forEach(l=>{l.g=AC.createGain();l.g.connect(SK.master);if(l.type==='drums'){l.nextAbs=null;l.live=new Map();l.sched=[]}});skGains();SK.start=linkNextBar();SK.nextBar=0;SK.playing=true;SK.voices=[];skTick();requestAnimationFrame(skAnim);drawSK()}
+function skTick(){if(!SK.playing)return;const L=barLen(),ahead=1.2+Math.max(0,...SK.lanes.map(l=>l.buf&&l.every&&l.type!=='drums'?Math.min(8,skAttack(l)):0));
+ SK.lanes.forEach(l=>{if(!l.g&&SK.master){l.g=AC.createGain();l.g.connect(SK.master);skGains()}});  // a lane added while playing joins in
+ while(SK.start+SK.nextBar*L<AC.currentTime+ahead){const t=SK.start+SK.nextBar*L;SK.lanes.forEach(l=>{if(l.g&&l.type!=='drums')skBar(AC,l.g,l,SK.nextBar,t,L,SK.voices)});SK.nextBar++}
+ SK.lanes.forEach(l=>{if(l.g&&l.type==='drums')drumTick(l)});  // drums: step by step, 120 ms ahead, so edits are heard at once
+ SK.timer=setTimeout(skTick,25)}
 function skStop(){SK.playing=false;clearTimeout(SK.timer);const now=AC.currentTime;if(SK.master){SK.master.gain.setTargetAtTime(0,now,0.015);const m=SK.master;setTimeout(()=>{try{m.disconnect()}catch(e){}},150)}
  SK.voices.forEach(s=>{try{s.stop(now+0.08)}catch(e){}});SK.voices=[];SK.lanes.forEach(l=>l.on=[]);drawSK()}
 function skAnim(){skHeads();drumHeads();if(!SK.playing)return;const el=$('skpos');if(el){const L=barLen(),t=AC.currentTime-SK.start;el.textContent=t<0?'waiting for the bar…':`bar ${Math.floor(t/L)+1} · beat ${Math.floor(t%L/(L/4))+1}`}requestAnimationFrame(skAnim)}
