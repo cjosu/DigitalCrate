@@ -42,6 +42,8 @@ def clean_params(p):
     return dict(start=float(p.get("start") or 0), end=float(p["end"]) if p.get("end") not in (None, "") else None,
                 stretch=float(p.get("stretch") or 1), semis=float(p.get("semis") or 0),
                 formant=bool(p.get("formant")), reverse=bool(p.get("reverse")),
+                tape=bool(p.get("tape")),  # pitch and speed together (Re-Pitch: best on voices in the blind test)
+                tone=min(20000.0, max(200.0, float(p.get("tone") or 20000))),  # low-pass cutoff, Hz (20000 = off)
                 fade_in=float(p.get("fade_in") or 5) / 1000, fade_out=float(p.get("fade_out") or 30) / 1000,
                 normalize=bool(p.get("normalize", True)), loop_xfade=float(p.get("loop_xfade") or 0) / 1000,
                 tune_key=(p.get("tune_key") or None), tune_strength=float(p.get("tune_strength") if p.get("tune_strength") is not None else 0.8),
@@ -61,7 +63,13 @@ def render(rel, p):
     y = y[:, a:max(b, a + 64)].copy()
     if p["reverse"]:
         y = y[:, ::-1].copy()
-    if abs(p["stretch"] - 1) > 1e-3 or abs(p["semis"]) > 1e-3:
+    if p["tape"] and abs(p["semis"]) > 1e-3:  # tape: the pitch change also changes the length, like a turntable
+        from .stretch import repitch
+        y = repitch(y, p["semis"])
+        if abs(p["stretch"] - 1) > 1e-3:
+            from .stretch import shift
+            y, _ = shift(y, 0.0, p["stretch"], engine="signalsmith")
+    elif abs(p["stretch"] - 1) > 1e-3 or abs(p["semis"]) > 1e-3:
         from .stretch import shift
         y, _ = shift(y, p["semis"], p["stretch"], engine="rubberband" if p["formant"] else "signalsmith",
                      formant=p["formant"])
@@ -70,6 +78,10 @@ def render(rel, p):
         y = tune(y, p.get("tune_key") or "C", strength=p["tune_strength"] if p.get("tune_key") else 0,
                  speed_ms=p["tune_speed"], detune_cents=p["tune_detune"], drift_cents=p["tune_drift"],
                  engine=p["tune_engine"])
+    if p["tone"] < 19000:  # darker: a gentle 12 dB/oct low-pass
+        from pedalboard import LowpassFilter, Pedalboard
+        y = Pedalboard([LowpassFilter(cutoff_frequency_hz=p["tone"]), LowpassFilter(cutoff_frequency_hz=p["tone"] * 1.4)])(
+            y.astype(np.float32), SR)
     if p.get("plugins"):  # your AU/VST3 effects (plugins.py), with room for a reverb or delay to ring out
         from .plugins import apply
         y = apply(y, SR, p["plugins"], tail=p.get("tail") or 0)

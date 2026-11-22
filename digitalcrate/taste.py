@@ -239,6 +239,7 @@ def _trees(Xl, yl, X_all, unl, n_pos, rng):
             clf = HistGradientBoostingClassifier(max_iter=200, learning_rate=0.05, max_leaf_nodes=15,
                                                  l2_regularization=1.0, random_state=0)
             clf.fit(np.vstack([Xl, X_all[tb]]), np.r_[yl, np.zeros(len(tb))])
+            _trees.last = clf  # kept for scoring audio outside the library (suggest.py)
             return clf.predict_proba(X_all)[:, 1]
     except Exception as e:  # the regression alone still works
         print(f"taste: trees skipped ({e})")
@@ -371,6 +372,13 @@ def fit(recent_hours=None, verbose=False, labels=None):
         # songs you haven't touched 0.758 -> 0.787 -> 0.797
         model = z(pz + tz) if tz is not None else pz
         result["parts"] = dict(regression=pz, trees=tz, knn=kz, song=sz)
+        # for scoring audio that isn't in the library (suggest.py): the models and each part's library scale
+        sm = (pz + tz) if tz is not None else pz
+        result["critic"] = dict(trees=getattr(_trees, "last", None) if tz is not None else None, pos_E=np.stack(pos),
+                                prob=(float(prob.mean()), float(prob.std() + 1e-9)),
+                                tree=(float(tp.mean()), float(tp.std() + 1e-9)) if tz is not None else None,
+                                sum=(float(sm.mean()), float(sm.std() + 1e-9)),
+                                knn=(float(knn.mean()), float(knn.std() + 1e-9)))
         result["score"] = 0.7 * model + 0.3 * kz + 0.3 * sz
         rng2 = np.random.default_rng()
         bt = rng2.multivariate_normal(beta, cov)

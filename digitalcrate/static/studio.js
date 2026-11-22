@@ -648,6 +648,41 @@ const _edParamsFx=edParams;
 edParams=function(){const p=_edParamsFx();if($('fxp')&&$('fxp').value){const pr={};$('fxctl').querySelectorAll('[data-fx][data-touched]').forEach(el=>{pr[el.dataset.fx]=el.type==='checkbox'?el.checked:el.tagName==='SELECT'?el.value:+el.value});
  p.plugins=[{path:$('fxp').value,params:pr}];p.tail=+$('fxtail').value}return p};
 
+// ---------- ✨ edit suggestions, judged by your taste model (suggest.py)
+let SG=null;
+const _openEditorSg=openEditor;
+openEditor=async function(i){await _openEditorSg(i);const box=$('editor');if(!box||box.hidden||!$('edprev')||$('edsg')||!SERVED)return;
+ const row=$('edprev').closest('.edrow'),d=document.createElement('div');d.id='edsg';d.style.margin='6px 0';
+ d.innerHTML=`<div class="edrow"><button id="sgbtn" title="try a dozen edits that suit this kind of sound and let your taste model pick">✨ suggest edits</button>${hq('suggest')}<span class="sub" id="sgmsg"></span></div><div id="sglist"></div>`;
+ row.parentNode.insertBefore(d,row);$('sgbtn').onclick=()=>sgRun(i)};
+const sgFb=(x,action)=>SG&&api('api/suggest/feedback',{path:S[SG.i][F.path],id:S[SG.i][F.id],move:x.id,family:x.family,arm:x.arm,material:x.material,action}).catch(()=>{});
+async function sgRun(i){const s=S[i];$('sgbtn').disabled=true;$('sglist').innerHTML='';$('sgmsg').textContent='trying a dozen edits on the selection… (a few seconds)';
+ let r;try{r=await api('api/suggest',{path:s[F.path],project_key:PROJ.key||'',start:ED&&ED.sel?ED.sel[0]:0,end:ED&&ED.sel?ED.sel[1]:null})}
+ catch(e){$('sgbtn').disabled=false;$('sgmsg').textContent="couldn't: "+e.message;return}
+ $('sgbtn').disabled=false;if(r.error){$('sgmsg').textContent=r.error;return}
+ SG={i,r};const up=r.suggestions.filter(x=>x.arm==='critic'&&x.delta>0).length;
+ $('sgmsg').textContent=`tried ${r.tried} · `+(up?`${up} it thinks you'd like more than the original`:'it rates the original highest, so these are the ones it minds least');
+ $('sglist').innerHTML=r.suggestions.map((x,k)=>`<div class="prow" data-sgk="${k}"><button class="play" data-sgplay="${k}">▶</button><div style="min-width:0">
+  <div class="name">${x.arm==='wildcard'?'<span class="badge" style="background:#5b6370" title="picked at random from the rest, to check the model">wildcard</span> ':''}${esc(x.label)}</div>
+  <div class="meta">${x.delta>=0?'+':''}${x.delta.toFixed(2)} taste · ${Math.round(x.close*100)}% like the original</div></div>
+  <div style="display:flex;gap:6px"><button data-sguse="${k}" title="set the editor to this edit, then adjust anything">use</button><button data-sgno="${k}" title="not this one (it learns which kinds of edit you keep)">✕</button></div></div>`).join('')}
+async function sgApply(x){const p=x.params,set=(id,v)=>{const el=$(id);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v;el.dispatchEvent(new Event('input'))};
+ set('edst',p.stretch||1);set('edpi',p.semis||0);set('edfm',false);set('edtape',!!p.tape);set('edrev',!!p.reverse);set('edtone',toneVal(p.tone||20000));
+ if($('tnkey')){const k=p.tune_key||'';if(k&&![...$('tnkey').options].some(o=>o.value===k))$('tnkey').insertAdjacentHTML('beforeend',`<option value="${esc(k)}">${esc(k)}</option>`);
+  $('tnkey').value=k;set('tnstr',p.tune_strength??0.8);set('tnspd',p.tune_speed??60);set('tndet',0);set('tndri',0)}
+ if($('fxp')){const pl=(p.plugins||[])[0];if(($('fxp').value||'')!==(pl?pl.path:'')){$('fxp').value=pl?pl.path:'';$('fxp').dispatchEvent(new Event('change'))}
+  if(pl){for(let t=0;t<50&&!$('fxctl').querySelector('[data-fx]');t++)await new Promise(r=>setTimeout(r,100));
+   Object.entries(pl.params||{}).forEach(([k,v])=>{const el=$('fxctl').querySelector(`[data-fx="${CSS.escape(k)}"]`);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v;el.dataset.touched=1;el.dispatchEvent(new Event('input'))});
+   if(p.tail!=null){$('fxtail').value=p.tail;$('fxtail').dispatchEvent(new Event('input'))}}}
+ ED.sugg=x;edChanged();$('edmsg').textContent=`set to “${x.label}” · adjust anything, then ▶ preview edit or save as new`}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-sgplay],[data-sguse],[data-sgno]');if(!b||!SG)return;e.stopPropagation();
+ const k=+(b.dataset.sgplay??b.dataset.sguse??b.dataset.sgno),x=SG.r.suggestions[k];
+ if(b.dataset.sgplay!=null){const was=players.get('sg'+k);stopAll();if(was)return;const a=new Audio(x.url);a.loop=true;a.play();players.set('sg'+k,a);b.classList.add('playing');sgFb(x,'play');return}
+ if(b.dataset.sguse!=null){stopAll();await sgApply(x);sgFb(x,'apply');document.querySelectorAll('[data-sgk]').forEach(r=>r.style.background=+r.dataset.sgk===k?'#1f2630':'');return}
+ sgFb(x,'dismiss');b.closest('[data-sgk]').remove()},true);
+const _edSaveSg=edSave;
+edSave=async function(...a){const x=ED&&ED.sugg;const r=await _edSaveSg.apply(this,a);if(x)sgFb(x,'save');return r};
+
 // ---------- chop pads
 const PADKEYS='1234qwerasdfzxcv'.split('');
 const PADS={i:null,buf:null,sl:[],voice:null,events:[],rec:false,loop:null,start:0,len:0,timer:null,clickG:null};

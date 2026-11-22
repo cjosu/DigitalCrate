@@ -493,6 +493,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"row": _with_partners(row)})
             elif self.path.startswith("/api/setup/") or self.path == "/api/quit":
                 return self._setup(req)
+            elif self.path == "/api/suggest":
+                from .suggest import suggest
+                return self._json(suggest(path, req.get("project_key") or None, req.get("start"), req.get("end"),
+                                          log=not req.get("nolog")))
+            elif self.path == "/api/suggest/feedback":
+                from .suggest import feedback
+                feedback(path, req.get("id"), req.get("move"), req.get("family"), req.get("arm"), req.get("material"),
+                         req.get("action"))
             elif self.path in ("/api/trash/delete", "/api/trash/restore"):
                 from . import trash
                 ids = [str(x) for x in req.get("ids", [])][:2000]

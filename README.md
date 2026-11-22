@@ -148,8 +148,16 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 
 - **Project mode:** set a key and tempo (or follow Ableton Live over **Link**); previews, the sketchpad and exports are
   shifted by the smallest interval that fits and stretched to the tempo.
-- **Editor:** non-destructive trims (drag either edge of a selection), stretch, pitch, fades, reverse and **Tune to**:
+- **Editor:** non-destructive trims (drag either edge of a selection), stretch, pitch (clean or **tape**: pitch and
+  speed together), **Tone** (darker), fades, reverse and **Tune to**:
   tape-style tuning toward a key with natural glide and drift. ↺ reset starts over.
+- **✨ Suggested edits:** in the editor, DigitalCrate renders a dozen edits that suit the sound (gentle lifts, natural
+  tuning and a little space for voices; an octave down, darker, washed out or slower for pads and textures) and your
+  taste model judges each *result*, with a cost for losing what the sample is. You get its three best, from different
+  kinds of edit, plus a random wildcard; **use** sets the editor to it. It learns which kinds you keep, and keeps
+  score of its picks against the wildcard. Checked first: on 20 samples it ranked sensible edits above deliberately
+  bad ones 81% of the time. It hears what a result sounds like, not processing artifacts, so every move uses the
+  engines you rated best in blind tests.
 - **Variations:** generative reworks chosen by what you've liked, including vocals tuned to their own key.
 - **First run:** the app asks for your music folder and where samples should go (saved to
   `~/.config/digitalcrate/digitalcrate.toml`), listens to a random few hundred songs, mines the most promising, and
