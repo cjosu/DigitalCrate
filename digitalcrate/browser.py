@@ -63,12 +63,12 @@ def write_browser(d, tags, parts, kits):
     from .recat import SUBTYPES, overrides
     ov = set(overrides())
     import time as _t
-    from datetime import datetime
+    from datetime import datetime, timezone
     tracks = {}
     for r in d["rows"]:
         if r["track_id"] not in tracks:
-            ts = r["processed_at"]
-            ep = int(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").timestamp()) if ts else 0
+            ts = r["processed_at"]  # SQLite's datetime('now') is UTC
+            ep = int(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()) if ts else 0
             added = not str(r["tpath"]).startswith(str(C.MUSIC_ROOT))
             kind = "YouTube" if "/YouTube/" in str(r["tpath"]) else ("added file" if added else "")
             tracks[r["track_id"]] = [ep, r["artist"] or "", r["title"] or "", kind, r["album"] or ""]
