@@ -17,7 +17,8 @@ VOX, PAD, MEL = "a59109", "4484c1", "0947ae"  # walkthrough samples: three diffe
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from digitalcrate import config as C  # noqa: E402
 import os  # noqa: E402
-PRIVATE = [n for n in [*C._cfg.get("reference_artists", []), *C._cfg.get("reference_exact", []),
+from digitalcrate.policy import REFERENCE_ARTISTS  # noqa: E402  the built-in reference list too (Burial, Gas…)
+PRIVATE = [n for n in [*REFERENCE_ARTISTS, *C._cfg.get("reference_artists", []), *C._cfg.get("reference_exact", []),
                        *os.environ.get("DIGITALCRATE_SCRUB", "").split(",")] if n.strip()]
 
 
@@ -28,7 +29,7 @@ def sel(page, sid):
 
 def scrub(page):
     """Replace private names in every visible text node and input value before a screenshot."""
-    page.evaluate("""names=>{const re=new RegExp(names.map(n=>n.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&')).join('|'),'gi');
+    page.evaluate("""names=>{const re=new RegExp('\\\\b('+names.map(n=>n.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&')).join('|')+')\\\\b','gi');
       const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let n;
       while((n=w.nextNode()))if(re.test(n.nodeValue)){re.lastIndex=0;n.nodeValue=n.nodeValue.replace(re,'(private)')}
       document.querySelectorAll('input,option').forEach(e=>{if(e.value&&re.test(e.value))e.value=e.value.replace(re,'(private)')})}""",

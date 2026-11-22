@@ -41,3 +41,4 @@
 .kk i.b{height:60%;background:#14171c;z-index:1;border-radius:0 0 2px 2px}.kk i.on{background:#e0a458}.kk i.b.on{background:#c98a3c}.kk i.bs{background:#7fb0c9}
 .kk em{position:absolute;bottom:2px;left:2px;font:9px ui-monospace,Menlo,monospace;color:#555;font-style:normal}
 .chlab{grid-column:2/-1;font-size:11px;color:var(--mute);margin-bottom:-4px;order:-1}
+.pad svg{width:100%;height:16px}.pad{height:68px}
