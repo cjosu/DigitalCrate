@@ -50,10 +50,22 @@ CREATE TABLE IF NOT EXISTS drum_labels (sample_id TEXT PRIMARY KEY, pieces TEXT,
 """
 
 
+def _wal(con):
+    """Write-ahead logging: the app reads while mining runs and analyses write, instead of waiting on their locks.
+    It's a setting of the database file, so this switches it once; commits then only need synchronous=NORMAL."""
+    try:
+        if con.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+            con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.OperationalError:  # busy right now: try again on the next connection
+        pass
+
+
 def connect():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=60)
     con.row_factory = sqlite3.Row
+    _wal(con)
     con.executescript(SCHEMA)
     cols = {r[1] for r in con.execute("PRAGMA table_info(samples)")}
     for c in ("env", "tags", "parent_id", "root_id", "ops"):

@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from . import config as C
 from .audio import decode, write_wav, to_mono48, camelot, key_label, PITCHES
-from .analyze import track_tempo_key, SourceFeat, bar_starts, segment_stats, sample_key, sec_to_frames
+from .analyze import track_tempo_key, SourceFeat, bars, segment_stats, sample_key, sec_to_frames
 from .extract import find_candidates, measure
 from .db import connect
 from . import models
@@ -135,7 +135,7 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
         return 0
     tk = track_tempo_key(y)
     mix = SourceFeat(y)
-    bar_times = bar_starts(tk["beats"], mix) if tk["tempo_ok"] else np.array([])
+    bar_times, _how = bars(tk, y, mix)
 
     clean_frac = float(((mix.pratio < C.MIX_PRATIO_DRUMS) & mix.active()).sum() / max(1, mix.active().sum()))
     do_sep = separate_mode == "always" or (separate_mode == "auto" and clean_frac < 0.9)

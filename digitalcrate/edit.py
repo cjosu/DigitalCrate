@@ -47,7 +47,10 @@ def clean_params(p):
                 tune_key=(p.get("tune_key") or None), tune_strength=float(p.get("tune_strength") if p.get("tune_strength") is not None else 0.8),
                 tune_speed=float(p.get("tune_speed") if p.get("tune_speed") is not None else 60),
                 tune_detune=float(p.get("tune_detune") or 0), tune_drift=float(p.get("tune_drift") or 0),
-                tune_engine=p.get("tune_engine") or "vari")
+                tune_engine=p.get("tune_engine") or "vari",
+                plugins=[dict(path=str(x["path"]), params=dict(x.get("params") or {})) for x in (p.get("plugins") or [])
+                         if x.get("path")],
+                tail=min(20.0, float(p.get("tail") or 0)))
 
 
 def render(rel, p):
@@ -67,6 +70,9 @@ def render(rel, p):
         y = tune(y, p.get("tune_key") or "C", strength=p["tune_strength"] if p.get("tune_key") else 0,
                  speed_ms=p["tune_speed"], detune_cents=p["tune_detune"], drift_cents=p["tune_drift"],
                  engine=p["tune_engine"])
+    if p.get("plugins"):  # your AU/VST3 effects (plugins.py), with room for a reverb or delay to ring out
+        from .plugins import apply
+        y = apply(y, SR, p["plugins"], tail=p.get("tail") or 0)
     n = y.shape[1]
     xf = min(int(p["loop_xfade"] * SR), n // 3)
     if xf > 32:  # seamless loop: crossfade the tail into the head (equal-power), drop separate fades

@@ -76,8 +76,25 @@ def write_browser(d, tags, parts, kits):
     from datetime import timezone
     born = [int(datetime.strptime(r["created_at"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp() // 60)
             if r["created_at"] else 0 for r in d["rows"]]
-    data = dict(tracks=tracks, samples=S, born=born, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+    from .lyrics import for_browser
+    wl = for_browser(con, [r["id"] for r in d["rows"]])
+    words = {i: t for i, t in enumerate(wl) if t}  # sung words; and which were transcribed and found wordless
+    wordless = [i for i, t in enumerate(wl) if t == ""]
+    data = dict(tracks=tracks, samples=S, born=born, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
+    write_page(data)
+
+
+def write_page(data):
+    """Browser.html, plus Browser-partners.js: the goes-with picks (almost half the data) load after the list is
+    showing, as a plain script so the page still works when opened straight from disk."""
+    import hashlib
+    data = dict(data)
+    parts = data.pop("partners", None)
+    if parts is not None:
+        js = "window.__PARTNERS=" + json.dumps(parts, separators=(",", ":")) + ";"
+        (C.LIB_ROOT / "Browser-partners.js").write_text(js, encoding="utf-8")
+        data["partners_v"] = hashlib.md5(js.encode()).hexdigest()[:10]
     html = TEMPLATE.replace("__DATA__", json.dumps(data, separators=(",", ":")).replace("</", "<\\/"))
     (C.LIB_ROOT / "Browser.html").write_text(html, encoding="utf-8")
 
@@ -104,12 +121,14 @@ text-transform:uppercase;color:var(--mute);margin:18px 0 8px;font-weight:600}
 .top{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px;display:flex;gap:8px;align-items:center;z-index:2;flex-wrap:wrap}
 .top input[type=search]{flex:1;min-width:200px}
 .row{display:grid;grid-template-columns:30px 120px 1fr auto;gap:12px;align-items:center;padding:7px 16px;border-bottom:1px solid #1a1d23;cursor:pointer}
+#list .row{content-visibility:auto;contain-intrinsic-size:auto 56px}
 .row:hover{background:#13161b}.row.sel{background:#1a1f27}
 .play{width:28px;height:28px;border-radius:50%;padding:0;display:grid;place-items:center;font-size:10px}
 .play.playing{background:var(--acc);color:#000;border-color:var(--acc)}
 svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.06em;padding:1px 5px;border-radius:4px;color:#000;margin-right:6px}
 .meta{color:var(--mute);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lyr{color:var(--ink);font-style:italic}
 .right{display:flex;gap:10px;align-items:center;color:var(--mute);font-size:12px;font-variant-numeric:tabular-nums}
 .key{color:var(--ink);font-weight:600;min-width:62px;text-align:right}.qbar{width:36px;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
 .qbar i{display:block;height:100%;background:var(--acc2)}
@@ -171,7 +190,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 <main>
   <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabA" title="browse by artist, album and song">👤 Artists</button><button id="tabK" title="recommended kits and your saved sketches">Kits &amp; sketches</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button><button id="tabP" title="mining runs: what's processing, start a new run, how much of your library is mined" hidden>⚙ Processing</button></div>
     <input type="search" id="search" placeholder="search artist, title, mood, instrument, id…">
-    <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select><span id="sorthq"></span><select id="since" title="only samples added recently — combine with any sort, e.g. for you"><option value="">added any time</option><option value="batch">latest run</option><option value="0.25">last 6 hours</option><option value="1">last day</option><option value="3">last 3 days</option><option value="7">last week</option><option value="30">last month</option></select>
+    <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select><span id="sorthq"></span><select id="since" title="only samples added recently — combine with any sort, e.g. for you"><option value="">added any time</option><option value="batch">latest run</option><option value="0.25">last 6 hours</option><option value="1">last day</option><option value="3">last 3 days</option><option value="7">last week</option><option value="30">last month</option></select><select id="wsel" title="vocals: with sung words, or wordless (oohs, hums, vowels) — words are transcribed by Whisper; search finds lyrics too"><option value="">words or not</option><option value="w">with words</option><option value="n">wordless</option></select>
     <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button>
     <div class="cattabs" id="cats" title="⌘/ctrl-click to pick several"></div><div id="subsBox" class="chips subrow" hidden></div></div>
   <div id="tbanner" class="prov" style="margin:8px 16px" hidden></div>
@@ -191,7 +210,13 @@ function unpackP(p){if(Array.isArray(p))return p;const b=atob(p.b64),w=p.w,stp=w
  for(let i=0;i<out.length;i++){const a=[];for(let k=p.off[i];k<p.off[i+1];k++){const o=k*stp;
   const j=w===2?(b.charCodeAt(o)|b.charCodeAt(o+1)<<8):(b.charCodeAt(o)|b.charCodeAt(o+1)<<8|b.charCodeAt(o+2)<<16|b.charCodeAt(o+3)<<24)>>>0;
   a.push([j,Math.round(b.charCodeAt(o+w)/255*1000)/1000,Math.round(b.charCodeAt(o+w+1)/255*100)/100,Math.round(b.charCodeAt(o+w+2)/255*100)/100])}out[i]=a}return out}
-const S=D.samples, P=unpackP(D.partners), AB=D.abbr;
+const S=D.samples, AB=D.abbr;
+// goes-with picks: in Browser-partners.js, loaded once the list is up (older pages carry them inline)
+const P=D.partners?unpackP(D.partners):new Array(S.length);let P_READY=!!D.partners,P_FAIL=false;
+function loadPartners(){if(P_READY)return;const sc=document.createElement('script');sc.src='Browser-partners.js?v='+(D.partners_v||'');
+ sc.onload=()=>{const all=unpackP(window.__PARTNERS);delete window.__PARTNERS;for(let k=0;k<all.length;k++)if(P[k]===undefined)P[k]=all[k];P_READY=true;
+  if(st.sel!=null&&$('goload'))select(st.sel)};
+ sc.onerror=()=>{P_READY=true;P_FAIL=true;if(st.sel!=null&&$('goload'))select(st.sel)};document.body.appendChild(sc)}
 // ---------- "?" explainers for the less obvious features: hq('key') renders the button, HELP holds the text
 const HELP={
  goes:['Goes well with','Samples that sit well with this one. Each is scored on <b>key</b> (Camelot wheel plus the notes the two actually use), <b>tempo</b> (for loops), whether their <b>roles</b> fit in an arrangement (a pad under a vocal), and how alike they <b>sound</b>. You get the best 24 overall plus the best few of every other category; the chips show one category at a time. <b>⧉</b> plays the pair together, <b>💾</b> saves the pair as a sketch.'],
@@ -200,7 +225,7 @@ const HELP={
  project:['Project key & tempo','Set the key and tempo of the track you\'re making. Previews (with the box ticked), the sketchpad and exports are retuned by the smallest shift that fits, and loops (and phrases with a reliable tempo) are stretched to the tempo. <b>🔗 Live</b> follows Ableton Live\'s tempo over Link.'],
  sketch:['Sketchpad','Layer up to 8 samples in time. Loops lock to the bar; other clips repeat every N bars (⋯ to change).<br><b>Amber lines</b>: the project\'s bars and beats as that lane plays. <b>White ticks</b>: the clip\'s own attacks (tall = strong). <b>▼</b>: the attack placed on the beat.<br><b>no pulse</b>: a pad or texture with nothing to line up; it plays from its start. <b>pulse ≈ N bpm</b>: a steady rhythm; <b>⟷ match tempo</b> stretches it so every attack stays on the grid.<br>Drag a waveform to use part of it, <b>⌥-drag</b> to slide it in time, <b>↺ re-align</b> to fit the selection to the grid. Faders are relative: every lane starts equally loud at 0 dB.<br><b>⇩ stems</b>: each lane as its own WAV, same length from bar 1, so they line up in Live.'],
  pads:['Pads','Your sample cut at its syllables (or notes), one slice per pad, in order, like an MPC. Tap keys <b>1–4 · Q–R · A–F · Z–V</b> to play the pieces back in a new order and rhythm.<br><b>● record</b> loops 1–4 bars with a click: play pads to lay down a pattern (it overdubs, and quantises if you like). <b>▶ pattern</b> plays it; <b>save pattern</b> keeps it as a new sample. <b>chops → Drum Rack</b> sends every slice to Ableton as a playable rack.'],
- chords:['Chord suggestions','Progressions picked to suit this sample: every chord is scored on how much of what the sample plays falls on its notes (and penalised for clashing a semitone away), then whole sequences are chosen for good movement and smooth voice leading. The sample\'s mood picks the flavour (soulful = 7ths/9ths, dark = minor 9ths, ethereal = sus/add9).<br>If the sample has chords of its own, suggestions change where it does: <b>follows</b> enriches its chords in another register, <b>reharmonised</b> swaps in chords that still contain what it plays.<br>On the keyboard, <span style="color:#7fb0c9">blue</span> = bass, <span style="color:#e0a458">amber</span> = the chord. ⇩ MIDI for your own instruments; ＋ sketch renders the pad.'],
+ chords:['Chord suggestions','Progressions picked to suit this sample: every chord is scored on how much of what the sample plays falls on its notes (and penalised for clashing a semitone away), then whole sequences are chosen for good movement and smooth voice leading. The sample\'s mood picks the flavour (soulful = 7ths/9ths, dark = minor 9ths, ethereal = sus/add9).<br>If the sample has chords of its own, suggestions change where it does: <b>follows</b> enriches its chords in another register, <b>reharmonised</b> swaps in chords that still contain what it plays.<br>On the keyboard, <span style="color:#7fb0c9">blue</span> = bass, <span style="color:#e0a458">amber</span> = the chord. <b>bass</b> adds a bassline under the chords: held roots, root &amp; fifth, an 8th-note pulse, syncopated R&amp;B or a walking line (✓ marks the one suited to this sample). ⇩ MIDI for your own instruments (chords and bass on separate tracks); ＋ sketch renders the pad, and the bass as its own lane.'],
  rack:['Drum Rack','Every drum hit cut from this song (or album/artist), kicks first, then snares, hats, toms, cymbals and combinations. Keys <b>1–4 · Q–R · A–F · Z–V</b> play the current page. ✕ drops a pad before export. The type names come from automatic drum labelling, which is often wrong; trust your ears.'],
  tune:['Tune to','Pulls a vocal toward a key by gently changing its speed, tape-style (nothing is resynthesised). <b>Strength</b>: how far each note moves. <b>Glide</b>: how slowly it moves (low = the hard Auto-Tune effect). <b>Detune</b> and <b>drift</b> add back human looseness.'],
  galaxy:['Galaxy','Every sample on a map by sound: neighbours sound alike, and clusters are families of sounds (distances between far-apart clusters mean little). Hover to hear, click to open, wheel to zoom. <b>Show taste</b> colours by how much the taste model thinks you\'ll like each one.'],
@@ -225,8 +250,11 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const url=p=>p.split('/').map(encodeURIComponent).join('/');
 const col=c=>`var(--${AB[c]})`;
-function wave(env,w=120,h=26,c='#7d8592'){if(!env.length)return'';const bw=w/env.length;
- return `<svg class="wave" width="${w}" height="${h}">${env.map((v,i)=>{const hh=Math.max(1,v/99*h);return`<rect x="${(i*bw).toFixed(1)}" y="${((h-hh)/2).toFixed(1)}" width="${(bw*.7).toFixed(1)}" height="${hh.toFixed(1)}" fill="${c}"/>`}).join('')}</svg>`}
+// one <path> per waveform (not a <rect> per bar: 200 rows made ~8,000 elements), cached per envelope and size
+const WAVES=new WeakMap();
+function wave(env,w=120,h=26,c='#7d8592'){if(!env||!env.length)return'';let m=WAVES.get(env);if(!m){m=new Map();WAVES.set(env,m)}const k=w+'|'+h;
+ let d=m.get(k);if(d==null){const bw=w/env.length,bwd=(bw*.7).toFixed(1);d=env.map((v,i)=>{const hh=Math.max(1,v/99*h);return`M${(i*bw).toFixed(1)} ${((h-hh)/2).toFixed(1)}h${bwd}v${hh.toFixed(1)}h-${bwd}z`}).join('');m.set(k,d)}
+ return `<svg class="wave" width="${w}" height="${h}"><path d="${d}" fill="${c}"/></svg>`}
 // ---------- favourites
 const FAV=new Map(); let SERVED=location.protocol.startsWith('http');
 function lsGet(){try{return JSON.parse(localStorage.getItem('atlasFavs')||'[]')}catch(e){return[]}}
@@ -600,7 +628,8 @@ function paintWheel(){const cnt={};S.forEach(s=>{if(s[F.cam])cnt[s[F.cam]]=(cnt[
  p.style.fill=nb&&nb.has(c)?(c===st.key?'#e0a458':'#8a6a3e'):`rgba(127,176,201,${0.08+v*0.6})`});
  $('keylbl').textContent=st.key?st.key:''}
 $('nbr').onclick=e=>{st.nbr=!st.nbr;e.target.classList.toggle('on');render()};$('clrkey').onclick=()=>{st.key=null;render()};
-['bmin','bmax','half','q','search','sort','grp','since'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
+['bmin','bmax','half','q','sort','grp','since','wsel'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
+let searchT=null;$('search').addEventListener('input',()=>{clearTimeout(searchT);searchT=setTimeout(()=>{st.shown=200;render()},160)});
 $('stop').onclick=stopAll;
 // the Processing page (served only), with a badge while a mining run is going
 if(SERVED){const tp=$('tabP');tp.hidden=false;tp.onclick=()=>location.href='activity';
@@ -610,6 +639,7 @@ if(SERVED){const tp=$('tabP');tp.hidden=false;tp.onclick=()=>location.href='acti
 $('refresh').onclick=()=>{$('refresh').hidden=true;render()};
 
 // the latest run: walk back from the newest sample until a gap of more than 6 hours
+const WORDS=D.words||{},WORDLESS=new Set(D.wordless||[]);
 const BORN=D.born||[],BATCH0=(()=>{const e=BORN.filter(x=>x).sort((a,b)=>b-a);let k=0;while(k+1<e.length&&e[k]-e[k+1]<360)k++;return e[k]||0})();
 const tabs={S:'tabS',A:'tabA',K:'tabK',F:'tabF',R:'tabR'};
 Object.entries(tabs).forEach(([k,id])=>$(id).onclick=()=>{st.tab=k;Object.values(tabs).forEach(t=>$(t).classList.toggle('on',t===id));render()});
@@ -619,16 +649,17 @@ function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').va
  let out=[];S.forEach((s,i)=>{if(s[F.q]<mq)return;if(st.tracks&&!st.tracks.has(String(s[F.tid])))return;if(st.cats.size&&!st.cats.has(s[F.cat]))return;if(st.subs.size&&!st.subs.has(s[F.sub]))return;if(st.kinds.size&&!st.kinds.has(s[F.kind]))return;if(st.genres.size&&!st.genres.has(s[F.genre]))return;if(st.excl.has(s[F.genre]))return;
  if(nb&&!(s[F.cam]&&nb.has(s[F.cam])))return;if(!okB(s[F.kind]==='loop'?s[F.bpm]:0)&&(bmin||bmax))return;
  if(st.moods.size&&![...st.moods].every(m=>s[F.tags].includes(m)))return;
- if(q&&!(`${s[F.artist]} ${s[F.title]} ${s[F.tags].join(' ')} ${s[F.inst]} ${s[F.id]} ${s[F.cat]} ${s[F.sub]} ${s[F.genre]}`.toLowerCase().includes(q)))return;out.push(i)});
+ if(q&&!(`${s[F.artist]} ${s[F.title]} ${s[F.tags].join(' ')} ${s[F.inst]} ${s[F.id]} ${s[F.cat]} ${s[F.sub]} ${s[F.genre]} ${WORDS[i]||''}`.toLowerCase().includes(q)))return;out.push(i)});
+ const wv=$('wsel').value;if(wv)out=out.filter(i=>wv==='w'?WORDS[i]:WORDLESS.has(i));
  out=out.filter(i=>!TASTE.disliked.has(S[i][F.path]));
  const sv=$('since').value;if(sv){const lim=sv==='batch'?BATCH0:Date.now()/60000-sv*1440;out=out.filter(i=>(BORN[i]||0)>=lim)}
  const k=$('sort').value;
- const tsort=m=>(a,b)=>((m[S[b][F.path]]??-9)-(m[S[a][F.path]]??-9));
- if(k==='div'){const by=new Map();out.sort((a,b)=>S[b][F.q]-S[a][F.q]||((TASTE.score[S[b][F.path]]??0)-(TASTE.score[S[a][F.path]]??0)));
+ const byKey=(arr,f)=>{const v=new Float64Array(S.length);arr.forEach(i=>v[i]=f(i));return arr.sort((a,b)=>v[b]-v[a])};
+ if(k==='div'){const by=new Map();byKey(out,i=>S[i][F.q]*1000+(TASTE.score[S[i][F.path]]??0));
   out.forEach(i=>{const a=S[i][F.artist];if(!by.has(a))by.set(a,[]);by.get(a).push(i)});
   const lists=[...by.values()].sort((x,y)=>(TASTE.score[S[y[0]][F.path]]??S[y[0]][F.q])-(TASTE.score[S[x[0]][F.path]]??S[x[0]][F.q]));
   const rr=[];for(let r=0;rr.length<out.length;r++)lists.forEach(l=>{if(l[r]!=null)rr.push(l[r])});return rr}
- if(k==='you')return out.sort(tsort(TASTE.score));if(k==='vibe')return out.sort(tsort(TASTE.vibe));if(k==='disc')return out.sort(tsort(TASTE.discover));
+ if(k==='you'||k==='vibe'||k==='disc'){const m=TASTE[{you:'score',vibe:'vibe',disc:'discover'}[k]];return byKey(out,i=>m[S[i][F.path]]??-9)}
  const cmp={q:(a,b)=>S[b][F.q]-S[a][F.q],key:(a,b)=>(S[a][F.cam]||'zz').localeCompare(S[b][F.cam]||'zz',undefined,{numeric:true}),
  bpm:(a,b)=>S[a][F.bpm]-S[b][F.bpm],dur:(a,b)=>S[b][F.dur]-S[a][F.dur],ref:(a,b)=>S[b][F.ref]-S[a][F.ref],new:(a,b)=>((D.tracks[S[b][F.tid]]||[0])[0]-(D.tracks[S[a][F.tid]]||[0])[0])||S[b][F.q]-S[a][F.q],var:(a,b)=>((D.variants[b]||[]).length-(D.variants[a]||[]).length)||S[b][F.q]-S[a][F.q],rnd:()=>Math.random()-.5}[k];return out.sort(cmp)}
 function rowHTML(i){const s=S[i],c=col(s[F.cat]);const bpm=s[F.bpm]?`${s[F.bpm]} bpm`:'free';
@@ -636,7 +667,7 @@ function rowHTML(i){const s=S[i],c=col(s[F.cat]);const bpm=s[F.bpm]?`${s[F.bpm]}
  return `<div class="row${st.sel===i?' sel':''}" data-i="${i}"><button class="play" data-play="${i}">▶</button>${wave(s[F.env],120,26,'#5b6370')}
  <div style="min-width:0"><div class="name"><span class="badge" style="background:${c}">${AB[s[F.cat]]}</span>${esc(s[F.sub])} · ${esc(kind)}${D.variants[i]?` · <span style="color:var(--acc)">${D.variants[i].length} variations</span>`:''}${s[F.parent]?` · <span style="color:var(--acc)">✎ edit</span>`:''}${s[F.note]?` · ${s[F.note]}`:''} · ${s[F.dur]}s
  ${s[F.tags].map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>
- <div class="meta">${esc(s[F.artist])} — ${esc(s[F.title])} @ ${Math.floor(s[F.start]/60)}:${String(s[F.start]%60).padStart(2,'0')}</div></div>
+ <div class="meta">${esc(s[F.artist])} — ${esc(s[F.title])} @ ${Math.floor(s[F.start]/60)}:${String(s[F.start]%60).padStart(2,'0')}${WORDS[i]?` · <i class="lyr">“${esc(WORDS[i].length>70?WORDS[i].slice(0,70)+'…':WORDS[i])}”</i>`:''}</div></div>
  <div class="right">${star(s[F.path],s[F.id],`${s[F.artist]} — ${s[F.title]} · ${s[F.sub]}`)}${nope(s[F.path],s[F.id])}${xp(s[F.path])}<span class="id" data-id="${s[F.id]}" title="copy ID">${s[F.id]}</span><span>${bpm}</span><span class="key">${s[F.cam]?`${s[F.cam]} ${s[F.key]}`:'—'}</span><span class="qbar" title="quality ${s[F.q]}"><i style="width:${s[F.q]*100}%"></i></span></div></div>`}
 const OVR=new Set((D.overridden||[]).map(i=>S[i][F.id]));
 const BYID=new Map(S.map((s,i)=>[s[F.id],i]));
@@ -686,7 +717,7 @@ function goList(i){const pool=goPool(i);if(st.gcat){const f=pool.filter(([j])=>S
  const left=pool.slice(),out=[],n={};while(left.length&&out.length<30){let bk=0,bv=-1;
   left.forEach((p,k)=>{const v=p[1]*Math.pow(0.85,n[S[p[0]][F.cat]]||0);if(v>bv){bv=v;bk=k}});const p=left.splice(bk,1)[0];n[S[p[0]][F.cat]]=(n[S[p[0]][F.cat]]||0)+1;out.push(p)}
  return out}
-function goChips(i){const cnt={};goPool(i).forEach(([j])=>{const c=S[j][F.cat];cnt[c]=(cnt[c]||0)+1});const cs=CATS.filter(c=>cnt[c]);if(cs.length<2)return'';
+function goChips(i){if(!P_READY)return '<div class="sub" id="goload">loading goes-with picks…</div>';if(P_FAIL&&!(P[i]||[]).length)return '<div class="sub">Goes-with picks didn\'t load (Browser-partners.js is missing). Rebuild with <code>digitalcrate build</code>.</div>';const cnt={};goPool(i).forEach(([j])=>{const c=S[j][F.cat];cnt[c]=(cnt[c]||0)+1});const cs=CATS.filter(c=>cnt[c]);if(cs.length<2)return'';
  const cur=st.gcat&&cnt[st.gcat]?st.gcat:'';
  return `<div class="chips" style="margin:6px 0 8px"><button data-gcat="" class="${cur?'':'on'}">All</button>${cs.map(c=>`<button data-gcat="${esc(c)}" class="${cur===c?'on':''}" title="${esc(c)}"><span class="badge" style="background:${col(c)};margin-right:4px">${AB[c]}</span>${cnt[c]}</button>`).join('')}</div>`}
 // kits are built for everyone; the members in genres you've excluded are left out when shown, played or exported
@@ -760,7 +791,7 @@ $('detail').addEventListener('click',e=>{if(e.target.id==='back'){goBack();retur
  const t=e.target.closest('[data-play],[data-pair],[data-go],[data-id]');if(!t)return;
  if(t.dataset.play!=null)toggle(+t.dataset.play,t);else if(t.dataset.pair!=null)playTogether([st.sel,+t.dataset.pair]);
  else if(t.dataset.go!=null){select(+t.dataset.go,'go');$('detail').scrollTop=0}else if(t.dataset.id){navigator.clipboard&&navigator.clipboard.writeText(t.dataset.id)}});
-render();loadFavs();loadTaste();
+render();requestAnimationFrame(()=>setTimeout(loadPartners,0));loadFavs();loadTaste();
 // deep link: #edit=<id>[&sel=a,b][&fi=ms][&fo=ms][&xf=ms][&loop=0|1][&zoom=1]
 (async()=>{const h=new URLSearchParams(location.hash.slice(1));if(h.get('tracks')){showTracks(h.get('tracks').split(','));return}const id=h.get('edit')||h.get('s');if(!id||!BYID.has(id))return;
  const i=BYID.get(id);select(i,'list');if(!h.get('edit'))return;await openEditor(i);

@@ -453,8 +453,9 @@ def suggest(rel, bpm=None, bars_per_chord=1, n_options=4):
                 bars_per_chord=bars_per_chord, loop=bool(loop), register=[low, high], options=options)
 
 
-def write_midi(name, chords, step, tempo, reveal=True, times=None):
-    """chords: [[midi notes]] one per step (or at times=[[start, length]]) -> a .mid in the User Library (Chords/)."""
+def write_midi(name, chords, step, tempo, reveal=True, times=None, bass=None):
+    """chords: [[midi notes]] one per step (or at times=[[start, length]]) -> a .mid in the User Library (Chords/).
+    bass: [[pitch, start, length, velocity]] for a second track (the bassline from the chords panel)."""
     import re
     import subprocess
     import pretty_midi
@@ -465,6 +466,11 @@ def write_midi(name, chords, step, tempo, reveal=True, times=None):
             a, d = times[k] if times else (k * step, step)
             inst.notes.append(pretty_midi.Note(velocity=80, pitch=int(n), start=float(a), end=float(a) + float(d)))
     pm.instruments.append(inst)
+    if bass:
+        b = pretty_midi.Instrument(33, name="bass")
+        for n, a, d, *v in bass:
+            b.notes.append(pretty_midi.Note(velocity=int(v[0]) if v else 90, pitch=int(n), start=float(a), end=float(a) + float(d)))
+        pm.instruments.append(b)
     dest = C.ABLETON_SAMPLES / "Chords"
     dest.mkdir(parents=True, exist_ok=True)
     f = dest / (re.sub(r'[/:\\*?"<>|]+', "-", name)[:80] + ".mid")

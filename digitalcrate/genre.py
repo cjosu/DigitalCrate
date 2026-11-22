@@ -4,7 +4,8 @@ Order of evidence, per track:
   1. your overrides: [genres] in digitalcrate.toml, artist = family (file tags are often just wrong);
   2. the file's genre tag, mapped by keyword; Ambient and Electronic win in compound tags ("Disco/Deep House/Funk");
   3. the artist's consensus: the most common family among their tagged tracks anywhere in the collection;
-  4. CLAP on the average embedding of the track's samples (weak: samples are stems and fragments).
+  4. the Discogs styles heard in the audio (styles.py), the artist's most common one across their songs;
+  5. CLAP on the average embedding of the track's samples (weak: samples are stems and fragments).
 """
 from collections import Counter
 
@@ -70,8 +71,8 @@ def artist_consensus():
     return {a: c.most_common(1)[0][0] for a, c in votes.items()}
 
 
-def family(artist, tag, ov=None, cons=None):
-    """Family for one track, or None when only the audio can tell."""
+def family(artist, tag, ov=None, cons=None, tid=None, sty=None):
+    """Family for one track, or None when only the audio can tell. sty: styles.families() (track id -> family)."""
     ov = overrides() if ov is None else ov
     a = _norm(artist)
     if a in ov:
@@ -80,7 +81,7 @@ def family(artist, tag, ov=None, cons=None):
     if f and f != "Other":
         return f
     cons = artist_consensus() if cons is None else cons
-    return cons.get(a) or f
+    return cons.get(a) or (sty or {}).get(tid) or f
 
 
 def assign(rows, emb):
@@ -90,9 +91,10 @@ def assign(rows, emb):
         by_track.setdefault(r["track_id"], []).append(i)
     fam_track = {}
     need = []
-    ov, cons = overrides(), artist_consensus()
+    from .styles import families
+    ov, cons, sty = overrides(), artist_consensus(), families()
     for tid, idx in by_track.items():
-        f = family(rows[idx[0]]["artist"], rows[idx[0]]["genre"], ov, cons)
+        f = family(rows[idx[0]]["artist"], rows[idx[0]]["genre"], ov, cons, tid, sty)
         if f:
             fam_track[tid] = f
         else:

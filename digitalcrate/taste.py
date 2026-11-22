@@ -47,12 +47,13 @@ def log_event(path, type_, value=None, sample_id=None, context=None):
 
 # ---------------------------------------------------------------- labels from events
 
-def item_labels(con, recent_hours=None):
+def item_labels(con, recent_hours=None, durs=None):
     """Aggregate events into (path -> (y, weight)). Explicit signals dominate implicit ones."""
     now = time.time()
     lab = {}
     fav = {r["path"] for r in con.execute("SELECT path FROM favorites")}
-    durs = {r["path"]: r["dur"] or 0 for r in con.execute("SELECT path, dur FROM samples")}
+    if durs is None:
+        durs = {r["path"]: r["dur"] or 0 for r in con.execute("SELECT path, dur FROM samples")}
     for r in con.execute("SELECT * FROM events ORDER BY ts"):
         age_d = (now - r["ts"]) / 86400
         w_time = np.exp(-age_d / 60)  # slow decay: taste drifts over months
@@ -133,10 +134,29 @@ def embed_paths(con, paths):
 class Featurizer:
     def __init__(self, E_all):
         mu = E_all.mean(0)
-        U, S, Vt = np.linalg.svd(E_all - mu, full_matrices=False)
-        self.mu, self.P = mu, Vt[:N_PCA].T
-        self.scale = (E_all - mu) @ self.P
+        Z = E_all - mu
+        # principal directions from the 512x512 covariance (same subspace as an SVD of all samples, ~25x faster)
+        w, V = np.linalg.eigh(Z.T @ Z)
+        self.mu, self.P = mu, V[:, ::-1][:, :N_PCA]
+        self.scale = Z @ self.P
         self.sd = self.scale.std(0) + 1e-6
+
+    def batch(self, E, metas):
+        """__call__ for many rows at once."""
+        z = ((E - self.mu) @ self.P) / self.sd
+        n = len(metas)
+        cat = np.zeros((n, len(CATS))); kind = np.zeros((n, len(KINDS)))
+        ci = {c: k for k, c in enumerate(CATS)}; ki = {c: k for k, c in enumerate(KINDS)}
+        for r, m in enumerate(metas):
+            if m.get("category") in ci:
+                cat[r, ci[m["category"]]] = 1
+            if m.get("kind") in ki:
+                kind[r, ki[m["kind"]]] = 1
+        g = lambda k, d: np.array([m.get(k) or d for m in metas], float)
+        eng = np.stack([np.log1p(g("dur", 5)) - 1.6, g("centroid", 1500) / 3000 - 0.5, g("flatness", 0.02) * 10,
+                        g("pratio", 0.1), np.array([m.get("scale") == "minor" for m in metas], float),
+                        np.array([bool(m.get("variation")) for m in metas], float)], 1)
+        return np.hstack([z, cat, kind, eng])
 
     def __call__(self, emb, meta):
         z = ((emb - self.mu) @ self.P) / self.sd
@@ -176,24 +196,45 @@ def fit_blr(X, y, w, prior_var=1.0, iters=30):
 
 def predict(X, beta, cov):
     m = X @ beta
-    s = np.einsum("ij,jk,ik->i", X, cov, X)
+    s = ((X @ cov) * X).sum(1)  # the diagonal of X cov X^T without building it
     return _sig(m / np.sqrt(1 + np.pi * s / 8)), np.sqrt(s)
 
 
 # ---------------------------------------------------------------- full fit
 
-def fit(recent_hours=None, verbose=False):
+_LIB = {}
+
+
+def _library(con):
+    """Every sample's embedding, metadata and features, kept between calls until samples are added or removed."""
+    key = tuple(con.execute("SELECT COUNT(*), MAX(rowid) FROM samples").fetchone())
+    if _LIB.get("key") != key:
+        rows = con.execute("""SELECT s.path, s.clap, s.category, s.kind, s.dur, s.centroid, s.flatness, s.pratio,
+                                     s.scale FROM samples s JOIN tracks t ON t.id=s.track_id
+                              WHERE s.path NOT LIKE '_Reference/%'""").fetchall()
+        if not rows:
+            return None
+        E = np.stack([np.frombuffer(r["clap"], np.float16).astype(np.float32) for r in rows])
+        metas = [dict(category=r["category"], kind=r["kind"], dur=r["dur"], centroid=r["centroid"],
+                      flatness=r["flatness"], pratio=r["pratio"], scale=r["scale"]) for r in rows]
+        fz = Featurizer(E)
+        paths = [r["path"] for r in rows]
+        _LIB.clear()
+        _LIB.update(key=key, paths=paths, E=E, fz=fz, X=fz.batch(E, metas), meta=dict(zip(paths, metas)),
+                    pos={p: i for i, p in enumerate(paths)},
+                    durs={r[0]: r[1] or 0 for r in con.execute("SELECT path, dur FROM samples")})
+    return _LIB
+
+
+def fit(recent_hours=None, verbose=False, labels=None):
     con = _db()
-    rows = con.execute("""SELECT s.*, t.artist FROM samples s JOIN tracks t ON t.id=s.track_id
-                          WHERE s.path NOT LIKE '_Reference/%'""").fetchall()
-    if not rows:
+    L = _library(con)
+    if L is None:
         return None
-    E = np.stack([np.frombuffer(r["clap"], np.float16).astype(np.float32) for r in rows])
-    fz = Featurizer(E)
-    meta = {r["path"]: dict(category=r["category"], kind=r["kind"], dur=r["dur"], centroid=r["centroid"],
-                            flatness=r["flatness"], pratio=r["pratio"], scale=r["scale"]) for r in rows}
-    emb = {r["path"]: e for r, e in zip(rows, E)}
-    labels = item_labels(con, recent_hours)
+    rows = [dict(path=p) for p in L["paths"]]
+    E, fz, meta = L["E"], L["fz"], dict(L["meta"])
+    emb = {p: E[i] for p, i in L["pos"].items()}
+    labels = labels if labels is not None else item_labels(con, recent_hours, L["durs"])
 
     # variation files: embed + inherit metadata from their source sample
     var_paths = [p for p in labels if p.startswith("Variations/")]
@@ -206,7 +247,7 @@ def fit(recent_hours=None, verbose=False):
             meta[p] = dict(meta.get(src["path"], {}) if src else {}, variation=True)
     lp = [p for p in labels if p in emb]
     n_pos = sum(labels[p][0] for p in lp)
-    X_all = np.stack([fz(emb[r["path"]], meta[r["path"]]) for r in rows])
+    X_all = L["X"]
     result = dict(n_labels=len(lp), n_pos=int(n_pos), paths=[r["path"] for r in rows])
 
     # multi-mood similarity: best match among liked items minus best match among disliked
@@ -296,11 +337,28 @@ def technique_posteriors(prior):
     return post
 
 
+_FIT = {}
+
+
 def scores_payload(recent_hours=None):
-    res = fit(recent_hours)
-    if res is None:
+    """Scores for the browser. The model is refit only when your ratings, listening or the samples change (a
+    listen counts, so it stays current); otherwise the last fit is reused and only 'discover' is re-drawn."""
+    con = _db()
+    L = _library(con)
+    if L is None:
         return {}
-    disliked = {p for p, (y, w) in item_labels(_db()).items() if y == 0 and w >= 1.5}
+    labels = item_labels(con, recent_hours, L["durs"])
+    key = (L["key"], recent_hours, hash(frozenset((p, round(w, 3), y) for p, (y, w) in labels.items())))
+    res = _FIT.get(recent_hours)
+    if not res or res["_key"] != key:
+        res = fit(recent_hours, labels=labels)
+        if res is None:
+            return {}
+        res["_key"] = key
+        _FIT[recent_hours] = res
+    if "beta" in res:
+        res["discover"] = L["X"] @ np.random.default_rng().multivariate_normal(res["beta"], res["cov"])
+    disliked = {p for p, (y, w) in labels.items() if y == 0 and w >= 1.5}
     return dict(n_labels=res["n_labels"], n_pos=res["n_pos"],
                 score={p: round(float(s), 4) for p, s in zip(res["paths"], res["score"])},
                 discover={p: round(float(s), 4) for p, s in zip(res["paths"], res["discover"])},

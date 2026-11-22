@@ -236,6 +236,21 @@ def profile(y, category=None):
 
 # ---------------------------------------------------------------- generative chains
 
+SM_MODES = ["Gemini", "Hydra", "Centaurus", "Sagittarius", "Andromeda", "Lyra", "Capricorn", "Aquarius", "Pisces"]
+_sm = []
+
+
+def _supermassive():
+    """Path to Valhalla Supermassive if it's installed (free; a lush, huge reverb/delay), else None."""
+    if not _sm:
+        try:
+            from .plugins import find
+            _sm.append(find("supermassive"))
+        except Exception:
+            _sm.append(None)
+    return _sm[0]
+
+
 def _space(y, rng, prof, dark=None):
     """Shared 'where does it live' stage: filter, reverb, tape — parameters adapt to brightness."""
     dark = rng.random() < 0.6 if dark is None else dark
@@ -243,8 +258,17 @@ def _space(y, rng, prof, dark=None):
     if prof["centroid"] < 1200:
         cut = max(cut, 2500)  # already dark: don't smother it
     y = highpass(lowpass(y, cut, 2), rng.uniform(40, 120))
-    y = wash(y, decay=float(rng.uniform(0.8, 2.6)), length=float(rng.uniform(3, 7)),
-             mix=float(rng.uniform(0.3, 0.7)), tone=cut * 1.3)
+    sm = _supermassive()
+    if sm and rng.random() < 0.5:  # half the time, Valhalla Supermassive instead of the built-in wash
+        from .plugins import apply
+        y = apply(y, SR, [dict(path=sm, params=dict(
+            mode=str(rng.choice(SM_MODES)), mix=float(rng.uniform(30, 65)), feedback=float(rng.uniform(40, 85)),
+            delay_ms=float(rng.uniform(60, 700)), width=100.0, density=float(rng.uniform(0, 60)),
+            moddepth=float(rng.uniform(20, 70)), modrate=float(rng.uniform(0.1, 1.5)),
+            lowcut=float(rng.uniform(60, 200)), highcut=float(cut * 1.3)))], tail=float(rng.uniform(2, 5)))
+    else:
+        y = wash(y, decay=float(rng.uniform(0.8, 2.6)), length=float(rng.uniform(3, 7)),
+                 mix=float(rng.uniform(0.3, 0.7)), tone=cut * 1.3)
     if rng.random() < 0.75:
         y = tape(y, drive=float(rng.uniform(1.1, 2.0)), wow_cents=float(rng.uniform(1, 5)),
                  flutter_cents=float(rng.uniform(0.3, 1.2)), hiss_db=float(rng.uniform(-56, -44)))

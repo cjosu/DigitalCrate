@@ -119,3 +119,40 @@ def test_voicings_use_only_chord_tones():
                 assert {n % 12 for n in v} <= {(ch["root"] + i) % 12 for i in QUAL[ch["q"]]}, ch["name"]
                 assert v[0] % 12 == ch["root"] and v[0] < min(v[1:])
                 prev = v[1:]
+
+
+def test_whisper_hallucinations_are_dropped():
+    from digitalcrate.lyrics import _clean
+    seg = lambda t, **k: dict(dict(text=t, no_speech_prob=0.0, avg_logprob=-0.3, compression_ratio=1.2,
+                                   words=[dict(word=w, start=i * 0.4, end=i * 0.4 + 0.3, probability=0.9)
+                                          for i, w in enumerate(t.split())]), **k)
+    assert _clean(dict(segments=[seg(" Thank you.")]))[0] == ""
+    assert _clean(dict(segments=[seg(" Ba-a-a-a-a-a-a-a-a")]))[0] == ""
+    assert _clean(dict(segments=[seg(" oh love", avg_logprob=-1.4)]))[0] == ""
+    text, words, _ = _clean(dict(segments=[seg(" How can I even try")], language="en"))
+    assert text == "How can I even try" and words[1][0] == "can"
+
+
+def test_style_families_and_search_phrases():
+    from digitalcrate.styles import family_of
+    from digitalcrate.related import phrase, _style_ok
+    assert family_of([["Jazz---Hard Bop", 0.4], ["Jazz---Post Bop", 0.3]]) == "Jazz"
+    assert family_of([["Electronic---Ambient", 0.5], ["Electronic---Drone", 0.4]]) == "Ambient"
+    assert family_of([["Funk / Soul---Neo Soul", 0.05]]) is None  # nothing confident
+    assert phrase("Classical---Modern") == "modern classical" and phrase("Funk / Soul---Neo Soul") == "neo soul"
+    assert not _style_ok("Hip Hop---Boom Bap") and _style_ok("Electronic---Ambient") and not _style_ok("Rock---Punk")
+
+
+def test_beat_this_bars_fall_back_without_a_grid(monkeypatch):
+    import numpy as np
+    from digitalcrate import analyze
+    beats = np.arange(0, 60, 0.5)  # a steady 120 bpm, downbeat every 4th beat
+    monkeypatch.setattr(analyze, "beat_this", lambda y: (beats, beats[::4]))
+    tk = dict(beats=np.array([]), tempo_ok=False, bpm=0)
+    bars, how = analyze.bars(tk, None, None)
+    assert how == "beat_this" and tk["tempo_ok"] and abs(tk["bpm"] - 120) < 0.01 and len(bars) == 30
+    rng = np.random.default_rng(0)  # rubato: no grid, and Essentia didn't trust its tempo either
+    loose = np.cumsum(rng.uniform(0.3, 0.9, 80))
+    monkeypatch.setattr(analyze, "beat_this", lambda y: (loose, loose[::4]))
+    tk = dict(beats=np.array([]), tempo_ok=False, bpm=0)
+    assert analyze.bars(tk, None, None)[1] == "none"

@@ -7,6 +7,9 @@ from .config import DEMUCS_MODEL, CLAP_MODEL, SR, MODELS_DIR, ROFORMER_MODELS, D
 
 warnings.filterwarnings("ignore")
 DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
+import os as _os
+if _os.environ.get("DC_THREADS"):  # background jobs (serve.start_job) share the machine with the app
+    torch.set_num_threads(int(_os.environ["DC_THREADS"]))
 
 _demucs = None
 _clap = None

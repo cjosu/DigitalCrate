@@ -32,13 +32,27 @@ def _saved_jobs():
         return {}
 
 
+BACKGROUND = {"styles", "lyrics", "credits", "reloop"}
+_SLOW = {}
+
+
 def start_job(kind, args, target):
     import subprocess, sys, time
     jid = str(int(time.time() * 1000))
     logf = C.DATA_DIR / f"{kind}_{jid}.log"
+    import os
     cmd = [sys.executable, "-u", "-m", "digitalcrate", kind] + args
+    env = dict(os.environ)
+    nice = 0
+    if kind in BACKGROUND:  # library-wide passes: a few cores and low priority, so the app stays quick meanwhile
+        env.update({k: "3" for k in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+                                     "OPENBLAS_NUM_THREADS", "DC_THREADS")})
+        nice = 15
+    elif kind == "process":  # a mining run: most of the machine, but the app comes first
+        nice = 5
     proc = subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parent.parent), stdout=open(logf, "w"),
-                            stderr=subprocess.STDOUT, start_new_session=True)  # keeps running if the server restarts
+                            stderr=subprocess.STDOUT, start_new_session=True, env=env,  # survives a server restart
+                            preexec_fn=(lambda: os.nice(nice)) if nice else None)
     JOBS[jid] = dict(kind=kind, target=target, proc=proc, log=logf)
     saved = _saved_jobs()
     saved[jid] = dict(kind=kind, target=target, pid=proc.pid, log=str(logf), started=time.time())
@@ -88,18 +102,51 @@ def activity():
                         now=now[-1] if now and running else None, songs=len(made),
                         samples=int(m.group(1)) if m else sum(int(x[1]) for x in made),
                         errors=txt.count("  ERROR "), building="BUILDING" in txt and "BUILD DONE" not in txt,
-                        finished=bool(m) or "BUILD DONE" in txt or "INGEST DONE" in txt or "SCOUT DONE" in txt,
+                        finished=bool(m) or "BUILD DONE" in txt or "INGEST DONE" in txt or "SCOUT DONE" in txt or "TASK DONE" in txt,
                         tail=lines[-8:]))
     mine = {j["pid"] for j in _saved_jobs().values()}
     try:
         ps = subprocess.run(["ps", "-axo", "pid=,etime=,command="], capture_output=True, text=True).stdout
         for l in ps.splitlines():
             pid, et, cmd = l.strip().split(None, 2)
-            if "python" in cmd.split()[0].rsplit("/", 1)[-1].lower() and "digitalcrate" in cmd and re.search(r"digitalcrate\W+(process|drums|scout|build|ingest|transform|mangle)\b|process import run|\.build import", cmd) \
+            if "python" in cmd.split()[0].rsplit("/", 1)[-1].lower() and "digitalcrate" in cmd and re.search(r"digitalcrate\W+(process|drums|scout|build|ingest|transform|mangle|lyrics|styles|embed|beats|credits|reloop)\b|process import run|\.build import", cmd) \
                     and int(pid) not in mine and "grep" not in cmd:
                 out.append(dict(id="pid" + pid, kind="terminal", target=cmd[-160:], running=True, elapsed=et, external=True))
     except Exception:
         pass
+    return out
+
+
+TASKS = {  # library-wide analyses the Processing page can start: (label, SQL for done, SQL for total)
+    "styles": ("Tag styles (Discogs, from the audio)", "SELECT COUNT(*) FROM styles",
+               "SELECT COUNT(*) FROM tracks WHERE status != 'duplicate'"),
+    "credits": ("Check sample credits (MusicBrainz; pop, soul, ambient, untagged…)", "SELECT COUNT(*) FROM mb",
+                None),
+    "lyrics": ("Transcribe words in vocals (Whisper)",
+               "SELECT COUNT(*) FROM words w JOIN samples s ON s.id=w.sample_id WHERE s.dur >= 0.8",
+               "SELECT COUNT(*) FROM samples WHERE category IN ('Vocals','Vocal Atmospheres') AND dur >= 0.8 "
+               "AND path NOT LIKE '_Reference/%'"),
+}
+
+
+def analysis():
+    from .db import connect
+    con, out = connect(), []
+    running = {j["kind"] for j in activity() if j["running"]}
+    for k, (label, done_q, total_q) in TASKS.items():
+        try:
+            done = con.execute(done_q).fetchone()[0]
+        except Exception:  # its table doesn't exist until the first run
+            done = 0
+        if total_q is None:  # credits: the unmined songs in genres where sampling is likely
+            from .batches import _pool
+            from .mbz import RISKY
+            rows, fam, _ = _pool(con)
+            seen = {r[0] for r in con.execute("SELECT track_id FROM mb")} if done else set()
+            total = done + sum(1 for r, f in zip(rows, fam) if f in RISKY and r["id"] not in seen)
+        else:
+            total = con.execute(total_q).fetchone()[0]
+        out.append(dict(task=k, label=label, done=done, total=total, running=k in running))
     return out
 
 
@@ -313,9 +360,32 @@ class Handler(SimpleHTTPRequestHandler):
             if u.path == "/api/link":
                 from .link import status
                 return self._json(status())
+            if u.path == "/api/plugins":
+                from .plugins import scan
+                return self._json(scan())
+            if u.path == "/api/plugins/params":
+                from .plugins import scan, params
+                if q.get("path") not in {x["path"] for x in scan()}:
+                    return self._json({"error": "not an installed plugin"}, 400)
+                try:
+                    return self._json(params(q["path"]))
+                except Exception as e:
+                    return self._json({"error": f"couldn't load it: {str(e)[:160]}"})
+            if u.path == "/api/related-artists":
+                from .mbz import related_artists
+                try:
+                    return self._json(related_artists())
+                except Exception as e:
+                    return self._json(dict(seeds=[], artists=[], error=str(e)[:200]))
             if u.path == "/api/ytscout":
                 from .ytscout import results, PRESETS
-                return self._json(dict(presets=PRESETS, results=results(q.get("q") or None)))
+                from .related import guided_queries, profile
+                try:
+                    prof, gq = profile(), guided_queries()
+                except Exception:  # styles not analysed yet
+                    prof, gq = dict(styles=[]), []
+                return self._json(dict(presets=dict(PRESETS, guided=[g["query"] for g in gq]), guided=gq,
+                                       profile=prof, results=results(q.get("q") or None)))
             if u.path == "/api/shootout":
                 from .shootout import manifest, votes, results
                 return self._json(dict(manifest(q.get("round")), votes=votes(), results=results()))
@@ -339,7 +409,11 @@ class Handler(SimpleHTTPRequestHandler):
             if q.get("jobs") == "1":  # the main page's badge: just what's running
                 return self._json(dict(jobs=[j for j in activity() if j["running"]]))
             from .backup import last_backup
-            return self._json(dict(jobs=activity(), coverage=coverage(), backup=last_backup()))
+            import time as _t
+            if _t.time() - _SLOW.get("at", 0) > 20:  # library stats change slowly; the page polls every 3 s in a run
+                _SLOW.update(at=_t.time(), coverage=coverage(), analysis=analysis())
+            return self._json(dict(jobs=activity(), coverage=_SLOW["coverage"], backup=last_backup(),
+                                   analysis=_SLOW["analysis"]))
         if u.path == "/api/jobs":
             return self._json(job_status(q.get("kind")))
         if self.path == "/api/favs":
@@ -375,9 +449,13 @@ class Handler(SimpleHTTPRequestHandler):
                 from .search import reference_search
                 return self._json(reference_search(req["target"]))
             elif self.path == "/api/ytscout":
-                mode = "pads" if req.get("mode") == "pads" else "voice"
-                return self._json({"job": start_job("ytscout", [req["query"], "--n", str(int(req.get("n", 15))), "--mode", mode],
-                                                    req["query"])})
+                mode = req.get("mode") if req.get("mode") in ("pads", "guided") else "voice"
+                extra = ["--style", req["style"]] if mode == "guided" and req.get("style") else []
+                return self._json({"job": start_job("ytscout", [req["query"], "--n", str(int(req.get("n", 15))), "--mode", mode]
+                                                    + extra, req["query"])})
+            elif self.path == "/api/styles/hide":
+                from .related import hide_style
+                return self._json({"hidden": hide_style(req["style"], bool(req.get("hide", True)))})
             elif self.path == "/api/ytscout/mark":
                 from .ytscout import mark
                 mark(req["id"], req["status"])
@@ -423,9 +501,18 @@ class Handler(SimpleHTTPRequestHandler):
                 if any(j["running"] and j["kind"] in ("process", "terminal") for j in activity()):
                     return self._json({"error": "a mining run is already going; stop it first"}, 409)
                 f = save_batch(plan)
-                args = ["--ids-file", str(f)] + (["--build"] if req.get("build", True) else [])
+                args = ["--ids-file", str(f)] + (["--words"] if req.get("words", True) else []) \
+                    + (["--build"] if req.get("build", True) else [])
                 label = f"{plan['n']} songs · {plan['mode']} · {plan['artists']} artists"
                 return self._json({"job": start_job("process", args, label)})
+            elif self.path == "/api/activity/task":
+                t = req.get("task")
+                if t not in TASKS:
+                    return self._json({"error": f"unknown task {t!r}"}, 400)
+                if any(j["running"] and j["kind"] == t for j in activity()):
+                    return self._json({"error": "already running"}, 409)
+                _SLOW.clear()
+                return self._json({"job": start_job(t, [], TASKS[t][0])})
             elif self.path == "/api/activity/stop":
                 return self._json({"stopped": stop_job(req["id"])})
             elif self.path == "/api/ingest":

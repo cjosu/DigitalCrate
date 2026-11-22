@@ -39,6 +39,9 @@ VOCAL = ["a person singing alone with no accompaniment", "a cappella solo voice"
 NEG = ["drums and bass, full band music", "people talking, speech, podcast", "loud crowd noise, applause",
        "electronic dance music with a beat", "video game sound effects and explosions"]
 ROOM = ["singing recorded at home on a phone, intimate room sound", "reverberant church acoustics"]
+# guided: listen for your styles (Discogs styles of the songs you've liked samples from), not a kind of sound
+GUIDED_NEG = ["people talking, speech, podcast", "loud crowd noise, applause", "video game sound effects and explosions",
+              "hip hop beat with rapping"]
 
 
 def log(m):
@@ -51,7 +54,7 @@ def _db():
                    channel TEXT, duration REAL, views INTEGER, score REAL, vocal REAL, neg REAL, taste REAL,
                    best_at REAL, snippet TEXT, status TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)""")
     cols = {r[1] for r in con.execute("PRAGMA table_info(yt_scout)")}
-    for c in ("queries", "mode"):  # every search a video turned up in; voice or pads scoring
+    for c in ("queries", "mode", "style"):  # every search a video turned up in; voice or pads scoring
         if c not in cols:
             con.execute(f"ALTER TABLE yt_scout ADD COLUMN {c} TEXT")
     return con
@@ -82,7 +85,8 @@ def _fetch(vid, dur):
 
 def _taste_vec(con, mode="voice"):
     cats = ("'Vocals','Vocal Atmospheres'" if mode == "voice"
-            else "'Pads & Atmospheres','Textures & Field','Chords & Keys','Vocal Atmospheres'")
+            else "'Pads & Atmospheres','Textures & Field','Chords & Keys','Vocal Atmospheres'" if mode == "pads"
+            else "'Vocals','Vocal Atmospheres','Pads & Atmospheres','Textures & Field','Chords & Keys','Melodies & Leads'")
     rows = con.execute(f"""SELECT s.clap FROM favorites f JOIN samples s ON s.path=f.path
                           WHERE s.category IN ({cats}) AND s.clap IS NOT NULL""").fetchall()
     if not rows:
@@ -92,21 +96,25 @@ def _taste_vec(con, mode="voice"):
     return v / (np.linalg.norm(v) + 1e-9)
 
 
-def run(query, n=15, mode="voice"):
+def run(query, n=15, mode="voice", style=None):
     import soundfile as sf
     from scipy.signal import resample_poly
     from .audio import decode
     from .models import clap
     con = _db()
     cl = clap()
-    pos, neg_, room = (VOCAL, NEG, ROOM) if mode == "voice" else (PAD, PAD_NEG, PAD_ROOM)
+    pos, neg_, room = {"voice": (VOCAL, NEG, ROOM), "pads": (PAD, PAD_NEG, PAD_ROOM)}.get(mode, (VOCAL, GUIDED_NEG, ROOM))
     tv, tn, tr = (cl.embed_text(tuple(x)) for x in (pos, neg_, room))
+    if mode == "guided":
+        from .related import target
+        from . import styles as S
+        T, cent = target(style, con)
     taste = _taste_vec(con, mode)
     seen = {r["id"]: r["queries"] or r["query"] or "" for r in con.execute("SELECT id, query, queries FROM yt_scout")}
     # dig past what's already been scouted, so repeating a search brings up to n *new* candidates
     known = sum(1 for q in seen.values() if query in q.split("|"))
     depth = min(100, n + known + n)
-    log(f"searching YouTube ({'pads & textures' if mode != 'voice' else 'voice'}): {query}")
+    log(f"searching YouTube ({dict(voice='voice', pads='pads & textures').get(mode, 'guided by ' + (style or 'your styles'))}): {query}")
     ents = search(query, depth)
     st = dict(found=len(ents), listened=0, already=0, too_short=0, failed=0)
     for k, e in enumerate(ents, 1):
@@ -137,6 +145,15 @@ def run(query, n=15, mode="voice"):
             rm = (A @ tr.T).max(1)
             ts = (A @ taste) if taste is not None else np.zeros(len(A))
             per = 2.0 * v - 1.2 * ng + 0.4 * rm + 0.8 * ts
+            if mode == "guided":  # how much each 10 s window sounds like your styles (Discogs-EffNet)
+                m16 = resample_poly(m48, 1, 3).astype(np.float32)
+                sty, emb = [], []
+                for s16 in starts:
+                    r = S.predict([m16[s16 // 3:(s16 + W) // 3]])
+                    pr, ev = r if r else (np.zeros(len(T), np.float32), np.zeros(1280, np.float32))
+                    sty.append(float(pr @ T)); emb.append(float(ev @ cent / (np.linalg.norm(ev) + 1e-9)) if cent is not None else 0.0)
+                v = np.array(sty)
+                per = 3.0 * v + 1.5 * (np.array(emb) - 0.6) + 0.8 * ts - 1.2 * ng
             top = np.argsort(-per)[:3]
             score = float(per[top].mean())
             b = int(top[0])
@@ -149,14 +166,14 @@ def run(query, n=15, mode="voice"):
             sf.write(str(snip), (seg * 0.9 / (np.abs(seg).max() + 1e-9)).T, C.SR, subtype="PCM_16")
             f.unlink(missing_ok=True)
             con.execute("""INSERT OR REPLACE INTO yt_scout(id, query, url, title, channel, duration, views, score, vocal, neg,
-                           taste, best_at, snippet, status, queries, mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'scored',?,?)""",
+                           taste, best_at, snippet, status, queries, mode, style) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'scored',?,?,?)""",
                         (vid, query, f"https://www.youtube.com/watch?v={vid}", e.get("title"),
                          e.get("channel") or e.get("uploader"), dur, e.get("view_count"), round(score, 4),
                          round(float(v[top].mean()), 4), round(float(ng[top].mean()), 4),
                          round(float(ts[top].mean()), 4), round(off + starts[b] / 48000, 1),
-                         str(snip.relative_to(C.LIB_ROOT)), query, mode))
+                         str(snip.relative_to(C.LIB_ROOT)), query, mode, style if mode == "guided" else None))
             con.commit()
-            log(f"    score {score:.2f} (fit {v[top].mean():.2f}, unwanted {ng[top].mean():.2f})")
+            log(f"    score {score:.2f} ({'style' if mode == 'guided' else 'fit'} {v[top].mean():.2f}, unwanted {ng[top].mean():.2f})")
         except Exception as ex:
             st["failed"] += 1
             log(f"    failed: {str(ex)[:120]}")

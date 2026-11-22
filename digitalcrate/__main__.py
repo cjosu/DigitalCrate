@@ -26,6 +26,7 @@ def main():
     p.add_argument("--limit", type=int)
     p.add_argument("--ids-file", help="a JSON list of track ids to mine (from the Processing page or research/*_batch.py)")
     p.add_argument("--build", action="store_true", help="rebuild the browser page when done")
+    p.add_argument("--words", action="store_true", help="transcribe the new vocal samples' words before rebuilding")
     p.add_argument("--separate", choices=["auto", "always", "never"], default="auto",
                    help="auto: separate stems unless the track is already drumless")
     p.add_argument("--reprocess", action="store_true")
@@ -40,6 +41,14 @@ def main():
     b = sub.add_parser("build")
     b.add_argument("--kits", type=int, default=60)
     sub.add_parser("status")
+    ly = sub.add_parser("lyrics", help="transcribe the words in vocal samples (Whisper), for lyric search and wordless chops")
+    ly.add_argument("--limit", type=int)
+    rl = sub.add_parser("reloop", help="re-cut old loops onto Beat This downbeats, in place (dry run without --fix)")
+    rl.add_argument("--fix", action="store_true"); rl.add_argument("--limit", type=int)
+    cr = sub.add_parser("credits", help="check unmined songs' sample credits on MusicBrainz (sample-based ones are skipped)")
+    cr.add_argument("--limit", type=int)
+    sy = sub.add_parser("styles", help="tag every song with Discogs styles from its audio (genre gaps, related music)")
+    sy.add_argument("--limit", type=int)
     bk = sub.add_parser("backup", help="back up your ratings, favourites, sketches, labels and edits (not regenerable)")
     bk.add_argument("--install", action="store_true", help="also back up nightly (launchd)")
     bk.add_argument("--restore", metavar="ZIP", help="put a backup back")
@@ -81,7 +90,9 @@ def main():
     sub.add_parser("reclassify", help="re-apply category rules to existing samples (fast, no audio work)")
     ys = sub.add_parser("ytscout", help="search YouTube, listen to a minute of each result, score for clean singing")
     ys.add_argument("query"); ys.add_argument("--n", type=int, default=15)
-    ys.add_argument("--mode", choices=["voice", "pads"], default="voice", help="score for singing, or for pads & textures")
+    ys.add_argument("--mode", choices=["voice", "pads", "guided"], default="voice",
+                    help="score for singing, for pads & textures, or for your styles (guided)")
+    ys.add_argument("--style", help="guided: one Discogs style to listen for, e.g. 'Funk / Soul---Neo Soul' (default: your styles)")
     so = sub.add_parser("shootout", help="render the stretch/repitch shootout (blind test at /shootout)")
     so.add_argument("--force", action="store_true"); so.add_argument("--results", action="store_true")
     so.add_argument("--tune", action="store_true", help="round 2: vocal tuning engines")
@@ -116,6 +127,10 @@ def main():
             a.limit = a.top
         run(where, params, a.separate, a.limit, a.reprocess, vocals=a.vocals,
             include_reference=a.reference, order_by=order)
+        if a.words:
+            print("WORDS: transcribing new vocal samples…", flush=True)
+            from .lyrics import run as words
+            words()
         if a.build:
             print("BUILDING the browser page…", flush=True)
             from .build import build
@@ -158,7 +173,7 @@ def main():
         print(export(paths, a.name or (a.kit if a.kit else None), rack=a.rack, key=a.key, bpm=a.bpm))
     elif a.cmd == "ytscout":
         from .ytscout import run as yrun
-        yrun(a.query, a.n, a.mode)
+        yrun(a.query, a.n, a.mode, a.style)
     elif a.cmd == "shootout":
         from .shootout import render, render_tune, results
         if a.tune and not a.results:
@@ -171,6 +186,22 @@ def main():
     elif a.cmd == "reclassify":
         from .process import reclassify
         reclassify()
+    elif a.cmd == "reloop":
+        from .reloop import run as reloop
+        reloop(a.fix, a.limit)
+        print("TASK DONE", flush=True)
+    elif a.cmd == "credits":
+        from .mbz import run as credits
+        credits(a.limit)
+        print("TASK DONE", flush=True)
+    elif a.cmd == "styles":
+        from .styles import run as styles
+        styles(a.limit)
+        print("TASK DONE", flush=True)
+    elif a.cmd == "lyrics":
+        from .lyrics import run as words
+        words(a.limit)
+        print("TASK DONE", flush=True)
     elif a.cmd == "build":
         from .build import build
         build(n_kits=a.kits)

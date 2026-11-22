@@ -43,6 +43,63 @@ def bar_starts(beats, mix_feat):
     return beats[int(np.argmax(strength))::4]
 
 
+_bt = None
+
+
+def beat_this(y):
+    """Beats and downbeats from Beat This! (CPJKU, 2024; state of the art on beat and downbeat tracking)."""
+    global _bt
+    if _bt is None:
+        import torch
+        from beat_this.inference import Audio2Beats
+        _bt = Audio2Beats(checkpoint_path="final0", device="mps" if torch.backends.mps.is_available() else "cpu",
+                          dbn=False)
+    beats, downs = _bt(y.mean(0).astype(np.float32), SR)
+    return np.asarray(beats, float), np.asarray(downs, float)
+
+
+def _fold(bpm):
+    while bpm and bpm < 70:
+        bpm *= 2
+    while bpm > 180:
+        bpm /= 2
+    return bpm
+
+
+def bars(tk, y, mix):
+    """Bar starts for cutting loops. Tested on 30 mined songs against the old way (Essentia's beats, bar phase from
+    bass-band onsets): tempi mostly agreed, but the old bar phase landed on Beat This's downbeats in only about half
+    the songs, so loops often started on beat 2, 3 or 4. Now:
+      - Beat This finds a steady 4/4 grid: its tempo and its downbeats (also catches songs Essentia gave up on);
+      - otherwise, if Essentia's tempo is trusted: Essentia's beats, phased to Beat This's downbeats when it found
+        any, else to the bass-band onsets as before;
+      - otherwise no loops (rubato, free time).
+    Returns (bar times, which way); tk is updated in place."""
+    try:
+        beats, downs = beat_this(y)
+    except Exception as e:  # missing package or model: the old way
+        print(f"  Beat This unavailable ({e}); using Essentia's bars")
+        return (bar_starts(tk["beats"], mix) if tk["tempo_ok"] else np.array([])), "essentia"
+    ibi = np.diff(beats)
+    steady = len(beats) > 16 and ibi.std() / ibi.mean() < 0.12
+    per_bar = np.median([((beats >= a - 0.03) & (beats < b - 0.03)).sum() for a, b in zip(downs[:-1], downs[1:])]) \
+        if len(downs) > 4 else 0
+    if steady and per_bar == 4:
+        # beats come on a 20 ms frame grid, so one interval says little; the slope of a line through all of them
+        # is precise (a median interval would put "Ready Or Not" at 88.2 instead of 89)
+        period = float(np.polyfit(np.arange(len(beats)), beats, 1)[0])
+        tk.update(bpm=round(_fold(60.0 / period), 2), beats=beats, tempo_ok=True)
+        return downs, "beat_this"
+    if not tk["tempo_ok"]:
+        return np.array([]), "none"
+    eb = tk["beats"]
+    if len(downs) > 4 and len(eb) >= 8:
+        hit = [np.mean([np.abs(downs - t).min() < 0.07 for t in eb[p::4]]) for p in range(4)]
+        if max(hit) > 0.5:
+            return eb[int(np.argmax(hit))::4], "essentia+downbeats"
+    return bar_starts(eb, mix), "essentia"
+
+
 class SourceFeat:
     """STFT-based frame features for one source signal (mix or a stem)."""
 

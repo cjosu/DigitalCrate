@@ -69,8 +69,9 @@ Layer up to 8 samples, in the project key and tempo. Open any auto-built **kit**
 - **Per lane:** trim to any part of the clip, on/off, solo, fades, repeat every N bars, keep its own key, and a fader
   that's relative (every lane starts equally loud at 0 dB). Loops lock to the bar; other clips repeat on their own
   length so nothing leaves a gap.
-- **Out:** save the sketch, bounce it to a new sample, or **⇩ stems**: one WAV per lane, all the same length from
-  bar 1, so they line up when dropped into Live.
+- **Out:** save the sketch, bounce it to a new sample, **⇩ stems** (one WAV per lane, all the same length from
+  bar 1), or **⇩ Live set**: an Ableton set with one audio track per lane and a clip wherever that lane plays, at the
+  sketch's tempo, with muted lanes kept as muted tracks. It's built from your installed Live's own empty template.
 
 ### Chords for any sample
 
@@ -83,8 +84,12 @@ flavour that follows the sample's mood (soulful → 7ths and 9ths, dark → mino
 Voicings sit in a different register from the sample so they don't mask it.
 
 If the sample has **chords of its own**, suggestions change where it does: *follows* enriches its chords in another
-register, *reharmonised* swaps in chords that still contain what it plays. Export the progression as **MIDI**, or
-render the pad straight into the sketchpad.
+register, *reharmonised* swaps in chords that still contain what it plays.
+
+**Bass** adds a bassline built from the chords: held roots, root and fifth, an 8th-note pulse, syncopated R&B, or a
+walking line with chromatic approach notes (the default follows the sample: walking for jazz, held roots where the
+changes don't follow a steady beat). Export the progression as **MIDI** (chords and bass on separate tracks), or
+render the pad and the bass straight into the sketchpad as two lanes.
 
 ### Pads
 
@@ -117,32 +122,38 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   tape-style tuning toward a key with natural glide and drift. ↺ reset starts over.
 - **Variations:** generative reworks chosen by what you've liked, including vocals tuned to their own key.
 - **⚙ Processing:** the mining runs in one place. Watch progress, see the current song and errors, and stop a
-  run. Start a new one in two modes: *breadth* (one song per artist, artists never mined first, spread across
-  genres) or *most promising*. You can preview a run before starting it, and see how much of each genre is mined.
+  run. Start a new one in three modes: *breadth* (one song per artist, artists never mined first, spread across
+  genres), *most promising*, or *like my favourites*. You can preview a run before starting it, and see how much
+  of each genre is mined. Whole-library passes (styles, lyrics, sample credits) start and show progress here too.
+- **Backups:** `digitalcrate backup --install` copies what can't be re-made (ratings, listening history,
+  favourites, sketches, labels, edits, config) to `~/Documents/DigitalCrate Backups` every night, keeping 14.
+  `digitalcrate backup --restore FILE` puts one back. The Processing page shows when the last one ran.
 - **Added recently:** narrows any sort to the latest run, or to the last day or week. With *for you* it shows the
   best of what just came in.
 - **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards.
 - **🌌 Galaxy:** every sample on a map by sound; hover to hear, colour by taste.
 
   ![The sample galaxy](docs/img/10-galaxy.png)
-- **🔭 Scout:** searches YouTube and listens to a minute of each result, scoring it for *raw singing* or for
-  *pads & textures*. Repeating a search digs deeper. Nothing enters the library until you press *add source*.
+- **🔭 Scout:** searches YouTube and listens to a minute of each result, scoring it for *raw singing*, for
+  *pads & textures*, or for **🧭 your styles**. Repeating a search digs deeper. Nothing enters the library until you
+  press *add source*.
+- **Your styles:** every song is tagged with Discogs styles (400 of them, from Essentia's Discogs-EffNet, heard in the
+  audio rather than read from tags). The songs behind the samples you like give your style profile (Medieval,
+  Contemporary R&B, Neo Soul, Gospel…); guided scouting searches YouTube with it and scores each result for how much
+  it sounds like those styles. It also suggests artists you don't have, that ListenBrainz listeners pair with yours.
+  The styles also fill genre gaps for untagged songs, and power a *like my favourites* mining mode.
+- **Lyrics:** Whisper transcribes the words in vocal samples (in whatever language is sung). Search finds lyrics, and
+  a filter shows samples *with words* or *wordless* (oohs, hums, vowels). Whisper "hears" *Thank you.* in silence and
+  pads, so that and other hallucinations are filtered out.
+- **Sample credits:** songs MusicBrainz lists as sampling other records are left out of mining runs (it knew 4 of 10
+  famous sample-based songs, so it adds to leaving out hip-hop and electronic rather than replacing it).
+- **Your plugins:** any AU or VST3 effect you have installed (Valhalla Supermassive, say) can be used in the editor,
+  with its controls; variations sometimes use Supermassive for their space.
+- **🎹 MIDI controller:** play/stop, next, previous, ★ and ✕ from pads or keys, plus the chop pads. Press *learn* and
+  then the pad you want. Uses Web MIDI, so Chrome, Edge or Firefox (not Safari).
 - **Export:** to `Ableton User Library/Samples/DigitalCrate/…` with an `_info.csv`; optionally key/tempo-conformed
   copies, MIDI next to tonal samples, and a Drum Rack. Also from the CLI:
   `digitalcrate export --favorites --rack --key Fm --bpm 124`.
-
-## Measuring instead of guessing
-
-Several models here were tuned against blind listening, and the app includes the tools to keep doing that:
-
-- **`/pairtest`:** a blind A/B test of "goes well with": partners from two models, shuffled; rate each pair 1–5. (A
-  model learned from the arrangements in your own songs is on trial against plain sound similarity this way.)
-- **`/drumlabel`:** label drum hits by ear, with a "not sure" option and hidden repeats to measure your own
-  consistency; the labels train the drum classifier.
-- **The taste model** reports an honest held-out score: whether hidden favourites outrank samples you heard and
-  didn't star. (An earlier score was inflated by counting a fully played half-second clip as "liked".)
-- **`research/`** holds the evaluation scripts behind these decisions (taste variants, pairing models, drum
-  classifiers, chord fit).
 
 ## How it works
 
@@ -196,14 +207,19 @@ digitalcrate <command>
 scan [--root DIR]                  catalogue the music folder (or an extra folder)
 scout                              rank tracks for sample-worthy material
 process [filters]                  --artist A --match S --genre G --all --top N --drum-only --reprocess
-                                   --ids-file F (from research/diverse_batch.py) --build (rebuild after)
+                                   --ids-file F (from research/diverse_batch.py) --words --build (rebuild after)
 drums --top N                      mine percussion
 build                              moods, compatibility, kits, folder views, Browser.html
 serve [--port 8765]                the app
 taste                              fit the taste model, report held-out accuracy
 ingest URL|FILE|FOLDER [--drums]   add a source (YouTube via yt-dlp) and mine it
 export --favorites|--kit K|--ids … [--name N] [--rack] [--key Fm --bpm 124]
-ytscout "query" [--n 15] [--mode voice|pads]
+backup [--install] [--restore ZIP]  back up ratings, favourites, sketches, labels, edits (nightly with --install)
+ytscout "query" [--n 15] [--mode voice|pads|guided] [--style "Funk / Soul---Neo Soul"]
+styles                             tag every song with Discogs styles from its audio (about an hour)
+lyrics                             transcribe the words in vocal samples (Whisper; about 2 s each)
+credits                            check unmined songs' sample credits on MusicBrainz
+reloop [--fix]                     re-cut older loops onto Beat This downbeats (keeps IDs; skips ones you've touched)
 ```
 
 ## The library on disk
@@ -216,7 +232,7 @@ SampleLibrary/
   Favorites/        hardlinks to starred samples
   _By Key/ · _By Tempo/ · Kits/      hardlinked views (no extra disk space)
   _Reference/       reference-only artists (style queries, never exported)
-  Browser.html · _data/samples.sqlite
+  Browser.html (+ Browser-partners.js, the goes-with picks, loaded after the list) · _data/samples.sqlite
 ```
 
 File names carry what Ableton's search needs: `VoxChop_05A-Cm-Ab_136bpm_Artist-Title_1m42s_ae127b.wav` is a vocal chop
@@ -255,7 +271,11 @@ Built on [Demucs](https://github.com/facebookresearch/demucs),
 [Rubber Band](https://breakfastquay.com/rubberband/), [Signalsmith Stretch](https://signalsmith-audio.co.uk/code/stretch/),
 [WORLD](https://github.com/mmorise/World), [OpenVPI vocoders](https://github.com/openvpi/vocoders) (CC BY-NC-SA 4.0),
 [basic-pitch](https://github.com/spotify/basic-pitch), [aalink](https://github.com/artfwo/aalink),
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) and [Parselmouth](https://github.com/YannickJadoul/Parselmouth). Model
+[yt-dlp](https://github.com/yt-dlp/yt-dlp), [Parselmouth](https://github.com/YannickJadoul/Parselmouth),
+[Whisper](https://github.com/openai/whisper) via [mlx-whisper](https://github.com/ml-explore/mlx-examples),
+[Beat This!](https://github.com/CPJKU/beat_this), [Pedalboard](https://github.com/spotify/pedalboard),
+Essentia's [Discogs-EffNet](https://essentia.upf.edu/models.html) (CC BY-NC-SA 4.0),
+[MusicBrainz](https://musicbrainz.org) and [ListenBrainz](https://listenbrainz.org). Model
 licences: [`models/README.md`](models/README.md).
 
 **Licence:** [AGPL-3.0](LICENSE), because Essentia is AGPL-3.0 and several other dependencies are GPL.

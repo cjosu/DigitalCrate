@@ -103,13 +103,17 @@ def install(hour=3, minute=30):
 
 
 def restore(zpath):
-    """Put a backup back. The current database and files are kept next to them as *.before-restore."""
+    """Put a backup back (quit the app and any runs first). The current database and files are kept next to them as
+    *.before-restore."""
     zpath = Path(zpath)
     with zipfile.ZipFile(zpath) as z:
         for name in z.namelist():
             target = (C.PROJECT_DIR / "digitalcrate.toml") if name == "digitalcrate.toml" else C.LIB_ROOT / name
             if target.exists():
                 shutil.copy2(target, target.with_name(target.name + ".before-restore"))
+            if target.suffix == ".sqlite":  # the old database's write-ahead log must not be replayed onto the new one
+                for side in ("-wal", "-shm"):
+                    target.with_name(target.name + side).unlink(missing_ok=True)
             target.parent.mkdir(parents=True, exist_ok=True)
             with z.open(name) as src, open(target, "wb") as dst:
                 shutil.copyfileobj(src, dst)

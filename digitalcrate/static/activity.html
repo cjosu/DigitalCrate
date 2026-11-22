@@ -20,7 +20,7 @@ input,select{font:inherit;color:var(--ink);background:#1b1f25;border:1px solid v
 .bar{height:6px;background:var(--line);border-radius:3px;margin:8px 0 6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
 .now{color:var(--acc);margin:2px 0}
 pre{background:#0b0d10;border:1px solid var(--line);border-radius:6px;padding:8px;font:11px/1.5 ui-monospace,Menlo,monospace;color:var(--mute);white-space:pre-wrap;word-break:break-word;margin:8px 0 0;max-height:150px;overflow:auto}
-.modes{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:10px}
 .mode{text-align:left;padding:10px}.mode.on{border-color:var(--acc);background:#e0a45814}.mode small{display:block;color:var(--mute);margin-top:3px;line-height:1.35}
 .chips{display:flex;flex-wrap:wrap;gap:5px}.chip{font-size:12px;padding:2px 8px;border-radius:12px}.chip.off{text-decoration:line-through;color:var(--mute);border-style:dashed}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
@@ -39,17 +39,20 @@ table{width:100%;border-collapse:collapse;font-size:13px}td{padding:4px 6px 4px 
     <div class="modes">
       <button class="mode on" data-mode="breadth"><b>Breadth</b><small>One song per artist, artists never mined first, shared across genres. For variety.</small></button>
       <button class="mode" data-mode="promising"><b>Most promising</b><small>The songs the scout rated best (exposed singing, pads, sparse parts), R&amp;B and jazz boosted. Up to 6 per artist.</small></button>
+      <button class="mode" data-mode="like"><b>Like my favourites</b><small>Songs whose style (Discogs, heard in the audio) is closest to the songs you've liked samples from. Up to 3 per artist.</small></button>
     </div>
     <div class="sub" style="margin-bottom:5px">Genres to include (click to leave one out)</div><div class="chips" id="skip"></div>
     <div class="row"><label>Songs <input id="n" type="number" min="5" max="1000" value="200" style="width:80px"></label>
+      <label class="sub"><input type="checkbox" id="words" checked> transcribe the words</label>
       <label class="sub"><input type="checkbox" id="build" checked> rebuild the library page when done</label>
       <button id="preview">Preview</button><button class="go" id="start" disabled>Start</button></div>
     <div id="plan" class="plan" hidden></div>
   </section>
+  <section class="card"><h2>Library analysis</h2><div class="sub" style="margin-bottom:8px">Whole-library passes; each only does what isn't done yet, and runs in the background like a mining run.</div><div id="tasks"></div></section>
   <section class="card"><h2>Past runs</h2><div id="past" class="sub">none yet</div></section>
 </div>
 <div>
-  <section class="card"><h2>Library</h2><div class="stats" id="stats"></div></section>
+  <section class="card"><h2>Library</h2><div class="stats" id="stats"></div><div class="sub" id="bk" style="margin-top:10px"></div></section>
   <section class="card"><h2>Mined by genre</h2>
     <div class="legend"><span><i style="background:var(--acc2)"></i>mined</span><span><i style="background:var(--acc)"></i>in the planned run</span></div>
     <table id="genres"></table></section>
@@ -77,12 +80,13 @@ async function load(){
 function jobHTML(j){
   if(j.external)return `<div class="job"><div class="jt"><span class="dot live"></span><b>Started from a terminal</b><span class="r sub">running ${esc(j.elapsed)}</span></div><pre>${esc(j.target)}</pre><div class="sub">Its progress isn't visible here; it can be stopped from the terminal it runs in.</div></div>`;
   const p=j.progress,pct=p?Math.round(100*p[0]/Math.max(1,p[1])):0;
-  const what=j.kind==='process'?'Mining':j.kind==='ingest'?'Adding':j.kind==='ytscout'?'YouTube scout':j.kind;
-  const status=j.running?(j.building?'rebuilding the page…':p?`${p[0]} of ${p[1]} songs · ${pct}%`:'starting…'):(j.finished?'finished':'stopped');
+  const TASK={lyrics:['Words','vocal samples'],styles:['Styles','songs'],embed:['Sound embeddings','samples'],beats:['Beats','loops'],credits:['Sample credits','songs'],reloop:['Re-cutting loops on the downbeat','songs']}[j.kind];
+  const what=j.kind==='process'?'Mining':j.kind==='ingest'?'Adding':j.kind==='ytscout'?'YouTube scout':TASK?TASK[0]:j.kind;
+  const status=j.running?(j.building?'rebuilding the page…':p?`${p[0].toLocaleString()} of ${p[1].toLocaleString()} ${TASK?TASK[1]:'songs'} · ${pct}%`:'starting…'):(j.finished?'finished':'stopped');
   return `<div class="job"><div class="jt"><span class="dot ${j.running?'live':''}"></span><b>${esc(what)}</b><span>${esc(j.target)}</span>
     <span class="r sub">${j.running&&j.eta&&!j.building?`about ${esc(j.eta)} left · `:''}${ago(j.started)}</span></div>
     ${j.running?`<div class="bar"><i style="width:${j.building?100:pct}%"></i></div>`:''}
-    <div class="sub">${esc(status)} · ${fmt(j.samples||0)} samples from ${j.songs} songs${j.errors?` · <span class="err">${j.errors} error${j.errors>1?'s':''}</span>`:''}</div>
+    <div class="sub">${esc(status)}${TASK?'':` · ${fmt(j.samples||0)} samples from ${j.songs} songs`}${j.errors?` · <span class="err">${j.errors} error${j.errors>1?'s':''}</span>`:''}</div>
     ${j.now&&!j.building?`<div class="now">→ ${esc(j.now)}</div>`:''}
     ${j.running?`<div class="row" style="margin:8px 0 0"><button class="warn" data-stop="${j.id}">${armed===j.id?'Click again to stop':'Stop'}</button><span class="sub">${armed===j.id?'The song in progress is dropped and stays unmined.':''}</span></div>`:''}
     <details${j.running?' open':''}><summary class="sub" style="cursor:pointer;margin-top:6px">log</summary><pre>${esc((j.tail||[]).join('\n'))}</pre></details></div>`}
@@ -90,7 +94,7 @@ function jobHTML(j){
 function render(){
   const jobs=A.jobs||[],live=jobs.filter(j=>j.running),past=jobs.filter(j=>!j.running);
   $('jobs').innerHTML=live.length?live.map(jobHTML).join(''):'<div class="sub">Nothing is processing right now.</div>';
-  $('past').innerHTML=past.length?past.slice(0,12).map(jobHTML).join(''):'none yet';
+  $('past').innerHTML=past.length?past.slice(0,12).map(jobHTML).join(''):'none yet';drawTasks();
   $('start').disabled=!PLAN||running();$('start').title=running()?'a mining run is already going':'';
   const c=A.coverage,st=c.status||{},songs=Object.values(st).reduce((a,b)=>a+b,0);
   $('stats').innerHTML=[[fmt(c.samples),'samples'],[fmt(st.done||0),`of ${fmt(songs)} songs mined`],[fmt(c.artists_done),`of ${fmt(c.artists)} artists`],[Math.round(c.top10_share*100)+'%','of mined songs from the top 10 artists']]
@@ -103,6 +107,9 @@ function render(){
     <td class="n">${fmt(d)} / ${fmt(t)}${pl?` <span style="color:var(--acc)">+${pl}</span>`:''}</td></tr>`}).join('');
   $('topart').innerHTML=c.top_artists.map(([a,n])=>`<div><span>${esc(a)}</span><span class="sub num">${n} songs</span></div>`).join('');
   $('recent').innerHTML=c.recent.map(r=>`<div><span>${esc(r.artist)} – ${esc(r.title)}</span><span class="sub num">${r.n} · ${ago(utc(r.processed_at))}</span></div>`).join('');
+  const b=A.backup;if(b){const old=!b.when||Date.now()/1000-b.when>3*86400;
+    $('bk').innerHTML=b.when?`<span style="color:var(${old?'--bad':'--ok'})">●</span> Last backup ${ago(b.when)} · ${b.count} kept in <code>${esc(b.dir.replace(/^\/Users\/[^/]+/,'~'))}</code>${b.installed?' · nightly at 3:30':' · <b>not scheduled</b>: run <code>digitalcrate backup --install</code>'}`
+      :'<span style="color:var(--bad)">●</span> No backup yet: run <code>digitalcrate backup --install</code>'}
   $('errbox').hidden=!c.errors.length;
   $('errors').innerHTML=c.errors.map(r=>`<div title="${esc(r.error)}"><span>${esc(r.artist)} – ${esc(r.title)}</span><span class="sub err">${esc(r.error.split(/[:\n]/)[0].slice(0,40))}</span></div>`).join('')}
 
@@ -128,8 +135,13 @@ document.addEventListener('click',async e=>{
     armed=null;s.disabled=true;s.textContent='stopping…';await fetch('api/activity/stop',{method:'POST',body:JSON.stringify({id})});setTimeout(load,800)}});
 $('preview').onclick=preview;$('n').onchange=preview;
 $('start').onclick=async()=>{$('start').disabled=true;
-  const r=await (await fetch('api/activity/start',{method:'POST',body:JSON.stringify({mode,n:+$('n').value,skip:[...skip],build:$('build').checked})})).json();
+  const r=await (await fetch('api/activity/start',{method:'POST',body:JSON.stringify({mode,n:+$('n').value,skip:[...skip],build:$('build').checked,words:$('words').checked})})).json();
   if(r.error){$('plan').innerHTML+=`<div class="err" style="margin-top:6px">${esc(r.error)}</div>`}else{PLAN=null;$('plan').hidden=true}
   load()};
+function drawTasks(){const T=(A&&A.analysis)||[];$('tasks').innerHTML=T.map(t=>{const pct=t.total?Math.round(t.done/t.total*100):0;
+  return `<div class="row" style="justify-content:space-between;margin:4px 0"><span style="flex:1">${esc(t.label)}<br><span class="sub">${t.done.toLocaleString()} of ${t.total.toLocaleString()} (${pct}%)</span></span>
+  <button data-task="${t.task}" ${t.running||t.done>=t.total?'disabled':''}>${t.running?'running…':t.done>=t.total?'done':'Start'}</button></div>`}).join('')}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-task]');if(!b)return;b.disabled=true;b.textContent='starting…';
+  const r=await (await fetch('api/activity/task',{method:'POST',body:JSON.stringify({task:b.dataset.task})})).json();if(r.error)b.textContent=r.error;setTimeout(load,800)});
 load().then(preview);
 </script></body></html>

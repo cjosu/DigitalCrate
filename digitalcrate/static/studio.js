@@ -24,7 +24,7 @@ top.insertAdjacentHTML('afterend',`<div class="projbar" id="projbar"><b>Project<
  key <select id="pjkey"><option value="">—</option>${KEYS24.map(([c,n])=>`<option value="${n}">${c} · ${n}</option>`).join('')}</select>
  tempo <input id="pjbpm" type="number" step="0.1" min="40" max="220" placeholder="bpm" style="width:72px">
  <label title="every preview, variation and 'play together' is pitched/stretched into the project key & tempo"><input type="checkbox" id="pjon"> play everything in the project key/tempo</label>
- <button id="pjlink" class="tbtn" title="follow Ableton Live's tempo via Link (turn on Link in Live's top bar)">🔗 Live</button>
+ <button id="pjlink" class="tbtn" title="follow Ableton Live's tempo via Link (turn on Link in Live's top bar)">🔗 Live</button>${hq('project')}
  <label class="sub" title="start/stop the sketchpad with Live's transport (Live: Link → Start Stop Sync)"><input type="checkbox" id="pjlt"> start/stop with Live</label>
  <span class="lk" id="pjlk"></span><span style="flex:1"></span><button id="skbtn" class="tbtn">🎛 sketchpad (0)</button></div>
  <div id="sbanner" class="prov sbanner" hidden></div>`);
@@ -72,7 +72,7 @@ function linkNextBar(){// AudioContext time of Live's next bar line
 
 // ================= sound search & reference search =================
 let SOUND=null;
-document.getElementById('search').insertAdjacentHTML('afterend',`<button id="sndbtn" class="tbtn" title="search by what it sounds like (CLAP): e.g. “lonely female voice, distant” · add -word to push away">≈ by sound</button><button id="refbtn" class="tbtn" title="find samples that feel like a reference track (never sampled)">🎧 feels like…</button>`);
+document.getElementById('search').insertAdjacentHTML('afterend',`<button id="sndbtn" class="tbtn" title="search by what it sounds like (CLAP): e.g. “lonely female voice, distant” · add -word to push away">≈ by sound</button><button id="refbtn" class="tbtn" title="find samples that feel like a reference track (never sampled)">🎧 feels like…</button>${hq('sound')}`);
 let soundMode=false;
 $('sndbtn').onclick=()=>{soundMode=!soundMode;$('sndbtn').classList.toggle('on',soundMode);$('search').placeholder=soundMode?'describe a sound, press Enter — e.g. “lonely female voice, distant, rainy night”':'search artist, title, mood, instrument, id…';
  if(!soundMode&&SOUND&&!SOUND.ref){SOUND=null;render()}if(soundMode&&$('search').value.trim())soundSearch($('search').value.trim());$('search').focus()};
@@ -129,7 +129,7 @@ function renderCrate(){const c=buildCrate(false),all=[...c.paths,...c.wild],ids=
  const done=all.filter(p=>FAV.has(p)||TASTE.disliked.has(p)).length;
  $('count').textContent=`today's crate · ${done}/${all.length} rated`+(TASTE.n?` · taste model: ${TASTE.n} ratings`:'');
  $('list').innerHTML=`<div class="crateprog"><i style="width:${done/all.length*100}%"></i></div>
- <div class="kit"><h3><span>For you — what the taste model rates highest that you haven't heard</span><button id="crnew" title="a fresh crate">↻ new crate</button></h3>${ids(c.paths).map(rowHTML).join('')||'<div class="empty">rate a few samples first</div>'}</div>
+ <div class="kit"><h3><span>For you — what the taste model rates highest that you haven't heard${hq('crate')}</span><button id="crnew" title="a fresh crate">↻ new crate</button></h3>${ids(c.paths).map(rowHTML).join('')||'<div class="empty">rate a few samples first</div>'}</div>
  <div class="kit"><h3><span>Wildcards — outside your usual, picked to teach the model fastest</span></h3>${ids(c.wild).map(rowHTML).join('')}</div>
  <div class="hint" style="margin:0 16px 16px">★ and ✕ train the taste model; a new crate appears each day. Already-crated samples don't come back.</div>`;
  $('crnew').onclick=()=>{buildCrate(true);renderCrate()};mark()}
@@ -144,7 +144,7 @@ function galPts(){const keep=new Set(filtered()),out=[];S.forEach((s,i)=>{let p=
 let GP=[];
 function galXY(c,x,y){const W=c.clientWidth,H=c.clientHeight,m=24,s=Math.min(W,H)-2*m;return[(x-.5-GV.x)*GV.z*s+W/2,(y-.5-GV.y)*GV.z*s+H/2]}
 function galSetup(){const c=$('galc'),tip=$('gtip');GP=galPts();
- $('gll').innerHTML=`${GP.filter(p=>p[3]).length.toLocaleString()} samples by sound — nearby = similar · wheel zoom · drag pan · click opens<br>
+ $('gll').innerHTML=`${hq('galaxy')} ${GP.filter(p=>p[3]).length.toLocaleString()} samples by sound — nearby = similar · wheel zoom · drag pan · click opens<br>
  <label style="pointer-events:auto"><input type="checkbox" id="ghov" ${GHOVER?'checked':''}> hover to play</label> <label style="pointer-events:auto"><input type="checkbox" id="gtaste" ${GTASTE?'checked':''}> show taste</label>
  <span style="pointer-events:auto">${CATS.map(cn=>`<span class="badge" style="background:${col(cn)}">${AB[cn]}</span>`).join('')}</span> <span>★ = favourite (ringed)</span>`;
  $('gll').style.pointerEvents='auto';$('ghov').onchange=e=>GHOVER=e.target.checked;$('gtaste').onchange=e=>{GTASTE=e.target.checked;galDraw()};
@@ -181,21 +181,34 @@ function galDraw(){const c=$('galc');if(!c)return;const dpr=devicePixelRatio||1,
 setInterval(()=>{if(st.tab==='G'&&players.size)galDraw()},500);
 
 // ---------- YouTube scout
-let ytT=null,ytRes=[],ytQ='',ytAll=false,ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
+let ytT=null,ytRes=[],ytQ='',ytAll=false,ytSty='',ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
 const YTM={voice:{label:'🎤 voice',intro:'Search YouTube for raw, private-feeling singing. A minute of each result is listened to and scored for clean, unaccompanied voice (and how close it is to your favourite vocals).',
   ph:'e.g. acapella cover · singing in my car · choir rehearsal',bars:['voice','band/talk']},
  pads:{label:'🌫 pads & textures',intro:'Search YouTube for ambient material: pads, drones, soundtracks, slow strings. A minute of each result (from the middle of long mixes) is scored for sustained, atmospheric sound with no drums, talking or singing, and for closeness to your favourite pads and textures.',
-  ph:'e.g. ps1 ambient soundtrack · organ drone · 70s synth soundtrack',bars:['ambient','drums/talk/voice']}};
+  ph:'e.g. ps1 ambient soundtrack · organ drone · 70s synth soundtrack',bars:['ambient','drums/talk/voice']},
+ guided:{label:'🧭 your styles',intro:'Search YouTube guided by your styles: the Discogs styles (heard in the audio, out of 400) of the songs you\'ve liked samples from, ranked by how much more they turn up there than in your collection overall. Each result is listened to and scored for how much it sounds like those styles and like the songs you liked, minus talking and crowd noise. The searches below are built from your styles; pick one, or type your own and choose a style to listen for.',
+  ph:'e.g. rare neo soul · modal jazz 1960s',bars:['your styles','talk/noise']}};
 async function renderScout(){$('count').textContent='YouTube scout';const L=$('list');
  if(!SERVED){L.innerHTML='<div class="empty">The scout needs the local server.</div>';return}
  let d={presets:{},results:[]};try{d=await api('api/ytscout')}catch(e){}if(st.tab!=='Y')return;ytRes=d.results;const M=YTM[ytMode],pre=(d.presets&&d.presets[ytMode])||[];
  L.innerHTML=`<div style="padding:12px 16px;display:grid;gap:8px"><div class="chips">${Object.entries(YTM).map(([k,m])=>`<button data-ytmode="${k}" class="${k===ytMode?'on':''}">${m.label}</button>`).join('')}</div>
- <div class="sub">${M.intro} Nothing enters the library until you press <b>add source</b>. Repeating a search digs further down YouTube's results instead of returning the same videos.</div>
+ <div class="sub">${hq('scout')} ${M.intro} Nothing enters the library until you press <b>add source</b>. Repeating a search digs further down YouTube's results instead of returning the same videos.</div>
  <div class="edrow"><input id="ytq" placeholder="${M.ph}" style="flex:1;min-width:200px" value="${esc(ytQ)}"><select id="ytn"><option>10</option><option selected>15</option><option>25</option></select><button id="ytgo" class="pill">scout</button></div>
- <div class="chips">${pre.map(p=>`<button data-ytp="${esc(p)}">${esc(p)}</button>`).join('')}</div><div id="ytjobs"></div>
+ ${ytMode==='guided'?ytGuided(d):`<div class="chips">${pre.map(p=>`<button data-ytp="${esc(p)}">${esc(p)}</button>`).join('')}</div>`}<div id="ytjobs"></div>
  <div class="edrow sub"><label><input type="checkbox" id="ytall" ${ytAll||!ytQ?'checked':''}> all searches</label><label><input type="checkbox" id="ytsk"> show dismissed</label><span id="ytcount"></span></div></div><div id="ytlist"></div>`;
- $('ytgo').onclick=()=>ytStart($('ytq').value.trim());$('ytq').onkeydown=e=>{if(e.key==='Enter')$('ytgo').click()};$('ytsk').onchange=ytDraw;$('ytall').onchange=e=>{ytAll=e.target.checked;ytDraw()};
- ytDraw();ytPoll()}
+ $('ytgo').onclick=()=>ytStart($('ytq').value.trim());$('ytq').onkeydown=e=>{if(e.key==='Enter')$('ytgo').click()};$('ytsk').onchange=ytDraw;if($('ytsty'))$('ytsty').onchange=e=>{ytSty=e.target.value};$('ytall').onchange=e=>{ytAll=e.target.checked;ytDraw()};
+ ytDraw();ytPoll();if(ytMode==='guided')ytRelated()}
+async function ytRelated(){const el=$('ytrel');if(!el)return;let r=ytRelated.cache;if(!r){try{r=await api('api/related-artists')}catch(e){r={artists:[]}}ytRelated.cache=r}
+ const el2=$('ytrel');if(!el2)return;const A=(r.artists||[]).slice(0,18);
+ el2.innerHTML=A.length?`artists you don't have, that listeners pair with yours (ListenBrainz) — scout one: <div class="chips" style="margin-top:4px">${A.map(a=>`<button data-ytp="${esc(a.name)}" data-yts="" title="listeners of ${esc(a.because.join(', '))} play them too${a.comment?' · '+esc(a.comment):''}">${esc(a.name)} <span style="opacity:.6">← ${esc(a.because[0])}</span></button>`).join('')}</div>`:'';}
+function ytGuided(d){const P=(d.profile&&d.profile.styles)||[],G=d.guided||[];
+ if(!P.length)return `<div class="sub">${d.profile&&d.profile.ready===false?'Your songs\' styles haven\'t been analysed yet: run <b>Tag styles</b> on the ⚙ Processing page (about an hour for the whole collection).':'Like (★) some samples first: your styles come from the songs behind the samples you like.'}</div>`;
+ return `<div class="edrow sub"><span>listen for</span><select id="ytsty"><option value="">all your styles</option>${P.map(p=>`<option value="${esc(p.full)}" ${p.full===ytSty?'selected':''}>${esc(p.name)} (${Math.round(p.share*100)}%${p.era?' · '+p.era:''})</option>`).join('')}</select></div>
+ <div class="chips">${G.map(g=>`<button data-ytp="${esc(g.query)}" data-yts="${esc(g.style)}" title="listens for ${esc(g.style.split('---')[1])}">${esc(g.query)}</button>`).join('')}</div>
+ <div class="sub" id="ytrel">artists related to yours (ListenBrainz): looking up… (about 20 s the first time)</div>
+ <div class="sub" style="line-height:1.9">your styles <span style="opacity:.7">(how much more often than in your whole collection; ✕ if one isn't really yours)</span>: ${P.slice(0,12).map(p=>`<span style="white-space:nowrap;margin-right:10px"><b>${esc(p.name)}</b> ${p.lift}× more<button data-hidesty="${esc(p.full)}" title="not one of my styles: leave it out of the searches" style="border:0;background:none;color:var(--mute);cursor:pointer;padding:0 0 0 5px">✕</button></span>`).join('')}</div>`}
+document.addEventListener('click',async e=>{const h=e.target.closest('[data-hidesty]');if(!h)return;h.disabled=true;
+ try{await api('api/styles/hide',{style:h.dataset.hidesty,hide:true});toast(h.dataset.hidesty.split('---')[1]+' left out of your styles');renderScout()}catch(err){toast('error: '+err.message)}});
 function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk').checked,all=!ytQ||($('ytall')&&$('ytall').checked);
  const inQ=r=>('|'+(r.queries||r.query||'')+'|').includes('|'+ytQ+'|');
  const rows=ytRes.filter(r=>(sk||r.status!=='skipped')&&(all||inQ(r)));
@@ -203,12 +216,12 @@ function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk
  const mx=Math.max(...rows.map(r=>r.score),1e-6);
  el.innerHTML=rows.length?rows.map(r=>{const bl=(YTM[r.mode||'voice']||YTM.voice).bars;return`<div class="yt" style="${r.status==='skipped'?'opacity:.4':''}"><button class="play" data-ytsnip="${esc(r.snippet||'')}" data-ytt="${esc(r.title||'')}">▶</button>
   <div style="min-width:0"><div class="name">${r.status==='ingested'?'<span class="badge" style="background:var(--acc)">added</span>':''}<a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:inherit">${esc(r.title||r.id)}</a></div>
-  <div class="meta">${esc(r.channel||'')} · ${r.views!=null?Number(r.views).toLocaleString()+' views':''} · ${r.duration?Math.floor(r.duration/60)+':'+String(Math.round(r.duration%60)).padStart(2,'0'):''} · best moment @ ${Math.floor(r.best_at/60)}:${String(Math.round(r.best_at%60)).padStart(2,'0')} · “${esc((r.queries||r.query||'').split('|').join('”, “'))}”</div>
+  <div class="meta">${r.style?`🧭 ${esc(r.style.split('---')[1])} · `:r.mode==='guided'?'🧭 your styles · ':''}${esc(r.channel||'')} · ${r.views!=null?Number(r.views).toLocaleString()+' views':''} · ${r.duration?Math.floor(r.duration/60)+':'+String(Math.round(r.duration%60)).padStart(2,'0'):''} · best moment @ ${Math.floor(r.best_at/60)}:${String(Math.round(r.best_at%60)).padStart(2,'0')} · “${esc((r.queries||r.query||'').split('|').join('”, “'))}”</div>
   <div class="bars"><span>${bl[0]}</span><i style="width:${Math.max(2,r.vocal*120)}px"></i><span>${bl[1]}</span><i style="width:${Math.max(2,r.neg*120)}px;background:#d96c6c"></i><span>your taste</span><i style="width:${Math.max(2,(r.taste||0)*120)}px;background:var(--acc)"></i></div></div>
   <div style="display:flex;gap:6px;align-items:center"><span class="score">${Math.round(r.score/mx*100)}</span>${r.status==='ingested'?'':`<button data-ytadd="${esc(r.url)}" data-ytid="${esc(r.id)}" class="pill">add source →</button>`}<button data-ytskip="${esc(r.id)}" title="dismiss">✕</button></div></div>`}).join('')
   :`<div class="empty">${ytQ&&!all?`Nothing scored for “${esc(ytQ)}” yet${ytPoll.wasRunning?' — still listening…':'. Try scouting again (it digs deeper each time) or tick “all searches”.'}`:'No candidates yet — pick a preset or type a search.'}</div>`}
 async function ytStart(q){if(!q)return;ytQ=q;ytAll=false;if($('ytall'))$('ytall').checked=false;ytDraw();
- try{await api('api/ytscout',{query:q,n:+$('ytn').value,mode:ytMode});toast('scouting “'+q+'”…');ytPoll()}catch(e){toast('error: '+e.message)}}
+ try{await api('api/ytscout',{query:q,n:+$('ytn').value,mode:ytMode,style:ytMode==='guided'?($('ytsty')?$('ytsty').value:ytSty):''});toast('scouting “'+q+'”…');ytPoll()}catch(e){toast('error: '+e.message)}}
 async function ytPoll(){clearTimeout(ytT);if(st.tab!=='Y')return;let js=[];try{js=await api('api/jobs?kind=ytscout')}catch(e){}
  const el=$('ytjobs');if(!el)return;const run=js.filter(j=>j.running);
  el.innerHTML=js.slice(-1).map(j=>{const sm=j.tail.map(t=>t.startsWith('SUMMARY ')?JSON.parse(t.slice(8)):null).filter(Boolean).pop();
@@ -217,7 +230,7 @@ async function ytPoll(){clearTimeout(ytT);if(st.tab!=='Y')return;let js=[];try{j
  if(run.length||ytPoll.wasRunning){try{const d=await api('api/ytscout');ytRes=d.results;ytDraw()}catch(e){}}
  ytPoll.wasRunning=run.length>0;if(run.length)ytT=setTimeout(ytPoll,2500)}
 document.addEventListener('click',async e=>{const ym=e.target.closest('[data-ytmode]');if(ym){ytMode=ym.dataset.ytmode;try{localStorage.setItem('ytMode',ytMode)}catch(err){}renderScout();return}
- const p=e.target.closest('[data-ytp]');if(p){$('ytq').value=p.dataset.ytp;ytStart(p.dataset.ytp);return}
+ const p=e.target.closest('[data-ytp]');if(p){$('ytq').value=p.dataset.ytp;if(p.dataset.yts!=null&&$('ytsty')){ytSty=p.dataset.yts;$('ytsty').value=ytSty}ytStart(p.dataset.ytp);return}
  const sn=e.target.closest('[data-ytsnip]');if(sn){if(!sn.dataset.ytsnip)return;if(players.has('yt')&&sn.classList.contains('playing')){stopAll();return}stopAll();
   const a=new Audio(url(sn.dataset.ytsnip));a.play();players.set('yt',a);a.onended=()=>{players.delete('yt');sn.classList.remove('playing');drawNP()};document.querySelectorAll('[data-ytsnip]').forEach(b=>b.classList.remove('playing'));sn.classList.add('playing');
   setNP(sn.dataset.ytsnip,null,'scout preview · '+sn.dataset.ytt,null);return}
@@ -333,10 +346,10 @@ function skHeads(){const now=AC.currentTime,dpr=devicePixelRatio||1;SK.lanes.for
  const v=(l.on||[]).filter(v=>now>=v.t0&&now<v.t0+v.dur).pop();if(!v||!SK.playing)return;
  const x=(v.off+(now-v.t0))/l.buf.duration*c.width;g.fillStyle='#fff';g.fillRect(x-dpr,0,2*dpr,c.height);g.fillStyle='rgba(255,255,255,.15)';g.fillRect(x-6*dpr,0,5*dpr,c.height)})}
 function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
- el.innerHTML=`<h3>🎛 Sketchpad <span class="sub">${esc(PROJ.key||'no key')} · ${PROJ.bpm||'—'} bpm — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
+ el.innerHTML=`<h3>🎛 Sketchpad${hq('sketch')} <span class="sub">${esc(PROJ.key||'no key')} · ${PROJ.bpm||'—'} bpm — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
- <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button><button id="skhide">▾</button></h3>
+ <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skals" title="a Live set: one audio track per lane, a clip wherever it plays, at the sketch's tempo (muted lanes come in as muted tracks). Opens in Live.">⇩ Live set</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button><button id="skhide">▾</button></h3>
  ${SK.lanes.map((l,k)=>{const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
   const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,
    loop||l.state!=='ok'?'':l.src?`tempo-matched to ${PROJ.bpm}`:pu?`pulse ≈ ${pu.bpm} bpm`:'no pulse'].filter(Boolean).join(' · ');
@@ -389,14 +402,18 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
   api('api/export',{scope:'paths',paths:SK.lanes.map(l=>l.path),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
- if(t.id==='skstems'){skStems(+$('skbars').value);return}});
+ if(t.id==='skstems'){skStems(+$('skbars').value);return}if(t.id==='skals'){skStems(+$('skbars').value,true);return}});
 // aligned stems: render every audible lane alone over the same N bars, so each file starts on bar 1 and they all line up
-async function skStems(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
+async function skStems(bars,als){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
  const L=barLen(),sr=44100,solo=SK.lanes.some(l=>l.solo),name=($('skname').value||'').trim()||SK.name||'Sketch '+new Date().toISOString().slice(0,10);
- const live=SK.lanes.filter(l=>!(l.mute||(solo&&!l.solo)));if(!live.length){toast('every lane is muted');return}toast(`rendering ${live.length} stems…`);
- const stems=[];for(const l of live){const ctx=new OfflineAudioContext(2,Math.ceil(bars*L*sr),sr),g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);
-  for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null);const s=S[l.i];stems.push({label:`${AB[s[F.cat]]} ${s[F.artist]} - ${s[F.title]}`,wav:wavB64(await ctx.startRendering())})}
- try{const r=await api('api/stems',{name,key:PROJ.key,bpm:PROJ.bpm,stems});toast(`${r.files.length} stems → ${r.dest.split('/').slice(-2).join('/')} · set Live to ${PROJ.bpm} bpm, ⌘-drag them in to get one track each`)}catch(e){toast('stems failed: '+e.message)}}
+ const off=l=>l.mute||(solo&&!l.solo);
+ // stems: only what you hear; a Live set: every lane, the silent ones as muted tracks you can bring back
+ const lanes=als?SK.lanes:SK.lanes.filter(l=>!off(l));if(!lanes.length){toast('every lane is muted');return}toast(`rendering ${lanes.length} ${als?'tracks':'stems'}…`);
+ const stems=[];for(const l of lanes){const ctx=new OfflineAudioContext(2,Math.ceil(bars*L*sr),sr),g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);
+  for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null);const s=S[l.i];
+  stems.push({label:`${AB[s[F.cat]]} ${s[F.artist]} - ${s[F.title]}`,wav:wavB64(await ctx.startRendering()),mute:off(l),category:s[F.cat],drums:s[F.cat]==='Percussion'})}
+ try{const r=await api('api/stems',{name,key:PROJ.key,bpm:PROJ.bpm,stems,als:!!als,bars});
+  toast(als?`Live set “${r.als.split('/').pop()}” written · opening it in Live`:`${r.files.length} stems → ${r.dest.split('/').slice(-2).join('/')} · set Live to ${PROJ.bpm} bpm, ⌘-drag them in to get one track each`)}catch(e){toast((als?'Live set':'stems')+' failed: '+e.message)}}
 $('sk').addEventListener('input',e=>{const t=e.target;
  if(t.dataset.skfi!=null||t.dataset.skfo!=null){const l=SK.lanes[+(t.dataset.skfi??t.dataset.skfo)];l[t.dataset.skfi!=null?'fin':'fout']=+t.value;
   const o=t.parentNode.querySelector('output');if(o)o.textContent=t.value+' ms';const k=SK.lanes.indexOf(l);skWave(document.querySelector(`[data-skw="${k}"]`),l.buf,l.trim);return}if(t.dataset.skv!=null){const l=SK.lanes[+t.dataset.skv];l.db=+t.value;skGains();const o=t.parentNode.querySelector('output');if(o)o.textContent=dbTxt(l.db)}});
@@ -422,7 +439,7 @@ function wavB64(buf){const n=buf.length,ch=2,sr=buf.sampleRate,b=new ArrayBuffer
 async function renderKitExtras(){const L=$('list');
  L.querySelectorAll('[data-kitexp]').forEach(b=>{const k=D.kits.findIndex(x=>x.name===b.dataset.kitexp);b.insertAdjacentHTML('afterend',` <button data-kitrack="${k}" title="export + Ableton Drum Rack">⇩ rack</button> <button data-kitsk="${k}" title="load into the sketchpad">🎛 sketch</button>`)});
  if(!SERVED)return;let sk=[];try{sk=await api('api/sketches')}catch(e){}if(st.tab!=='K'||!sk.length)return;
- L.insertAdjacentHTML('afterbegin',`<div class="kit"><h3><span>Your sketches</span></h3>${sk.map(x=>{const s=JSON.parse(x.state);return`<div class="prow"><button class="play" data-skopen="${esc(x.name)}">▶</button><div style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(s.key||'')} · ${s.bpm||'—'} bpm · ${s.lanes.length} lanes · ${esc(x.updated_at)}</div></div><button data-skdel="${esc(x.name)}">✕</button></div>`}).join('')}</div>`);
+ L.insertAdjacentHTML('afterbegin',`<div class="kit"><h3><span>Your sketches${hq('kits')}</span></h3>${sk.map(x=>{const s=JSON.parse(x.state);return`<div class="prow"><button class="play" data-skopen="${esc(x.name)}">▶</button><div style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(s.key||'')} · ${s.bpm||'—'} bpm · ${s.lanes.length} lanes · ${esc(x.updated_at)}</div></div><button data-skdel="${esc(x.name)}">✕</button></div>`}).join('')}</div>`);
  L.querySelectorAll('[data-skopen]').forEach(b=>b.onclick=()=>{const x=sk.find(z=>z.name===b.dataset.skopen);skOpen(x.name,JSON.parse(x.state))});
  L.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=async()=>{await api('api/sketch/delete',{name:b.dataset.skdel});render()})}
 async function skOpen(name,s){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
@@ -470,17 +487,45 @@ function padChord(ctx,dest,notes,t,dur,kind){const v=PADV[kind]||PADV.warm;
 const chLen=(r,o)=>r.follows?r.total:o.chords.length*r.step;           // one pass of the progression
 const chAt=(r,c,k)=>r.follows?[c.t,c.d]:[k*r.step,r.step];             // a chord's start and length in that pass
 function padProgression(ctx,dest,opt,step,t0,kind,reps=1,r=CH.res){const L=chLen(r,opt);for(let n=0;n<reps;n++)opt.chords.forEach((c,k)=>{const [a,d]=chAt(r,c,k);padChord(ctx,dest,c.notes,t0+n*L+a,d,kind)})}
-const CH={i:null,res:null,bpc:1,pad:null,lvl:0.8,play:null};
+// ---- basslines under the chords: patterns built from each chord's root, 3rd and 5th on the beat grid
+const BASSES={off:'no bass',held:'held roots',root5:'root & fifth',pulse:'8th-note pulse',sync:'syncopated (R&B)',walk:'walking (jazz)'};
+function bassAuto(r,s){if(r.follows&&!r.loop)return 'held';  // changes off any steady beat: hold the roots
+ if(/jazz/i.test(s[F.genre]||''))return 'walk';return {soulful:'sync',dark:'pulse',ethereal:'held'}[r.style]||'root5'}
+function chTones(c){const root=c.notes[0]%12,nm=c.name.replace(/^[A-G][b#♭♯]?/,'');
+ const dim=/dim|°|ø|m7b5/.test(nm),aug=/aug|\+/.test(nm),minor=dim||/^m(?!aj)/.test(nm);
+ return {root,third:root+(minor?3:4),fifth:root+(dim?6:aug?8:7)}}
+// near the last note, in the bass register (E1–G2 for roots)
+const bassNear=(pc,prev)=>{let best=null;for(let n=28;n<=50;n++)if(((n-pc)%12+12)%12===0&&(best===null||Math.abs(n-prev)<Math.abs(best-prev)))best=n;return best};
+function bassLine(r,o,style){if(!style||style==='off')return [];const beat=60/r.tempo,out=[];let prev=36;
+ const cs=o.chords.map((c,k)=>{const [a,d]=chAt(r,c,k);return {c,a,d,t:chTones(c)}});
+ cs.forEach((x,k)=>{const nx=cs[(k+1)%cs.length],R=bassNear(x.t.root,prev);prev=R;const F5=R+((x.t.fifth-x.t.root+12)%12),T3=R+((x.t.third-x.t.root+12)%12);
+  const beats=[];for(let b=Math.ceil(x.a/beat-1e-6);b*beat<x.a+x.d-1e-6;b++)beats.push(b*beat);if(beats.length&&beats[0]-x.a<beat*0.25)beats[0]=x.a;else beats.unshift(x.a);  // the chord change always gets its root, even off the grid
+  const end=x.a+x.d,add=(n,t,d,v=1)=>{if(t<end-1e-4)out.push({n,t,d:Math.min(d,end-t),v})};
+  const bar=b=>Math.round(b/beat)%4;
+  if(style==='held')add(R,x.a,x.d,0.9);
+  else if(style==='root5')beats.forEach(t=>{const p=bar(t);if(p===0||t===x.a)add(R,t,beat*1.9);else if(p===2)add(F5,t,beat*1.9,0.85)});
+  else if(style==='pulse')beats.forEach(t=>{add(R,t,beat*0.45,bar(t)===0?1:0.8);add(bar(t)===3?R+12:R,t+beat/2,beat*0.4,0.7)});
+  else if(style==='sync')beats.forEach(t=>{const p=bar(t);if(p===0||t===x.a)add(R,t,beat*1.3);if(p===1)add(R,t+beat/2,beat*0.4,0.75);if(p===2)add(R+12,t+beat/2,beat*0.35,0.7);if(p===3)add(F5,t+beat/2,beat*0.45,0.8)});
+  else if(style==='walk'){const nR=bassNear(nx.t.root,R),tones=[R,T3,F5,R+12,F5,T3];
+   beats.forEach((t,j)=>{let n;if(j===0)n=R;else if(j===beats.length-1)n=nR+(nR>=R?-1:1);else n=tones[j%tones.length];add(n,t,beat*0.9,j===0?1:0.85)})}});
+ return out}
+function bassNote(ctx,dest,n,t,d,v=1){const f=440*Math.pow(2,(n-69)/12),g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.Q.value=2;
+ lp.frequency.setValueAtTime(900,t);lp.frequency.exponentialRampToValueAtTime(260,t+0.25);
+ const lvl=0.32*v;g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(lvl,t+0.006);g.gain.setTargetAtTime(lvl*0.7,t+0.006,0.12);
+ g.gain.setValueAtTime(lvl*0.7,t+Math.max(0.01,d-0.04));g.gain.linearRampToValueAtTime(0,t+d+0.06);lp.connect(g);g.connect(dest);
+ [['sawtooth',0,0.5],['sine',0,1],['sine',-1200,0.6]].forEach(([type,cents,amp])=>{const o=ctx.createOscillator(),og=ctx.createGain();og.gain.value=amp;o.type=type;o.frequency.value=f;o.detune.value=cents;o.connect(og);og.connect(lp);o.start(t);o.stop(t+d+0.1)})}
+function bassProgression(ctx,dest,r,o,t0,style){bassLine(r,o,style).forEach(b=>bassNote(ctx,dest,b.n,t0+b.t,b.d,b.v))}
+const CH={i:null,res:null,bpc:1,pad:null,lvl:0.8,play:null,bass:null,blvl:0.8};window.CH=CH;window.bassLine=(r,o,st)=>bassLine(r,o,st);window.chAt=chAt;window.BASSES=BASSES;
 async function openChords(i,keep){const box=$('chordbox');if(!keep){if(!box.hidden&&CH.i===i){chStop();box.hidden=true;return}}box.hidden=false;CH.i=i;
  box.innerHTML='<div class="sub">listening to the notes and working out chords…</div>';
  const s=S[i],bpm=s[F.kind]==='loop'?'':(PROJ.bpm||90);
- try{const r=await api(`api/chords?path=${encodeURIComponent(s[F.path])}&bpc=${CH.bpc}${bpm?'&bpm='+bpm:''}`);if(st.sel!==i)return;CH.res=r;CH.pad=CH.pad||r.timbre;drawChords()}
+ try{const r=await api(`api/chords?path=${encodeURIComponent(s[F.path])}&bpc=${CH.bpc}${bpm?'&bpm='+bpm:''}`);if(st.sel!==i)return;CH.res=r;CH.pad=CH.pad||r.timbre;if(!CH.bassPicked)CH.bass=bassAuto(r,s);drawChords()}
  catch(e){box.innerHTML='<div class="sub">chords failed: '+esc(e.message)+'</div>'}}
 function drawChords(){const r=CH.res,box=$('chordbox');if(!r)return;
- box.innerHTML=`<div class="edrow"><b>🎼 ${esc(r.key)}</b><span class="sub">${esc(r.style)} flavour (${r.moods.map(esc).join(', ')}) · ${r.follows?`follows the sample's own changes: ${r.own.map(esc).join(' → ')}`:`${r.steps} chords × ${r.bars_per_chord} bar at ${r.tempo} bpm${r.loop?'':' (project tempo)'}`}</span></div>
+ box.innerHTML=`<div class="edrow"><b>🎼 ${esc(r.key)}</b>${hq('chords')}<span class="sub">${esc(r.style)} flavour (${r.moods.map(esc).join(', ')}) · ${r.follows?`follows the sample's own changes: ${r.own.map(esc).join(' → ')}`:`${r.steps} chords × ${r.bars_per_chord} bar at ${r.tempo} bpm${r.loop?'':' (project tempo)'}`}</span></div>
  <div class="edrow sub"><label ${r.follows?'hidden':''}>chord every <select id="chbpc"><option value="1" ${CH.bpc===1?'selected':''}>1 bar</option><option value="2" ${CH.bpc===2?'selected':''}>2 bars</option></select></label>
   <label>pad <select id="chpad">${r.pads.map(p=>`<option ${p===CH.pad?'selected':''}>${p}</option>`).join('')}</select></label>
-  <label>pad level <input type="range" id="chlvl" min="0" max="1.5" step="0.05" value="${CH.lvl}" style="width:80px"></label><button id="chstop">■ stop</button></div>
+  <label>pad level <input type="range" id="chlvl" min="0" max="1.5" step="0.05" value="${CH.lvl}" style="width:80px"></label><label>bass <select id="chbass">${Object.entries(BASSES).map(([k,v])=>`<option value="${k}" ${k===CH.bass?'selected':''}>${v}${k===bassAuto(r,S[CH.i])?' ✓':''}</option>`).join('')}</select></label><label ${CH.bass==='off'?'hidden':''} id="chblw">bass level <input type="range" id="chblvl" min="0" max="1.5" step="0.05" value="${CH.blvl}" style="width:70px"></label><button id="chstop">■ stop</button></div>
  ${r.options.map((o,k)=>`<div class="chopt"><button class="play" data-chplay="${k}" title="the sample with this progression">▶</button>${o.label?`<span class="chlab">${esc(o.label)}</span>`:''}
   <div class="chs">${o.chords.map((c,ci)=>`<span class="chd" data-chone="${k}:${ci}" title="fit ${c.fit} · click to hear this chord"><b>${esc(c.name)}</b><i>${esc(c.roman)}</i></span>`).join('')}</div>
   <span class="sub" title="how well the chords' notes match what the sample plays">${Math.round(o.fit*100)}%</span>
@@ -489,7 +534,7 @@ function drawChords(){const r=CH.res,box=$('chordbox');if(!r)return;
  <div class="hint">Click a chord to hear it alone. ${r.follows?"This sample has chords of its own, so suggestions change where it does: “follows” enriches its chords in another register, “reharmonised” swaps in chords that still contain what it plays;":"Chords follow the sample's key and what it plays in each bar;"} the flavour comes from its mood. Voiced ${r.register[0]<55?'below':'above'} the sample's own register so they don't mask it.</div>`;
  chKeys([]);
  $('chbpc').onchange=e=>{CH.bpc=+e.target.value;chStop();openChords(CH.i,true)};$('chpad').onchange=e=>{CH.pad=e.target.value;if(CH.play)chPlay(CH.play.k)};
- $('chlvl').oninput=e=>{CH.lvl=+e.target.value;if(CH.play)CH.play.pg.gain.value=CH.lvl};$('chstop').onclick=chStop}
+ $('chlvl').oninput=e=>{CH.lvl=+e.target.value;if(CH.play)CH.play.pg.gain.value=CH.lvl};$('chbass').onchange=e=>{CH.bass=e.target.value;CH.bassPicked=true;$('chblw').hidden=CH.bass==='off';if(CH.play)chPlay(CH.play.k)};$('chblvl').oninput=e=>{CH.blvl=+e.target.value;if(CH.play&&CH.play.bg)CH.play.bg.gain.value=CH.blvl};$('chstop').onclick=chStop}
 // a piano keyboard over the register the chords use; lit keys = the chord sounding now (bass in a darker colour)
 function chKeys(notes,label){const el=$('chkeys');if(!el||!CH.res)return;const lo=Math.min(36,...notes.map(n=>n-(n%12))),hi=Math.max(84,...notes.map(n=>n+1));
  const blk=n=>[1,3,6,8,10].includes(n%12),wh=[];for(let n=lo;n<=hi;n++)if(!blk(n))wh.push(n);const W=100/wh.length,on=new Set(notes),bass=notes.length?Math.min(...notes):null;
@@ -497,7 +542,9 @@ function chKeys(notes,label){const el=$('chkeys');if(!el||!CH.res)return;const l
  for(let n=lo;n<=hi;n++)if(blk(n)){const k=wh.filter(x=>x<n).length;h+=`<i class="b${on.has(n)?(n===bass?' bs':' on'):''}" style="left:${k*W-W*0.32}%;width:${W*0.64}%"></i>`}
  el.innerHTML=`<div class="kl">${label?esc(label):'&nbsp;'}</div><div class="kk">${h}</div>`}
 function chMark(k,ci){document.querySelectorAll('[data-chone]').forEach(x=>x.classList.toggle('now',x.dataset.chone===`${k}:${ci}`));const c=CH.res&&CH.res.options[k]&&CH.res.options[k].chords[ci];
- chKeys(c?c.notes:[],c?`${c.name} · ${c.roman}`:'')}
+ const b=c&&CH.bass&&CH.bass!=='off'?bassLine(CH.res,CH.res.options[k],CH.bass).find(x=>Math.abs(x.t-chAt(CH.res,c,ci)[0])<1e-3):null;
+ chKeys(c?(b?[b.n,...c.notes]:c.notes):[],c?`${c.name} · ${c.roman}${b?' · bass '+NOTE_NAMES[b.n%12]+(Math.floor(b.n/12)-1):''}`:'')}
+const NOTE_NAMES=['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
 function chStop(){if(!CH.play)return;const p=CH.play;CH.play=null;clearTimeout(p.timer);cancelAnimationFrame(p.raf);chMark(-1,-1);const now=AC.currentTime;p.master.gain.setTargetAtTime(0,now,0.05);setTimeout(()=>{try{p.master.disconnect()}catch(e){}},400);
  try{p.src.stop(now+0.2)}catch(e){}document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.remove('playing'))}
 // anything else starting to play (a sample, play-together, a variation, the sketch, the stop button) stops the chords too
@@ -507,8 +554,9 @@ async function chPlay(k){chStop();stopAll();skStop();AC.resume();const r=CH.res,
  const L=chLen(r,o),master=AC.createGain();master.connect(AC.destination);const pg=AC.createGain();pg.gain.value=CH.lvl;const rv=padReverb(AC),wet=AC.createGain();wet.gain.value=0.35;
  pg.connect(master);pg.connect(rv);rv.connect(wet);wet.connect(master);
  const src=AC.createBufferSource();src.buffer=buf;src.loop=true;src.loopEnd=Math.min(buf.duration,L);const sg=AC.createGain();sg.gain.value=Math.min(4,skNorm(buf))*0.8;src.connect(sg);sg.connect(master);
- const t0=AC.currentTime+0.1;src.start(t0);CH.play={k,master,pg,src,timer:null};
- const sched=n=>{if(!CH.play||CH.play.k!==k)return;padProgression(AC,pg,o,r.step,t0+n*L,CH.pad);CH.play.timer=setTimeout(()=>sched(n+1),Math.max(50,(t0+(n+1)*L-AC.currentTime-1)*1000))};sched(0);
+ const bg=AC.createGain();bg.gain.value=CH.blvl;bg.connect(master);
+ const t0=AC.currentTime+0.1;src.start(t0);CH.play={k,master,pg,bg,src,timer:null};
+ const sched=n=>{if(!CH.play||CH.play.k!==k)return;padProgression(AC,pg,o,r.step,t0+n*L,CH.pad);bassProgression(AC,bg,r,o,t0+n*L,CH.bass);CH.play.timer=setTimeout(()=>sched(n+1),Math.max(50,(t0+(n+1)*L-AC.currentTime-1)*1000))};sched(0);
  let last=-1;const follow=()=>{if(!CH.play||CH.play.k!==k)return;const t=AC.currentTime-t0,tl=t<0?0:t%L;
   let ci=0;o.chords.forEach((c,j)=>{if(chAt(r,c,j)[0]<=tl+1e-6)ci=j});if(ci!==last){last=ci;chMark(k,ci)}CH.play.raf=requestAnimationFrame(follow)};follow();
  document.querySelectorAll('[data-chplay]').forEach(b=>b.classList.toggle('playing',+b.dataset.chplay===k))}
@@ -517,17 +565,22 @@ document.addEventListener('click',async e=>{const one=e.target.closest('[data-ch
   padChord(AC,pg,c.notes,AC.currentTime+0.02,Math.min(2.5,chAt(r,c,ci)[1]),CH.pad);chMark(k,ci);return}
  const p=e.target.closest('[data-chplay]');if(p){if(CH.play&&CH.play.k===+p.dataset.chplay)chStop();else chPlay(+p.dataset.chplay);return}
  const m=e.target.closest('[data-chmidi]');if(m){const r=CH.res,o=r.options[+m.dataset.chmidi],s=S[CH.i];
-  try{await api('api/chords/midi',{name:`${s[F.artist]} - ${s[F.title]} - ${o.chords.map(c=>c.name).join(' ')}`,chords:o.chords.map(c=>c.notes),times:o.chords.map((c,j)=>chAt(r,c,j)),step:r.step,tempo:r.tempo});m.textContent='✓ MIDI';toast('MIDI clip saved to your Ableton User Library › Chords')}catch(err){toast('error: '+err.message)}return}
+  try{await api('api/chords/midi',{name:`${s[F.artist]} - ${s[F.title]} - ${o.chords.map(c=>c.name).join(' ')}`,chords:o.chords.map(c=>c.notes),times:o.chords.map((c,j)=>chAt(r,c,j)),step:r.step,tempo:r.tempo,bass:bassLine(r,o,CH.bass).map(b=>[b.n,b.t,b.d,Math.round(70+40*b.v-30)])});m.textContent='✓ MIDI';toast(CH.bass&&CH.bass!=='off'?'MIDI clip saved (chords + bass tracks) to your Ableton User Library › Chords':'MIDI clip saved to your Ableton User Library › Chords')}catch(err){toast('error: '+err.message)}return}
  const sk=e.target.closest('[data-chsk]');if(sk){const r=CH.res,o=r.options[+sk.dataset.chsk],i=CH.i,s=S[i];sk.textContent='rendering…';
-  // render the pad offline, store it as a new Chords & Keys loop (key + tempo + provenance), then add both lanes
-  const sr=44100,L=chLen(r,o),ctx=new OfflineAudioContext(2,Math.ceil((L+3)*sr),sr),pg=ctx.createGain();pg.gain.value=1;const rv=padReverb(ctx),wet=ctx.createGain();wet.gain.value=0.35;
-  pg.connect(ctx.destination);pg.connect(rv);rv.connect(wet);wet.connect(ctx.destination);padProgression(ctx,pg,o,r.step,0,CH.pad);
-  // fold the release/reverb tail past the loop end back onto its start, so the loop is seamless
-  const full=await ctx.startRendering(),n=Math.round(L*sr),out=new AudioBuffer({numberOfChannels:2,length:n,sampleRate:sr});
-  for(let c=0;c<2;c++){const a=full.getChannelData(c),b=out.getChannelData(c);b.set(a.subarray(0,n));for(let k=n;k<a.length;k++)b[(k-n)%n]+=a[k]}
-  try{const res=await api('api/bounce',{parent:s[F.path],wav:wavB64(out),kind:r.follows?'free':'loop',bpm:r.follows?null:r.tempo,bars:r.follows?null:o.chords.length*r.bars_per_chord,key:r.key,prefix:'Chords',category:'Chords & Keys',
-    name:o.chords.map(c=>c.name).join(' '),tag:`chords ${CH.pad}`,ops:{chords:o.chords.map(c=>c.name),pad:CH.pad,from:s[F.id]}});
-   const j=addRow(i,res.row);if(!SK.lanes.some(l=>l.path===s[F.path]))await skAdd(i);await skAdd(j);sk.textContent='✓ in sketch';toast('chord pad saved (★) and added to the sketchpad with the sample')}
+  // render offline, folding the release/reverb tail past the loop end back onto its start so the loop is seamless
+  const L=chLen(r,o),render=async(build,verb)=>{const sr=44100,ctx=new OfflineAudioContext(2,Math.ceil((L+3)*sr),sr),g=ctx.createGain();g.connect(ctx.destination);
+   if(verb){const rv=padReverb(ctx),wet=ctx.createGain();wet.gain.value=0.35;g.connect(rv);rv.connect(wet);wet.connect(ctx.destination)}build(ctx,g);
+   const full=await ctx.startRendering(),n=Math.round(L*sr),out=new AudioBuffer({numberOfChannels:2,length:n,sampleRate:sr});
+   for(let c=0;c<2;c++){const a=full.getChannelData(c),b=out.getChannelData(c);b.set(a.subarray(0,n));for(let k=n;k<a.length;k++)b[(k-n)%n]+=a[k]}return out};
+  // stored as new loops (key + tempo + provenance): the pad in Chords & Keys, the bass in Bass & Sub; then all lanes go in the sketch
+  const meta={parent:s[F.path],kind:r.follows?'free':'loop',bpm:r.follows?null:r.tempo,bars:r.follows?null:o.chords.length*r.bars_per_chord,key:r.key},names=o.chords.map(c=>c.name);
+  try{const pad=await render((ctx,g)=>padProgression(ctx,g,o,r.step,0,CH.pad),true);
+   const res=await api('api/bounce',{...meta,wav:wavB64(pad),prefix:'Chords',category:'Chords & Keys',name:names.join(' '),tag:`chords ${CH.pad}`,ops:{chords:names,pad:CH.pad,from:s[F.id]}});
+   const j=addRow(i,res.row);if(!SK.lanes.some(l=>l.path===s[F.path]))await skAdd(i);await skAdd(j);
+   if(CH.bass&&CH.bass!=='off'){const bs=await render((ctx,g)=>bassProgression(ctx,g,r,o,0,CH.bass),false);
+    const rb=await api('api/bounce',{...meta,wav:wavB64(bs),prefix:'Bass',category:'Bass & Sub',name:'bass '+names.join(' '),tag:`bass ${CH.bass}`,ops:{chords:names,bass:CH.bass,from:s[F.id]}});
+    await skAdd(addRow(i,rb.row))}
+   sk.textContent='✓ in sketch';toast(CH.bass&&CH.bass!=='off'?'chord pad and bassline saved (★) and added to the sketchpad with the sample':'chord pad saved (★) and added to the sketchpad with the sample')}
   catch(err){sk.textContent='＋ sketch';toast('error: '+err.message)}}});
 async function openMidi(i){const box=$('midibox');if(!box.hidden){box.hidden=true;return}box.hidden=false;box.innerHTML='<div class="sub">transcribing notes & chords (basic-pitch)…</div>';
  try{const s=S[i],r=await api(`api/midi?path=${encodeURIComponent(s[F.path])}${s[F.kind]==='loop'&&s[F.bpm]?'&bpm='+s[F.bpm]:''}`);if(st.sel!==i)return;
@@ -544,7 +597,7 @@ function drawRoll(c,r){const dpr=devicePixelRatio||1,W=c.clientWidth*dpr,H=150*d
 const _openEditor=openEditor;
 openEditor=async function(i){await _openEditor(i);const box=$('editor');if(!box||box.hidden||!$('edprev')||$('edtune'))return;
  const row=$('edprev').closest('.edrow'),d=document.createElement('div');d.className='edgrid';d.id='edtune';const own=S[i][F.key];
- d.innerHTML=`<span>Tune to</span><select id="tnkey"><option value="">off</option>${PROJ.key?`<option value="${esc(PROJ.key)}">project · ${esc(PROJ.key)}</option>`:''}${own?`<option value="${esc(own)}">its own key · ${esc(own)}</option>`:''}${KEYS24.map(([c,n])=>`<option value="${n}">${c} ${n}</option>`).join('')}</select><span id="tnrep" class="sub"></span>
+ d.innerHTML=`<span>Tune to${hq('tune')}</span><select id="tnkey"><option value="">off</option>${PROJ.key?`<option value="${esc(PROJ.key)}">project · ${esc(PROJ.key)}</option>`:''}${own?`<option value="${esc(own)}">its own key · ${esc(own)}</option>`:''}${KEYS24.map(([c,n])=>`<option value="${n}">${c} ${n}</option>`).join('')}</select><span id="tnrep" class="sub"></span>
  <span>Strength</span><input type="range" id="tnstr" min="0" max="1" step="0.05" value="0.8"><span id="tnstrv">80%</span>
  <span>Glide</span><input type="range" id="tnspd" min="0" max="300" step="5" value="60"><span id="tnspdv">60 ms</span>
  <span>Detune</span><input type="range" id="tndet" min="-50" max="50" step="1" value="0"><span id="tndetv">0 ¢</span>
@@ -557,6 +610,28 @@ openEditor=async function(i){await _openEditor(i);const box=$('editor');if(!box|
    $('tnrep').textContent=r.voiced?`${Math.round(r.in_key*100)}% of its notes are in ${k} · sits ${r.cents>0?'+':''}${r.cents}¢ · wobble ±${r.spread}¢`:'no clear pitch found'}catch(e){$('tnrep').textContent=''}})};
 const _edParams=edParams;
 edParams=function(){const p=_edParams();if($('tnkey')){p.tune_key=$('tnkey').value||null;p.tune_strength=+$('tnstr').value;p.tune_speed=+$('tnspd').value;p.tune_detune=+$('tndet').value;p.tune_drift=+$('tndri').value}return p};
+
+// ---------- your plugins (AU/VST3 via Pedalboard) in the editor
+let FXLIST=null;
+const _openEditorFx=openEditor;
+openEditor=async function(i){await _openEditorFx(i);const box=$('editor');if(!box||box.hidden||!$('edprev')||$('edfx')||!SERVED)return;
+ if(!FXLIST){try{FXLIST=await api('api/plugins')}catch(e){FXLIST=[]}}if(!FXLIST.length||$('edfx'))return;
+ const row=$('edprev').closest('.edrow'),d=document.createElement('div');d.className='edgrid';d.id='edfx';
+ d.innerHTML=`<span>Plugin</span><select id="fxp"><option value="">none</option>${FXLIST.map(x=>`<option value="${esc(x.path)}">${esc(x.name)} (${x.format})</option>`).join('')}</select><span id="fxmsg" class="sub">your own effects</span>
+ <span class="fxt" hidden>Tail</span><input class="fxt" hidden type="range" id="fxtail" min="0" max="12" step="0.5" value="4"><span class="fxt" hidden id="fxtailv">4 s to ring out</span><div id="fxctl" style="grid-column:1/-1;display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center"></div>`;
+ row.parentNode.insertBefore(d,row);
+ $('fxtail').addEventListener('input',()=>$('fxtailv').textContent=$('fxtail').value+' s to ring out');$('fxtail').addEventListener('change',()=>edChanged());
+ $('fxp').addEventListener('change',async()=>{const path=$('fxp').value,c=$('fxctl');c.innerHTML='';document.querySelectorAll('.fxt').forEach(e=>e.hidden=!path);if(!path){edChanged();return}
+  $('fxmsg').textContent='loading…';let ps=[];try{ps=await api('api/plugins/params?path='+encodeURIComponent(path))}catch(e){$('fxmsg').textContent='couldn\'t load: '+e.message;return}
+  if(ps.error){$('fxmsg').textContent=ps.error;return}$('fxmsg').textContent=ps.length+' controls';
+  c.innerHTML=ps.slice(0,16).map(p=>p.kind==='choice'?`<span>${esc(p.name)}</span><select data-fx="${esc(p.key)}">${p.choices.map(o=>`<option ${o===p.value?'selected':''}>${esc(o)}</option>`).join('')}</select><span></span>`
+   :p.kind==='bool'?`<span>${esc(p.name)}</span><input type="checkbox" data-fx="${esc(p.key)}" ${p.value?'checked':''}><span></span>`
+   :`<span>${esc(p.name)}</span><input type="range" data-fx="${esc(p.key)}" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.value}"><span data-fxv="${esc(p.key)}">${+(+p.value).toFixed(2)} ${esc(p.label||'')}</span>`).join('');
+  c.querySelectorAll('[data-fx]').forEach(el=>{el.addEventListener('change',()=>el.dataset.touched=1);el.addEventListener('input',()=>{el.dataset.touched=1;const v=c.querySelector(`[data-fxv="${el.dataset.fx}"]`);if(v)v.textContent=(+(+el.value).toFixed(2))+' '+(v.textContent.split(' ').slice(1).join(' '))});el.addEventListener('change',()=>edChanged())});
+  edChanged()})};
+const _edParamsFx=edParams;
+edParams=function(){const p=_edParamsFx();if($('fxp')&&$('fxp').value){const pr={};$('fxctl').querySelectorAll('[data-fx][data-touched]').forEach(el=>{pr[el.dataset.fx]=el.type==='checkbox'?el.checked:el.tagName==='SELECT'?el.value:+el.value});
+ p.plugins=[{path:$('fxp').value,params:pr}];p.tail=+$('fxtail').value}return p};
 
 // ---------- chop pads
 const PADKEYS='1234qwerasdfzxcv'.split('');
@@ -572,8 +647,11 @@ async function openPads(i){const box=$('pads');if(!box.hidden&&PADS.i===i){padsC
   const info=JSON.parse(res.headers.get('X-Conform')||'{}'),tr=+(info.length||info.time||1);PADS.buf=await AC.decodeAudioData(await res.arrayBuffer());
   const on=await api('api/onsets?path='+encodeURIComponent(path));if(st.sel!==i)return;
   PADS.sl=mergeSlices([0,...on.onsets.map(t=>t*tr),PADS.buf.duration],16,0.08)}catch(e){box.innerHTML='<div class="sub">pads failed: '+esc(e.message)+'</div>';return}
- box.innerHTML=`<div class="edrow"><b>🎹 pads</b><span class="sub">keys 1–4 · Q–R · A–F · Z–V (or click) · ${PADS.sl.length} slices${PROJ.on&&(PROJ.key||PROJ.bpm)?' · in the project key/tempo':''}</span></div>
- <div class="grid16">${PADS.sl.map(([a,b],k)=>`<div class="pad" data-pad="${k}"><b>${PADKEYS[k].toUpperCase()}</b><span>${a.toFixed(2)}s · ${(b-a).toFixed(2)}</span></div>`).join('')}</div>
+ const env=([a,b])=>{const d=PADS.buf.getChannelData(0),sr=PADS.buf.sampleRate,i0=Math.floor(a*sr),i1=Math.floor(b*sr),n=24,st2=Math.max(1,Math.floor((i1-i0)/n)),v=[];
+  for(let k=0;k<n;k++){let m=0;for(let j=i0+k*st2;j<Math.min(i1,i0+(k+1)*st2);j+=4)m=Math.max(m,Math.abs(d[j]));v.push(m)}const mx=Math.max(...v,1e-6);return v.map(x=>Math.round(x/mx*99))};
+ box.innerHTML=`<div class="edrow"><b>🎹 pads</b>${hq('pads')}<span class="sub">keys 1–4 · Q–R · A–F · Z–V (or click) · ${PADS.sl.length} slices${PROJ.on&&(PROJ.key||PROJ.bpm)?' · in the project key/tempo':''}</span></div>
+ <div class="sub" style="margin:-2px 0 4px">your sample cut into syllables or notes: tap keys to replay them in a new rhythm, record a pattern, or save the slices as a Drum Rack</div>
+ <div class="grid16">${PADS.sl.map((sl,k)=>`<div class="pad" data-pad="${k}"><b>${PADKEYS[k].toUpperCase()}</b>${wave(env(sl),110,16,'#7d8592')}<span>${sl[0].toFixed(2)}s · ${(sl[1]-sl[0]).toFixed(2)}</span></div>`).join('')}</div>
  <div class="edrow sub"><label><input type="checkbox" id="pdmono" checked> one voice at a time (choke)</label>
  quantise <select id="pdq"><option value="0">off</option><option value="2">1/8</option><option value="4" selected>1/16</option><option value="8">1/32</option></select>
  <select id="pdbars"><option value="1">1 bar</option><option value="2" selected>2 bars</option><option value="4">4 bars</option></select> at ${padBpm()} bpm</div>
@@ -629,3 +707,42 @@ $('stop').onclick=()=>{stopAll();skStop();padsStopLoop()};
 window.CRATE={setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ};  // hooks for tools/screenshots.py and the console
 drawProj();if(PROJ.link)linkPoll();render();
 })();
+
+// ================= MIDI controller (Web MIDI: Chrome, Edge, Firefox — Safari doesn't support it) =================
+// Any controller works: open 🎹, press "learn" next to an action, then the pad, key or button you want for it.
+// Pads/keys also play the chop pads when those are open (the first learned "pad 1" note and the 15 above it).
+const MIDI_NOTES=['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
+const MIDI_ACTIONS=[['play','play / stop the selected sample'],['next','next sample (and play it)'],['prev','previous sample (and play it)'],
+ ['star','★ favourite'],['nope','✕ not for me (and go to the next)'],['pad1','chop pad 1 (pads 2–16 follow on the next notes)']];
+const MIDI={map:(()=>{try{return JSON.parse(localStorage.getItem('midiMap')||'null')}catch(e){return null}})()||{play:'n:36',next:'n:37',prev:'n:38',star:'n:39',nope:'n:40',pad1:'n:44'},
+ learn:null,inputs:[],status:'',last:''};
+function midiSave(){try{localStorage.setItem('midiMap',JSON.stringify(MIDI.map))}catch(e){}}
+function midiRows(){return [...document.querySelectorAll('#list .row')]}
+function midiStep(d){const rows=midiRows();if(!rows.length)return;let k=rows.findIndex(r=>r.classList.contains('sel'));k=k<0?0:Math.max(0,Math.min(rows.length-1,k+d));
+ const i=+rows[k].dataset.i;select(i,'list');rows[k].scrollIntoView({block:'nearest'});stopAll();const b=rows[k].querySelector('[data-play]');if(b)b.click()}
+function midiDo(a,k){const i=st.sel;
+ if(a==='next')return midiStep(1);if(a==='prev')return midiStep(-1);
+ if(a==='play'){if(players.size){stopAll();return}if(i==null){midiStep(0);return}const b=document.querySelector(`#list .row[data-i="${i}"] [data-play]`)||document.querySelector(`[data-play="${i}"]`);if(b)b.click();return}
+ if(i==null)return;const s=S[i];
+ if(a==='star'){const on=!FAV.has(s[F.path]);toggleFav(s[F.path],s[F.id],lbl(i));toast(on?'★ favourite':'☆ removed');return}
+ if(a==='nope'){toggleDislike(s[F.path],s[F.id]);midiStep(1);return}
+ if(a==='pad'&&typeof padHit==='function'&&PADS.i!=null&&!$('pads').hidden)padHit(k)}
+function midiMsg(e){const [st0,d1,d2]=e.data,type=st0&0xf0;let id=null;
+ if(type===0x90&&d2>0)id='n:'+d1;else if(type===0xB0&&d2>=64)id='cc:'+d1;if(!id)return;MIDI.last=id;
+ if(MIDI.learn){MIDI.map[MIDI.learn]=id;Object.keys(MIDI.map).forEach(k=>{if(k!==MIDI.learn&&MIDI.map[k]===id)delete MIDI.map[k]});MIDI.learn=null;midiSave();midiPanel();return}
+ const a=Object.keys(MIDI.map).find(k=>MIDI.map[k]===id&&k!=='pad1');if(a){midiDo(a);return}
+ const p=MIDI.map.pad1;if(p&&p[0]==='n'&&id[0]==='n'){const k=+id.slice(2)-+p.slice(2);if(k>=0&&k<16)midiDo('pad',k)}}
+async function midiInit(){if(!navigator.requestMIDIAccess){MIDI.status='this browser has no Web MIDI (use Chrome, Edge or Firefox)';return}
+ try{const acc=await navigator.requestMIDIAccess();const hook=()=>{MIDI.inputs=[...acc.inputs.values()];MIDI.inputs.forEach(inp=>inp.onmidimessage=midiMsg);
+  MIDI.status=MIDI.inputs.length?MIDI.inputs.map(x=>x.name).join(', '):'no controller connected';midiBtn();if(!$('modal').hidden&&$('midipanel'))midiPanel()};
+  acc.onstatechange=hook;hook()}catch(e){MIDI.status='MIDI not allowed: '+e.message}midiBtn()}
+function midiBtn(){let b=$('midibtn');if(!b){b=document.createElement('button');b.id='midibtn';b.onclick=()=>{midiPanel();if(!MIDI.inputs.length&&!MIDI.status)midiInit()};$('expbtn').after(b)}
+ b.textContent=MIDI.inputs.length?'🎹 '+MIDI.inputs.length:'🎹';b.title='MIDI controller: '+(MIDI.status||'click to connect')}
+function midiPanel(){const nm=id=>!id?'—':id[0]==='n'?`note ${id.slice(2)} (${MIDI_NOTES[+id.slice(2)%12]}${Math.floor(+id.slice(2)/12)-1})`:`CC ${id.slice(3)}`;
+ modal(`<div id="midipanel"><h2 style="margin:0">🎹 MIDI controller</h2><div class="sub">${esc(MIDI.status||'connecting…')}</div>
+ <div class="sub" style="margin:6px 0">Press <b>learn</b>, then the pad, key or button to use. Buttons that send CC work too (pressed = value ≥ 64).${MIDI.last?` Last received: ${esc(nm(MIDI.last))}.`:''}</div>
+ <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px 10px;align-items:center">${MIDI_ACTIONS.map(([k,l])=>`<span>${esc(l)}</span><span class="sub">${esc(nm(MIDI.map[k]))}</span><button data-midilearn="${k}">${MIDI.learn===k?'press it now…':'learn'}</button>`).join('')}</div>
+ <div style="margin-top:10px;display:flex;gap:8px"><button id="midireset">reset to defaults</button><button onclick="$('modal').hidden=true">done</button></div></div>`);
+ $('midireset').onclick=()=>{MIDI.map={play:'n:36',next:'n:37',prev:'n:38',star:'n:39',nope:'n:40',pad1:'n:44'};midiSave();midiPanel()}}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-midilearn]');if(!b)return;MIDI.learn=MIDI.learn===b.dataset.midilearn?null:b.dataset.midilearn;midiPanel();if(!MIDI.inputs.length)midiInit()});
+midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permissions.query({name:'midi'}).then(r=>{if(r.state==='granted')midiInit()}).catch(()=>{});
