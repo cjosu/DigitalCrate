@@ -19,8 +19,19 @@ The small **?** buttons next to the less obvious features explain them.
 
 ## Quick start
 
-macOS on Apple Silicon (tested on an M4, macOS 15) with Python 3.11 and `brew install ffmpeg rubberband`. Other
-platforms aren't supported (see [Limitations](#limitations)).
+For a Mac with Apple Silicon (M1 or later; other platforms aren't supported, see [Limitations](#limitations)).
+Paste this into Terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jaredhuling/DigitalCrate/main/install.sh | bash
+```
+
+It installs what DigitalCrate needs (Homebrew if you don't have it, ffmpeg, rubberband, Python packages) and puts
+**DigitalCrate** in your Applications folder. Open it like any app: the first time, it asks where your music is and
+mines a first batch of samples (10 minutes to an hour, your choice), then opens your library. Run the same command
+again to update. The app runs a small local server; ⏻ in the page turns it off, and opening the app turns it back on.
+
+### By hand, and the command line
 
 ```bash
 git clone https://github.com/jaredhuling/DigitalCrate.git digitalcrate && cd digitalcrate
@@ -30,6 +41,7 @@ uv pip install --python .venv/bin/python --no-deps -e .
 cp digitalcrate.example.toml digitalcrate.toml                             # where your music is, where the library goes
 
 source .venv/bin/activate
+digitalcrate app               # optional: DigitalCrate.app in ~/Applications (it does the steps below for you)
 digitalcrate scan              # catalog your music (tags only, fast, incremental)
 digitalcrate scout             # rank tracks by how sample-worthy they sound
 digitalcrate process --top 200 # mine the 200 most promising tracks
@@ -217,6 +229,10 @@ process [filters]                  --artist A --match S --genre G --all --top N 
 drums --top N                      mine percussion
 build                              moods, compatibility, kits, folder views, Browser.html
 serve [--port 8765]                the app
+open                               start the server if needed and open the window (what DigitalCrate.app runs)
+app [--dest DIR]                   make DigitalCrate.app (in ~/Applications)
+firstrun [--mine N]                scan, scout a sample of songs, mine the N most promising, build (the setup page)
+trash [--empty]                    deleted samples: how many, and delete them for good
 taste                              fit the taste model, report held-out accuracy
 ingest URL|FILE|FOLDER [--drums]   add a source (YouTube via yt-dlp) and mine it
 export --favorites|--kit K|--ids … [--name N] [--rack] [--key Fm --bpm 124]

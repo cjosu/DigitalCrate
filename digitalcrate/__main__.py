@@ -74,6 +74,12 @@ def main():
     mg.add_argument("--seed", type=int, help="reproduce a render (seed is in its .json sidecar)")
     sv = sub.add_parser("serve", help="run the browser at http://localhost:8765 (favourites, Ableton folder)")
     sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--no-browser", action="store_true", help="don't open a browser window")
+    sub.add_parser("open", help="start DigitalCrate (the server, if it isn't running) and open its window")
+    ap_ = sub.add_parser("app", help="make ~/Applications/DigitalCrate.app, to start DigitalCrate like any Mac app")
+    ap_.add_argument("--dest", default=str(__import__("pathlib").Path.home() / "Applications"))
+    fr = sub.add_parser("firstrun", help="scan your music, find promising songs, mine a first batch, build (the setup page runs this)")
+    fr.add_argument("--scout", type=int, default=400); fr.add_argument("--mine", type=int, default=25)
     sub.add_parser("taste", help="fit the taste model and report how well it predicts your ratings")
     dr = sub.add_parser("drums", help="mine percussion: one-shots (incl. combined strikes) and loops")
     dr.add_argument("--artist", nargs="*", default=[]); dr.add_argument("--match", nargs="*", default=[])
@@ -146,7 +152,17 @@ def main():
         scout(limit=a.limit, redo=a.redo)
     elif a.cmd == "serve":
         from .serve import serve
-        serve(a.port)
+        serve(a.port, open_browser=not a.no_browser)
+    elif a.cmd == "open":
+        from .app import open_app
+        open_app()
+    elif a.cmd == "app":
+        from .app import make_app
+        print(f"made {make_app(a.dest)}: open it from Applications, Launchpad or Spotlight")
+    elif a.cmd == "firstrun":
+        from .app import first_run
+        first_run(a.scout, a.mine)
+        print("TASK DONE", flush=True)
     elif a.cmd == "mangle":
         from .mangle import run as mrun
         mrun(a.ids, a.file, a.category, a.top, a.variants, a.seed)

@@ -175,7 +175,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 </style></head><body>
 <div class="app">
 <aside>
-  <h1>DigitalCrate</h1><div class="sub" id="count"></div>
+  <h1 style="display:flex;align-items:center;gap:6px">DigitalCrate<span style="flex:1"></span><a id="setbtn" href="setup" title="your music and library folders" hidden style="font-size:13px;text-decoration:none">⚙</a><button id="quitbtn" title="turn DigitalCrate off (mining runs keep going)" hidden style="font-size:12px;padding:1px 6px">⏻</button></h1><div class="sub" id="count"></div>
   <h2>Key <span class="sub" id="keylbl"></span></h2>
   <svg class="wheel" id="wheel" viewBox="-110 -110 220 220" width="220" height="220"></svg>
   <div class="chips" style="margin-top:6px"><button id="nbr" class="on" title="include Camelot neighbours">+ neighbours</button><button id="clrkey">clear</button></div>
@@ -292,6 +292,11 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-del],[data
  const s=S[all[0]];if(!go.length){toast('only favourites and edits left in this song');return}
  if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent=`🗑 delete ${go.length} sample${go.length>1?'s':''}${keep.length?` (keeping ${keep.length} ★/edits)`:''}? click again`;setTimeout(()=>{if(b.isConnected){b.dataset.armed='';b.textContent='🗑'+(b.closest('h2')?" delete this song's samples":'')}},4000);return}
  delSamples(go,`${go.length} samples from ${s[F.artist]} — ${s[F.title]}`)},true);
+// ⏻ turns the local server off (served only); the app turns it back on
+if(SERVED){$('setbtn').hidden=$('quitbtn').hidden=false;
+ $('quitbtn').onclick=async e=>{const b=e.currentTarget;if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent='⏻ turn off?';setTimeout(()=>{b.dataset.armed='';b.textContent='⏻'},3000);return}
+  players.forEach(a=>a.pause());try{await fetch('api/quit',{method:'POST',body:'{}'})}catch(err){}
+  document.body.innerHTML='<div style="font:16px system-ui;color:#d9dde3;background:#0e1013;position:fixed;inset:0;display:grid;place-items:center;text-align:center"><div><h2>DigitalCrate is off</h2><p style="color:#7d8592">Mining runs you started keep going in the background.<br>Open the DigitalCrate app to turn it back on. You can close this window.</p></div></div>'}}
 let refitT=null;function scheduleRefit(){clearTimeout(refitT);refitT=setTimeout(loadTaste,4000)}
 function sendEvent(path,type,value,id){if(!SERVED)return;fetch('api/event',{method:'POST',body:JSON.stringify({path,type,value,id})}).catch(()=>{});scheduleRefit()}
 const listenStart=new Map();

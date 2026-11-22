@@ -9,10 +9,15 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 _cfg = {}
-for _f in (Path(os.environ.get("DIGITALCRATE_CONFIG", PROJECT_DIR / "digitalcrate.toml")), Path.home() / ".config/digitalcrate/digitalcrate.toml"):
+CONFIG_FILE = Path.home() / ".config/digitalcrate/digitalcrate.toml"  # where the setup page saves, unless one below exists
+for _f in (Path(os.environ.get("DIGITALCRATE_CONFIG", PROJECT_DIR / "digitalcrate.toml")), CONFIG_FILE):
     if _f.exists():
         _cfg = tomllib.loads(_f.read_text())
+        CONFIG_FILE = _f
         break
+else:
+    if os.environ.get("DIGITALCRATE_CONFIG"):
+        CONFIG_FILE = Path(os.environ["DIGITALCRATE_CONFIG"])
 
 
 def _path(key, env, default):

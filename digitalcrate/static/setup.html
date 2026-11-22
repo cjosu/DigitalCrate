@@ -1,0 +1,87 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DigitalCrate setup</title>
+<style>
+:root{--bg:#0e1013;--panel:#15181d;--line:#242932;--ink:#d9dde3;--mute:#7d8592;--acc:#e0a458;--acc2:#7fb0c9;--bad:#d96c6c;--ok:#8fc98f}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,system-ui,sans-serif;margin:0;padding:48px 16px 80px}
+main{max-width:640px;margin:auto}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:.02em}h1 b{color:var(--acc)}
+.lead{color:var(--mute);margin:0 0 28px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 4px;display:flex;gap:10px;align-items:center}
+.num{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--line);font-size:13px;flex:none}
+.done .num{background:var(--ok);color:#000}
+.sub{color:var(--mute);font-size:13px}
+.row{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+input[type=text]{flex:1;min-width:0;font:13px ui-monospace,Menlo,monospace;color:var(--ink);background:#0b0d10;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+button{font:inherit;font-size:14px;color:var(--ink);background:#1b1f25;border:1px solid var(--line);border-radius:8px;padding:7px 14px;cursor:pointer}
+button:hover{border-color:var(--mute)}button:disabled{opacity:.45;cursor:default}
+button.go{background:var(--acc);color:#111;border-color:var(--acc);font-weight:600}
+.found{margin-top:8px;font-size:13px}.found.ok{color:var(--ok)}.found.bad{color:var(--bad)}
+.warn{border-color:#5a4426;background:#1d1912}
+code{font:12px ui-monospace,Menlo,monospace;background:#0b0d10;border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+.sizes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}@media(max-width:520px){.sizes{grid-template-columns:1fr}}
+.size{text-align:left;padding:10px 12px}.size b{display:block}.size.on{border-color:var(--acc);background:#221c13}
+.steps{margin:14px 0 0;padding:0;list-style:none}.steps li{padding:6px 0;color:var(--mute);display:flex;gap:10px;align-items:center}
+.steps li.now{color:var(--ink);font-weight:600}.steps li.past{color:var(--ok)}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:10px}.bar i{display:block;height:100%;background:var(--acc);transition:width .6s}
+pre{white-space:pre-wrap;font:12px ui-monospace,Menlo,monospace;color:var(--mute);background:#0b0d10;border-radius:8px;padding:10px;max-height:180px;overflow:auto}
+a{color:var(--acc2)}
+</style></head><body><main>
+<h1>Welcome to <b>DigitalCrate</b></h1>
+<p class="lead">It listens to your music and cuts out the clean moments (voices, pads, chords, textures, drums) as a sample library you can play with. Everything stays on this Mac.</p>
+<div id="app"><div class="card sub">Loading…</div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const api=async(u,b)=>{const r=await fetch(u,b===undefined?{}:{method:'POST',body:JSON.stringify(b)});const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||r.status);return j};
+let S=null,F={music:'',library:'',count:null},SIZE=25,timer=null;
+async function load(){try{S=await api('api/setup/state')}catch(e){$('app').innerHTML='<div class="card sub">Waiting for DigitalCrate to start…</div>';return setTimeout(load,1000)}
+ if(!F.music){F.music=S.configured?S.music:'';F.library=S.library}
+ draw()}
+const toolsWarn=()=>{const miss=Object.entries(S.tools).filter(([,v])=>!v).map(([k])=>k);return miss.length?`<div class="card warn"><h2>⚠ Missing: ${miss.join(', ')}</h2>
+ <div class="sub">DigitalCrate needs these to read and stretch audio. In Terminal run <code>brew install ${miss.join(' ')}</code>, then reload this page. (The installer normally does this.)</div></div>`:''};
+function draw(){clearTimeout(timer);const job=S.job;
+ if(location.pathname==='/setup'&&!(job&&job.running))return drawFolders();
+ if(S.configured&&(job&&(job.running||!S.has_library)||!S.has_library))return drawMine();
+ if(S.configured&&S.has_library&&location.pathname!=='/setup'){location.href='/';return}
+ drawFolders()}
+function drawFolders(){const settings=S.configured;
+ $('app').innerHTML=toolsWarn()+`<div class="card ${F.music&&F.count?.n?'done':''}"><h2><span class="num">1</span>Where's your music?</h2>
+ <div class="sub">The folder with your songs (MP3, FLAC, WAV, AIFF, M4A). It's only read, never changed.</div>
+ <div class="row"><input type="text" id="music" value="${esc(F.music)}" placeholder="/Users/you/Music" spellcheck="false"><button id="pickm">Choose…</button></div>
+ <div class="found" id="mfound"></div></div>
+ <div class="card ${F.library?'done':''}"><h2><span class="num">2</span>Where should the samples go?</h2>
+ <div class="sub">A new folder for the samples and the database. A big collection can need tens of GB; an external drive is fine. ${S.free_gb!=null?`About ${S.free_gb} GB free here.`:''}</div>
+ <div class="row"><input type="text" id="lib" value="${esc(F.library)}" spellcheck="false"><button id="pickl">Choose…</button></div></div>
+ <div class="row"><button class="go" id="save">${settings?'Save':'Continue →'}</button>${settings?'<a href="/">← back to the library</a>':''}<span class="sub" id="msg"></span></div>`;
+ const showCount=()=>{const c=F.count,el=$('mfound');if(!el)return;el.className='found'+(c?c.n?' ok':' bad':'');
+  el.textContent=c==null?'':c.n?`✓ ${c.n.toLocaleString()}${c.more?'+':''} songs found`:'No audio files found in that folder'};showCount();
+ if(F.music&&F.count==null)count();
+ $('music').onchange=e=>{F.music=e.target.value.trim();F.count=null;count()};$('lib').onchange=e=>F.library=e.target.value.trim();
+ $('pickm').onclick=async()=>{const r=await api('api/setup/choose',{prompt:'Choose your music folder',start:F.music,count:true});if(r.path){F.music=r.path;F.count=r.n!=null?{n:r.n,more:r.more}:null;
+  if(!S.configured&&(!F.library||F.library.endsWith('/SampleLibrary')))F.library=r.path.replace(/\/[^/]+$/,'')+'/SampleLibrary';drawFolders()}};
+ $('pickl').onclick=async()=>{const r=await api('api/setup/choose',{prompt:'Choose where the sample library goes',start:F.library});if(r.path){F.library=r.path.endsWith('SampleLibrary')?r.path:r.path+'/SampleLibrary';drawFolders()}};
+ $('save').onclick=async()=>{F.music=$('music').value.trim();F.library=$('lib').value.trim();if(!F.music){$('msg').textContent='choose your music folder first';return}
+  $('save').disabled=true;$('msg').textContent='saving…';try{await api('api/setup/save',{music:F.music,library:F.library})}catch(e){$('save').disabled=false;$('msg').textContent=e.message;return}
+  $('msg').textContent='starting with your folders…';setTimeout(function wait(){fetch('api/ping').then(r=>r.ok?location.href='/':setTimeout(wait,500)).catch(()=>setTimeout(wait,500))},900)}}
+async function count(){if(!F.music)return;try{F.count=await api('api/setup/count',{path:F.music})}catch(e){F.count={n:0}}const el=$('mfound');if(el)drawFolders()}
+const STEPS=['Reading your music folder','Listening for the most promising songs','Mining the first samples','Building your library'];
+function drawMine(){const job=S.job,run=job&&job.running,failed=job&&!job.running&&!S.has_library;
+ const step=job?.step?.[0]||(run?1:0),p=job?.progress;
+ $('app').innerHTML=toolsWarn()+`<div class="card done"><h2><span class="num">✓</span>Folders</h2><div class="sub">Music: ${esc(S.music)}<br>Samples: ${esc(S.library)} · <a href="/setup" id="chg">change</a></div></div>
+ <div class="card"><h2><span class="num">3</span>Mine your first samples</h2>
+ ${run||failed?'':`<div class="sub">DigitalCrate listens to a few hundred of your songs, picks the most promising, and cuts samples from them. You can mine more later from the ⚙ Processing tab. The first time, it also downloads its listening models (about 2 GB).</div>
+ <div class="sizes">${[[10,'A quick look','about 10 minutes'],[25,'A good start','about 25 minutes'],[60,'A real crate','about an hour']].map(([n,t,d])=>`<button class="size${SIZE===n?' on':''}" data-n="${n}"><b>${n} songs</b><span class="sub">${t} · ${d}</span></button>`).join('')}</div>
+ <div class="row"><button class="go" id="start">Start mining</button><span class="sub">Times are for a recent Apple Silicon Mac.</span></div>`}
+ ${run?`<ul class="steps">${STEPS.map((s,k)=>`<li class="${k+1<step?'past':k+1===step?'now':''}">${k+1<step?'✓':k+1===step?'▸':'·'} ${s}</li>`).join('')}</ul>
+ ${p?`<div class="bar"><i style="width:${Math.round(p[0]/p[1]*100)}%"></i></div><div class="sub" style="margin-top:6px">${p[0]} of ${p[1]}${job.eta&&job.eta!=='?'?` · about ${esc(job.eta)} left`:''}${job.now?` · ${esc(job.now)}`:''}</div>`:'<div class="sub" style="margin-top:6px">starting…</div>'}
+ <div class="sub" style="margin-top:14px">You can close this window; it keeps going. Open DigitalCrate again to check on it.</div>
+ <div class="row"><button id="stop">Stop</button></div>`:''}
+ ${failed?`<div class="found bad">That run stopped before it finished.</div><pre>${esc((job.tail||[]).join('\n'))}</pre><div class="row"><button class="go" id="retry">Try again</button></div>`:''}</div>`;
+ document.querySelectorAll('[data-n]').forEach(b=>b.onclick=()=>{SIZE=+b.dataset.n;drawMine()});
+ const go=async()=>{try{await api('api/setup/start',{n:SIZE});S.job={running:true};drawMine();timer=setTimeout(load,1500)}catch(e){alert(e.message)}};
+ if($('start'))$('start').onclick=go;if($('retry'))$('retry').onclick=()=>{S.job=null;drawMine()};
+ if($('stop'))$('stop').onclick=async()=>{await api('api/activity/stop',{id:job.id});load()};
+ if(run)timer=setTimeout(load,2500)}
+load();
+</script></body></html>

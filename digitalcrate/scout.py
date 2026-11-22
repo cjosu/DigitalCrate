@@ -46,12 +46,13 @@ def reference_set(con):
     return E, [f"{r['artist']} – {r['title']} ({r['category']})" for r in rows]
 
 
-def scout(limit=None, redo=False):
+def scout(limit=None, redo=False, shuffle=False):
     con = connect()
     from .policy import apply
     apply()
     where = "COALESCE(policy,'source') != 'reference'" + ("" if redo else " AND scout_done IS NULL")
-    rows = con.execute(f"SELECT id, path, duration FROM tracks WHERE {where} ORDER BY id").fetchall()
+    # shuffle: a random sample across the whole collection (the first run), not the first N by id
+    rows = con.execute(f"SELECT id, path, duration FROM tracks WHERE {where} ORDER BY {'RANDOM()' if shuffle else 'id'}").fetchall()
     if limit:
         rows = rows[:limit]
     cl = models.clap()

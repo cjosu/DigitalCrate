@@ -8,6 +8,8 @@ in Ableton's browser straight away. Works for library samples and for variation-
 import json
 import os
 import shutil
+import sys
+import time
 import webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from functools import partial
@@ -39,6 +41,7 @@ _SLOW = {}
 def start_job(kind, args, target):
     import subprocess, sys, time
     jid = str(int(time.time() * 1000))
+    C.DATA_DIR.mkdir(parents=True, exist_ok=True)
     logf = C.DATA_DIR / f"{kind}_{jid}.log"
     import os
     cmd = [sys.executable, "-u", "-m", "digitalcrate", kind] + args
@@ -287,7 +290,49 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _setup(self, req):
+        """First-run setup (static/setup.html) and the quit button."""
+        import threading
+        from . import app
+        if self.path == "/api/setup/choose":
+            path = app.choose_folder(req.get("prompt", "Choose a folder"), req.get("start"))
+            return self._json(dict(path=path, **(app.count_audio(path) if path and req.get("count") else {})))
+        if self.path == "/api/setup/count":
+            return self._json(app.count_audio(req["path"]))
+        if self.path == "/api/setup/save":
+            res = app.save_config(req["music"], req["library"])
+            self._json(dict(res, restarting=True))
+            threading.Thread(target=_restart, daemon=True).start()  # the folders are read at start-up
+            return
+        if self.path == "/api/setup/start":
+            if any(j["running"] and j["kind"] in ("firstrun", "process", "terminal") for j in activity()):
+                return self._json({"error": "already running"}, 409)
+            n = max(5, min(200, int(req.get("n", 25))))
+            return self._json({"job": start_job("firstrun", ["--mine", str(n)], f"first run: {n} songs")})
+        if self.path == "/api/quit":
+            self._json({"ok": True})
+            threading.Thread(target=lambda: (time.sleep(0.3), HTTPD.shutdown()), daemon=True).start()
+            return
+        return self._json({"error": "unknown"}, 404)
+
     def do_GET(self):
+        from . import app
+        if self.path == "/api/ping":
+            return self._json({"ok": True})
+        if self.path == "/api/setup/state":
+            st = app.state()
+            st["job"] = next((j for j in activity() if j["kind"] == "firstrun"), None)
+            if st["job"]:
+                import re
+                f = Path(_saved_jobs().get(st["job"]["id"], {}).get("log", ""))
+                txt = f.read_text(errors="ignore") if f.is_file() else ""
+                steps = re.findall(r"^STEP (\d)/4 (.+)$", txt, re.M)
+                st["job"]["step"] = [int(steps[-1][0]), steps[-1][1]] if steps else None
+            return self._json(st)
+        if self.path in ("/", "/setup", "/Browser.html") and (self.path == "/setup" or not app.configured()
+                                                             or not (C.LIB_ROOT / "Browser.html").exists()):
+            return self._file(Path(__file__).resolve().parent / "static" / "setup.html", "text/html",
+                              {"Cache-Control": "no-store"})
         if self.path == "/":
             self.path = "/Browser.html"
         if self.path == "/Browser.html" and not (C.LIB_ROOT / "Browser.html").exists():
@@ -446,6 +491,8 @@ class Handler(SimpleHTTPRequestHandler):
                 log_event(row["path"], "star", 1, row["id"])  # you made it: counts as a like
                 set_fav(row["path"], True, row["id"], f"edit of {req.get('label', path)}")
                 return self._json({"row": _with_partners(row)})
+            elif self.path.startswith("/api/setup/") or self.path == "/api/quit":
+                return self._setup(req)
             elif self.path in ("/api/trash/delete", "/api/trash/restore"):
                 from . import trash
                 ids = [str(x) for x in req.get("ids", [])][:2000]
@@ -544,11 +591,25 @@ class Handler(SimpleHTTPRequestHandler):
             return self._json({"error": str(e)}, 400)
 
 
+HTTPD = None
+
+
+def _restart():
+    """Start over in a fresh process (after setup changes the folders, which are read at import)."""
+    time.sleep(0.4)
+    HTTPD.server_close()
+    os.execv(sys.executable, [sys.executable, "-m", "digitalcrate", "serve", "--port", str(HTTPD.server_port),
+                              "--no-browser"])
+
+
 def serve(port=8765, open_browser=True):
-    _db()
-    from .edit import clear_previews
-    clear_previews()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(C.LIB_ROOT)))
+    global HTTPD
+    from .app import configured
+    if configured():
+        _db()
+        from .edit import clear_previews
+        clear_previews()
+    httpd = HTTPD = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(C.LIB_ROOT)))
     url = f"http://localhost:{port}/"
     print(f"DigitalCrate at {url}  (Ctrl-C to stop)")
     if open_browser:

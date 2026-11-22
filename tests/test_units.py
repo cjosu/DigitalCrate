@@ -156,3 +156,23 @@ def test_beat_this_bars_fall_back_without_a_grid(monkeypatch):
     monkeypatch.setattr(analyze, "beat_this", lambda y: (loose, loose[::4]))
     tk = dict(beats=np.array([]), tempo_ok=False, bpm=0)
     assert analyze.bars(tk, None, None)[1] == "none"
+
+
+def test_setup_saves_folders(tmp_path, monkeypatch):
+    """The setup page writes the two folders into the config in use, keeps other settings, and refuses bad choices."""
+    from digitalcrate import app, config as C
+    cfg = tmp_path / "digitalcrate.toml"
+    cfg.write_text('reference_artists = ["X"]\nmusic = "/old"\n')
+    monkeypatch.setattr(C, "CONFIG_FILE", cfg)
+    music = tmp_path / "Music"; music.mkdir()
+    (music / "a.mp3").write_bytes(b""); (music / "._a.mp3").write_bytes(b"")
+    assert app.count_audio(music) == {"n": 1, "more": False}
+    app.save_config(music, tmp_path / "Lib")
+    import tomllib
+    d = tomllib.loads(cfg.read_text())
+    assert d["music"] == str(music) and d["library"] == str(tmp_path / "Lib") and d["reference_artists"] == ["X"]
+    import pytest
+    with pytest.raises(ValueError):
+        app.save_config(tmp_path / "nope", tmp_path / "Lib")
+    with pytest.raises(ValueError):
+        app.save_config(music, music / "Lib")
