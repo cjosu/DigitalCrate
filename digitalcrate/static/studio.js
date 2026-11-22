@@ -113,27 +113,35 @@ rowHTML=function(i){return _rowHTML(i).replace('<span class="id"',`<button class
 // ---------- daily crate
 function rng(seed){let a=0;for(const c of seed)a=(a*31+c.charCodeAt(0))|0;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 function lsj(k,d){try{return JSON.parse(localStorage.getItem(k)||'null')??d}catch(e){return d}}
-function buildCrate(force){const day=new Date().toLocaleDateString('en-CA');const saved=lsj('atlasCrate',null);
- if(!force&&saved&&saved.day===day&&saved.paths&&saved.paths.length)return saved;
+// which sample types the crate draws from: [] = all (the default); remembered per browser
+const crateMix=()=>lsj('atlasCrateMix',[]);
+function buildCrate(force){const day=new Date().toLocaleDateString('en-CA');const saved=lsj('atlasCrate',null),mix=crateMix();
+ if(!force&&saved&&saved.day===day&&saved.paths&&saved.paths.length&&String(saved.mix||[])===String(mix))return saved;
  const n=(saved&&saved.day===day?saved.n||0:0)+(force?1:0),R=rng(day+':'+n),seen=new Set(lsj('atlasCrateSeen',[]));
  const rated=new Set([...FAV.keys(),...TASTE.disliked]);
- const pool=S.map((s,i)=>i).filter(i=>{const s=S[i];return !rated.has(s[F.path])&&!seen.has(s[F.path])&&!st.excl.has(s[F.genre])&&s[F.q]>=0.45&&!s[F.path].startsWith('_Reference')&&!s[F.parent]});
+ const pool=S.map((s,i)=>i).filter(i=>{const s=S[i];return !rated.has(s[F.path])&&!seen.has(s[F.path])&&!st.excl.has(s[F.genre])&&s[F.q]>=0.45&&!s[F.path].startsWith('_Reference')&&!s[F.parent]&&(!mix.length||mix.includes(s[F.cat]))});
  const sc=i=>TASTE.score[S[i][F.path]]??(S[i][F.q]-1),ds=i=>TASTE.discover[S[i][F.path]]??R();
  const pick=(list,k,out,byT,byA)=>{for(const i of list){if(out.length>=k)break;const t=S[i][F.tid],a=S[i][F.artist];if(byT.has(t)||(byA.get(a)||0)>=2)continue;byT.add(t);byA.set(a,(byA.get(a)||0)+1);out.push(i)}return out};
  const byT=new Set(),byA=new Map();
  const you=pick(pool.slice().sort((a,b)=>sc(b)-sc(a)+(R()-.5)*0.15),14,[],byT,byA);
  const disc=pool.slice().sort((a,b)=>ds(b)-ds(a)).slice(30,900);for(let k=disc.length-1;k>0;k--){const j=Math.floor(R()*(k+1));[disc[k],disc[j]]=[disc[j],disc[k]]}
  const wild=pick(disc,6,[],byT,byA);
- const c={day,n,paths:you.map(i=>S[i][F.path]),wild:wild.map(i=>S[i][F.path])};try{localStorage.setItem('atlasCrate',JSON.stringify(c));
+ const c={day,n,mix,paths:you.map(i=>S[i][F.path]),wild:wild.map(i=>S[i][F.path])};try{localStorage.setItem('atlasCrate',JSON.stringify(c));
   localStorage.setItem('atlasCrateSeen',JSON.stringify([...seen,...c.paths,...c.wild].slice(-3000)))}catch(e){}return c}
 function renderCrate(){const c=buildCrate(false),all=[...c.paths,...c.wild],ids=p=>p.map(x=>byPath.get(x)).filter(x=>x!=null);
  const done=all.filter(p=>FAV.has(p)||TASTE.disliked.has(p)).length;
  $('count').textContent=`today's crate · ${done}/${all.length} rated`+(TASTE.n?` · taste model: ${TASTE.n} ratings`:'');
- $('list').innerHTML=`<div class="crateprog"><i style="width:${done/all.length*100}%"></i></div>
- <div class="kit"><h3><span>For you — what the taste model rates highest that you haven't heard${hq('crate')}</span><button id="crnew" title="a fresh crate">↻ new crate</button></h3>${ids(c.paths).map(rowHTML).join('')||'<div class="empty">rate a few samples first</div>'}</div>
+ const mix=crateMix(),cats=Object.keys(D.subtypes).filter(c=>S.some(s=>s[F.cat]===c));
+ $('list').innerHTML=`<div class="crateprog"><i style="width:${all.length?done/all.length*100:0}%"></i></div>
+ <div class="chips" style="margin:0 16px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="sub">In this crate:</span>
+ <button data-crmix="" class="${mix.length?'':'on'}" title="every type (the default)">All</button>${cats.map(c=>`<button data-crmix="${esc(c)}" class="${mix.includes(c)?'on':''}" title="${esc(c)}"><span class="badge" style="background:${col(c)}">${AB[c]}</span>${esc(c.replace('Atmospheres','Atmos'))}</button>`).join('')}
+ <span class="sub">pick one or more</span></div>
+ <div class="kit"><h3><span>For you — what the taste model rates highest that you haven't heard${hq('crate')}</span><button id="crnew" title="a fresh crate">↻ new crate</button></h3>${ids(c.paths).map(rowHTML).join('')||(mix.length?'<div class="empty">No unheard samples of these types left. Add another type.</div>':'<div class="empty">rate a few samples first</div>')}</div>
  <div class="kit"><h3><span>Wildcards — outside your usual, picked to teach the model fastest</span></h3>${ids(c.wild).map(rowHTML).join('')}</div>
  <div class="hint" style="margin:0 16px 16px">★ and ✕ train the taste model; a new crate appears each day. Already-crated samples don't come back.</div>`;
- $('crnew').onclick=()=>{buildCrate(true);renderCrate()};mark()}
+ $('crnew').onclick=()=>{buildCrate(true);renderCrate()};
+ $('list').querySelectorAll('[data-crmix]').forEach(b=>b.onclick=()=>{const v=b.dataset.crmix;let m=crateMix();
+  m=v===''?[]:m.includes(v)?m.filter(x=>x!==v):[...m,v];try{localStorage.setItem('atlasCrateMix',JSON.stringify(m))}catch(e){}buildCrate(true);renderCrate()});mark()}
 
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;

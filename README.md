@@ -168,7 +168,8 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   heard and didn't star; about 78% here, where sample quality alone gets 48%), and how that changes as you rate.
   Also what it learns from, what it has learned in words ("warm analog synth pad", "a breathy whispered voice"…),
   where it's wrong, and the samples whose ★ or ✕ would teach it the most.
-- **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards.
+- **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards. Choose which types it draws
+  from (all by default, or just vocals, say); the choice is remembered.
 - **🌌 Galaxy:** every sample on a map by sound; hover to hear, color by taste.
 
   ![The sample galaxy](docs/img/10-galaxy.png)
