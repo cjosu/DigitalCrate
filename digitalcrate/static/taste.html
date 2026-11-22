@@ -42,10 +42,13 @@ function render(){if(!D.ready){$('app').innerHTML='<div class="card">No samples 
  <section class="card"><h2>How well it knows you</h2>
   ${A.auc==null?`<div class="sub">${A.measuring?'Measuring… (about 15 seconds)':'Star about 10 samples and it can be measured.'}</div>`:`
   <div class="big">${pct(A.auc)}<small>of the time it picks your favourite</small></div>
-  <div class="sub" style="margin-top:8px">The honest test: a fifth of your ★ favourites is hidden, the model learns from everything else, then it's shown pairs of one hidden favourite and one sample you listened to but didn't star. This is how often it ranks the favourite higher. A coin flip gets 50%.</div>
+  <div class="sub" style="margin-top:8px">The honest test: the samples you've heard are split into five groups. For each group, everything you told it about those samples (★, ✕, listening) is hidden, the model learns from the rest, then it's shown pairs of one of the group's favourites and one it heard but you didn't star. This is how often it ranks the favourite higher. A coin flip gets 50%.</div>
   <div class="cmp"><span>your taste model</span><div class="hb"><i style="width:${A.auc*100}%"></i></div><b>${pct(A.auc)}</b>
+   ${A.auc_regression!=null?`<span class="sub">· regression alone</span><div class="hb"><i style="width:${A.auc_regression*100}%;background:#c9a36b"></i></div><span>${pct(A.auc_regression)}</span>`:''}
+   ${A.auc_trees!=null?`<span class="sub">· trees alone</span><div class="hb"><i style="width:${A.auc_trees*100}%;background:#8fc98f"></i></div><span>${pct(A.auc_trees)}</span>`:''}
    <span>sample quality alone</span><div class="hb"><i style="width:${(A.quality_auc||0)*100}%;background:var(--acc2)"></i></div><span>${pct(A.quality_auc||0)}</span>
    <span>coin flip</span><div class="hb"><i style="width:50%;background:var(--mute)"></i></div><span>50%</span></div>
+  ${A.auc_trees!=null?`<div class="sub" style="margin-bottom:6px">Your model averages two learners: a <b>regression</b> (steady, and it knows how unsure it is, which picks "teach it the most") and <b>gradient-boosted trees</b> (more flexible; they may pull ahead as you rate more). Both are measured each time, so the chart shows which is doing better.</div>`:''}
   <div class="sub">"Quality" is how clean and isolated a sample is. Near 50% means what you star isn't about cleanliness: it's about sound and mood, which is what the model learns.</div>`}
   ${chart()}
  </section>
@@ -54,7 +57,8 @@ function render(){if(!D.ready){$('app').innerHTML='<div class="card">No samples 
   <div class="stat"><b>${S.liked_by_listening}</b><span>liked by listening</span></div><div class="stat"><b>${S.skipped}</b><span>skipped</span></div><div class="stat"><b>${S.listens.toLocaleString()}</b><span>plays in total</span></div></div>
   <details style="margin-top:10px"><summary>How plays count</summary><div class="sub" style="margin-top:6px">
   A sample counts as <b>liked by listening</b> after 3 plays or 12 seconds of listening in total; as <b>skipped</b> when every play of a longer sample stopped in the first 15%. Plays fade over about two months, so recent listening counts most. Stars and ✕ always win over plays. "Played to the end" doesn't count by itself: a half-second chop always plays to the end.<br><br>
-  To fill in the gaps, the model also treats a few thousand random samples you've never heard as very weak "probably not" examples (5% of a skip each). Most of the library is like that, so the model learns what sets your picks apart.</div></details>
+  A short sample (3 s or less) you played once and passed over, while starring others in the same session, counts as a weak "not this one": a 1-second clip can't be skipped.<br><br>
+  To fill in the gaps, the model also treats random samples you've never heard as weak "probably not" examples (60 per favourite, each worth a tenth of a skip). Most of the library is like that, so the model learns what sets your picks apart.</div></details>
  </section>
  <section class="card"><h2>Where it's going wrong</h2>
   ${wrongHTML(E)}
@@ -86,11 +90,14 @@ function wrongHTML(E){const miss=E.missed.filter(r=>r.pct<70),bad=E.wrong.filter
  return h}
 function chart(){const H=D.history||[];if(H.length<2)return H.length?'<div class="sub" style="margin-top:10px">The trend appears here after the next change to your ratings.</div>':'';
  const W=480,Ht=120,p=24,xs=H.map((h,i)=>p+i*(W-2*p)/(H.length-1)),y=v=>Ht-p-(v-0.4)/(0.6)*(Ht-2*p);
- const path=H.map((h,i)=>`${i?'L':'M'}${xs[i].toFixed(1)},${y(h.auc).toFixed(1)}`).join('');
+ const line=k=>{const pts=H.map((h,i)=>h[k]!=null?[xs[i],y(h[k])]:null).filter(Boolean);return pts.length>1?pts.map((q,i)=>`${i?'L':'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(''):''};
+ const path=line('auc'),pr=line('auc_regression'),pt=line('auc_trees');
  return `<div class="sub" style="margin:12px 0 2px">Over time (each point is a measurement after your ratings changed)</div><div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${Ht}" width="100%" style="max-width:${W}px">
  <line x1="${p}" x2="${W-p}" y1="${y(.5)}" y2="${y(.5)}" stroke="#2c323c" stroke-dasharray="3 3"/><text x="${W-p+2}" y="${y(.5)+3}">50%</text>
+ ${pr?`<path d="${pr}" fill="none" stroke="#c9a36b" stroke-width="1.5" stroke-dasharray="4 3"/>`:''}${pt?`<path d="${pt}" fill="none" stroke="#8fc98f" stroke-width="1.5" stroke-dasharray="4 3"/>`:''}
  <path d="${path}" fill="none" stroke="var(--acc)" stroke-width="2"/>${H.map((h,i)=>`<circle cx="${xs[i]}" cy="${y(h.auc)}" r="3" fill="var(--acc)"><title>${new Date(h.ts*1000).toLocaleString()} · ${pct(h.auc)} · ${h.n_fav} favourites</title></circle>`).join('')}
- <text x="${xs[0]}" y="${Ht-6}">${H[0].n_fav} ★</text><text x="${xs[xs.length-1]-20}" y="${Ht-6}">${H[H.length-1].n_fav} ★</text></svg></div>`}
+ <text x="${xs[0]}" y="${Ht-6}">${H[0].n_fav} ★</text><text x="${xs[xs.length-1]-20}" y="${Ht-6}">${H[H.length-1].n_fav} ★</text></svg></div>
+ ${pr||pt?'<div class="sub">— your model &nbsp; <span style="color:#c9a36b">- - regression alone</span> &nbsp; <span style="color:#8fc98f">- - trees alone</span></div>':''}`}
 function words(ws,c){const m=Math.max(...ws.map(w=>Math.abs(w[1])),1);return `<div class="w">${ws.map(w=>`<span>${esc(w[0])}</span><div class="wb"><i style="left:0;width:${Math.abs(w[1])/m*100}%;background:${c}"></i></div>`).join('')}</div>`}
 function bars(rows){return `<div class="w" style="grid-template-columns:150px 1fr 40px">${(rows||[]).map(r=>`<span>${esc(r[0])} <span class="sub">${r[2].toLocaleString()}</span></span><div class="hb"><i style="width:${r[1]}%;background:${r[1]>=50?'var(--ok)':'var(--acc2)'}"></i></div><span class="sub">${r[1]}</span>`).join('')}</div>`}
 function exRow(r,rate){const st=rated[r.path];return `<div class="ex"><button class="play" data-p="${esc(r.path)}">${playing===r.path?'■':'▶'}</button>

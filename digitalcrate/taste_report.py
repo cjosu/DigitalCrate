@@ -56,7 +56,7 @@ def accuracy(con=None, folds=5, seeds=2):
     for r in con.execute("SELECT path, quality FROM samples"):
         if r[0] in pos:
             q[pos[r[0]]] = r[1] or 0
-    res, base = [], []
+    res, base, alone = [], [], {"regression": [], "trees": []}
     allh = sorted(heard | set(fav))
     favs = set(fav)
     for seed in range(seeds):
@@ -72,13 +72,23 @@ def accuracy(con=None, folds=5, seeds=2):
             b = _auc(y, q[idx])
             if a is not None:
                 res.append(a); base.append(b)
+                P = r.get("parts") or {}
+                for m in alone:  # the same blend with only one of the two models, on the same fold
+                    if P.get(m) is not None:
+                        s = 0.7 * P[m] + 0.3 * P["knn"] + 0.3 * P["song"]
+                        alone[m].append(_auc(y, s[idx]))
     return dict(auc=round(float(np.mean(res)), 3), se=round(float(np.std(res) / np.sqrt(len(res))), 3),
-                quality_auc=round(float(np.mean(base)), 3), n_fav=len(fav), n_heard=len(heard))
+                quality_auc=round(float(np.mean(base)), 3), n_fav=len(fav), n_heard=len(heard),
+                **{f"auc_{m}": round(float(np.mean(v)), 3) if v else None for m, v in alone.items()})
 
 
 def _history(con):
     con.execute("""CREATE TABLE IF NOT EXISTS taste_history (ts REAL, n_labels INTEGER, n_pos INTEGER, n_fav INTEGER,
                    n_dislike INTEGER, auc REAL, quality_auc REAL)""")
+    have = {r[1] for r in con.execute("PRAGMA table_info(taste_history)")}
+    for c in ("auc_regression", "auc_trees"):  # the two models measured on their own, to compare over time
+        if c not in have:
+            con.execute(f"ALTER TABLE taste_history ADD COLUMN {c} REAL")
     return con
 
 
@@ -98,8 +108,10 @@ def measure_soon(sig):
             con = _history(_db())
             acc = accuracy(con)
             if acc.get("auc") is not None:
-                con.execute("INSERT INTO taste_history VALUES (?,?,?,?,?,?,?)",
-                            (time.time(), *sig, acc["auc"], acc["quality_auc"]))
+                con.execute("""INSERT INTO taste_history (ts, n_labels, n_pos, n_fav, n_dislike, auc, quality_auc,
+                               auc_regression, auc_trees) VALUES (?,?,?,?,?,?,?,?,?)""",
+                            (time.time(), *sig, acc["auc"], acc["quality_auc"], acc.get("auc_regression"),
+                             acc.get("auc_trees")))
                 con.commit()
             _CACHE.clear()
         finally:
@@ -140,7 +152,8 @@ def explain():
     stale = not last or (last["n_labels"], last["n_pos"], last["n_fav"], last["n_dislike"]) != sig
     if stale:
         measure_soon(sig)
-    acc = dict(auc=last["auc"], quality_auc=last["quality_auc"], when=last["ts"]) if last else dict(auc=None)
+    acc = dict(auc=last["auc"], quality_auc=last["quality_auc"], when=last["ts"], auc_regression=last["auc_regression"],
+               auc_trees=last["auc_trees"]) if last else dict(auc=None)
     acc.update(measuring=_MEASURING.is_set(), n_fav=len(fav))
     hist = [dict(r) for r in con.execute("SELECT * FROM taste_history ORDER BY ts")]
 

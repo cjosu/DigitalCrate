@@ -223,6 +223,28 @@ def predict(X, beta, cov):
 _LIB = {}
 
 
+# Gradient-boosted trees, averaged with the regression (held-out: +0.014 AUC, +0.010 on new songs). Unweighted:
+# with sample weights scikit-learn's trees fit ~8x slower. The Taste page tracks regression, trees and the average
+# separately, so it shows whether the trees pull ahead (or fall behind) as ratings accumulate.
+TREES = True
+TREE_BG = 15  # unheard samples per favourite as the trees' "probably not" examples
+
+
+def _trees(Xl, yl, X_all, unl, n_pos, rng):
+    try:
+        from sklearn.ensemble import HistGradientBoostingClassifier
+        from threadpoolctl import threadpool_limits
+        tb = rng.choice(unl, size=min(len(unl), TREE_BG * max(1, n_pos)), replace=False)
+        with threadpool_limits(2):  # stay light while mining runs share the machine
+            clf = HistGradientBoostingClassifier(max_iter=200, learning_rate=0.05, max_leaf_nodes=15,
+                                                 l2_regularization=1.0, random_state=0)
+            clf.fit(np.vstack([Xl, X_all[tb]]), np.r_[yl, np.zeros(len(tb))])
+            return clf.predict_proba(X_all)[:, 1]
+    except Exception as e:  # the regression alone still works
+        print(f"taste: trees skipped ({e})")
+        return None
+
+
 N_STYLE = 8  # dimensions of the song's Discogs-EffNet style embedding used as features
 
 
@@ -321,14 +343,20 @@ def fit(recent_hours=None, verbose=False, labels=None):
         unl = [i for i, r in enumerate(rows) if r["path"] not in labels]
         # 60 per favourite at weight 0.1 (was 20 at 0.05): +0.012 held-out AUC, better in every fold
         bg = rng.choice(unl, size=min(len(unl), 60 * max(1, n_pos)), replace=False) if unl else []
-        X = np.vstack([np.stack([row_of(p) for p in lp]), X_all[bg]])
-        y = np.r_[[labels[p][0] for p in lp], np.zeros(len(bg))]
+        Xl = np.stack([row_of(p) for p in lp])
+        yl = np.array([labels[p][0] for p in lp], float)
+        X = np.vstack([Xl, X_all[bg]])
+        y = np.r_[yl, np.zeros(len(bg))]
         w = np.r_[[labels[p][1] for p in lp], np.full(len(bg), 0.1)]
         beta, cov = fit_blr(X, y, w)
         prob, unc = predict(X_all, beta, cov)
         result.update(prob=prob, unc=unc, beta=beta, cov=cov)
-        kz = (knn - knn.mean()) / (knn.std() + 1e-9)
-        pz = (prob - prob.mean()) / (prob.std() + 1e-9)
+        z = lambda v: (v - v.mean()) / (v.std() + 1e-9)
+        kz, pz = z(knn), z(prob)
+        tz = None
+        if TREES:
+            tp = _trees(Xl, yl, X_all, unl, n_pos, rng)
+            tz = z(tp) if tp is not None else None
         # songs you've rated lift (or sink) their other samples: the mean label of the song's rated samples
         song = np.zeros(len(rows))
         tid = L["tid"]
@@ -339,8 +367,11 @@ def fit(recent_hours=None, verbose=False, labels=None):
         for t, v in acc.items():
             song[tid == t] = np.mean(v)
         sz = (song - song.mean()) / (song.std() + 1e-9)
-        # held-out (2,386 heard, 144 favourites): 0.781 -> 0.822; songs you haven't touched 0.758 -> 0.787
-        result["score"] = 0.7 * pz + 0.3 * kz + 0.3 * sz
+        # held-out (2,386 heard, 144 favourites): 0.781 -> 0.822 (regression) -> 0.836 (with trees);
+        # songs you haven't touched 0.758 -> 0.787 -> 0.797
+        model = z(pz + tz) if tz is not None else pz
+        result["parts"] = dict(regression=pz, trees=tz, knn=kz, song=sz)
+        result["score"] = 0.7 * model + 0.3 * kz + 0.3 * sz
         rng2 = np.random.default_rng()
         bt = rng2.multivariate_normal(beta, cov)
         result["discover"] = X_all @ bt  # Thompson sample: optimistic where uncertain
