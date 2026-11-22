@@ -314,9 +314,9 @@ let NP=null;
 function setNP(path,id,label,i){NP={path,id,label,i};drawNP()}
 function drawNP(){const el=$('np');if(!NP||!(players.size||(ED&&ED.P))){el.hidden=true;return}el.hidden=false;
  el.innerHTML=`<button class="play playing" id="npstop">■</button><div class="lbl"><span class="sub">now playing</span> · ${esc(NP.label)}${window.SK&&SK.playing?' <span class="sub" style="color:var(--acc)">· with the sketch</span>':''}</div>
- ${star(NP.path,NP.id,NP.label)}${nope(NP.path,NP.id)}${xp(NP.path)}${NP.i!=null?`<button id="npshow">show</button>`:''}<span class="sub">F ★ · X ✕</span>`;
+ ${NP.edit?'<span class="sub">a preview: use it or save it to keep it</span>':`${star(NP.path,NP.id,NP.label)}${nope(NP.path,NP.id)}${xp(NP.path)}`}${NP.i!=null?`<button id="npshow">show</button>`:''}${NP.edit?'':'<span class="sub">F ★ · X ✕</span>'}`;
  $('npstop').onclick=()=>{stopAll()};if($('npshow'))$('npshow').onclick=()=>select(NP.i,'go')}
-document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||!NP||!players.size)return;
+document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||!NP||NP.edit||!players.size)return;
  if(e.key==='f'||e.key==='F'){toggleFav(NP.path,NP.id,NP.label);setTimeout(drawNP,50)}else if(e.key==='x'||e.key==='X'){toggleDislike(NP.path,NP.id)}});
 const lbl=i=>`${S[i][F.artist]} — ${S[i][F.title]} · ${S[i][F.sub]}${S[i][F.cam]?' · '+S[i][F.cam]:''}`;
 // ---------- provenance
@@ -385,7 +385,8 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
 // loop / snap / the name are preferences, not edits, so they stay
 function edReset(){if(!ED||!ED.buf)return;$('editor').querySelectorAll('input,select').forEach(el=>{if(['edloop','edsnap','edname'].includes(el.id))return;
  if(el.type==='checkbox')el.checked=el.defaultChecked;else if(el.tagName==='SELECT')el.selectedIndex=Math.max(0,[...el.options].findIndex(o=>o.defaultSelected));else el.value=el.defaultValue;
- el.dispatchEvent(new Event('input'))});if($('tnrep'))$('tnrep').textContent='';
+ el.dispatchEvent(new Event('input'));if(el.tagName==='SELECT')el.dispatchEvent(new Event('change'))});if($('tnrep'))$('tnrep').textContent='';  // menus redraw their panels (plugin controls, tuning report)
+ ED.sugg=null;document.querySelectorAll('[data-sgk]').forEach(r=>r.style.background='');
  ED.sel=[0,ED.buf.duration];edZoom(null);edDraw();edChanged();$('edmsg').textContent='reset: back to the untouched sample'}
 function edButtons(){if(!$('edprev'))return;const m=ED&&ED.P&&ED.P.mode;
  $('edprev').textContent=m==='prev'?'■ stop preview':'▶ preview edit';$('edprev').classList.toggle('playing',m==='prev');
@@ -605,7 +606,7 @@ $('expbtn').onclick=()=>{if(!SERVED){alert('needs the local server');return}
   $('expMsg').textContent=r.error?'error: '+r.error:`exported ${r.count} files to ${r.dest} (opened in Finder)`}};
 // ---------- audio
 const players=new Map();
-function stopAll(){if(typeof edStop==='function')edStop();setTimeout(()=>{if(typeof edButtons==='function')edButtons()},0);players.forEach((a,k)=>{a.pause();endListen(k,a)});players.clear();document.querySelectorAll('.play.playing').forEach(b=>b.classList.remove('playing'))}
+function stopAll(){setTimeout(()=>typeof drawNP==='function'&&drawNP(),0);if(typeof edStop==='function')edStop();setTimeout(()=>{if(typeof edButtons==='function')edButtons()},0);players.forEach((a,k)=>{a.pause();endListen(k,a)});players.clear();document.querySelectorAll('.play.playing').forEach(b=>b.classList.remove('playing'))}
 function toggle(i,btn,{loop=true,exclusive=true}={}){
  if(players.has(i)){const a=players.get(i);a.pause();endListen(i,a);players.delete(i);mark();return}
  if(exclusive)stopAll();

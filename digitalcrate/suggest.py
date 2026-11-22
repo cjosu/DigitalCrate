@@ -49,51 +49,77 @@ def _sm(params_by_key, mix=0.3, mode="Gemini", decay=None):
     return dict(plugins=[dict(path=path, params=out)], tail=4.0 if mix < 0.4 else 7.0)
 
 
-def moves(material, key=None, project_key=None, k=None):
-    """[(id, family, label, params)] for this kind of sample. k: {family: strength multiplier} learned from your
-    "too much" / "too subtle" ratings (1 = as designed)."""
-    M = []
+SM_MODES = ["Gemini", "Hydra", "Centaurus", "Sagittarius", "Andromeda", "Lyra", "Capricorn", "Aquarius", "Pisces"]
+
+
+def moves(material, key=None, project_key=None, k=None, rng=None, per=2):
+    """[(id, family, label, params)] for this kind of sample: `per` fresh variants of each kind of move, with their
+    settings drawn from ranges, so pressing ✨ again tries different things. An id is "type~settings": your ratings
+    attach to the type. k: {family: strength multiplier} learned from "too much" / "too subtle" (1 = as designed)."""
+    rng = rng or np.random.default_rng()
     k = k or {}
-    add = lambda i, f, l, p: M.append((i, f, l, p)) if p is not None else None
-    mix = lambda f, m: min(0.9, max(0.05, m * k.get(f, 1)))
-    tone = lambda f, hz: int(min(16000, max(400, hz / k.get(f, 1))))
-    slow = lambda f, s: round(1 + (s - 1) * k.get(f, 1), 2)
+    M = []
+    seen = set()
+    pick = lambda xs: xs[int(rng.integers(len(xs)))]
+    U = lambda lo, hi: float(rng.uniform(lo, hi))
     kh = lambda hz: f"{hz / 1000:.1f} kHz"
+
+    def add(t, f, label, p):
+        if p is None:
+            return
+        sig = json.dumps({x: v for x, v in p.items() if x != "plugins"}, sort_keys=True)
+        sig += json.dumps([pl["params"] for pl in p.get("plugins", [])], sort_keys=True)
+        if (t, sig) in seen:
+            return
+        seen.add((t, sig))
+        M.append((f"{t}~{abs(hash(sig)) % 10 ** 6}", f, label, p))
+
+    def space(lo, hi, decay=None):
+        m = min(0.9, max(0.05, U(lo, hi) * k.get("space", 1)))
+        mode = pick(SM_MODES)
+        p = _sm({}, mix=m, mode=mode, decay=decay)
+        return p, f"{mode} {m:.0%}"
+
+    def tone(lo, hi):
+        return int(min(16000, max(400, U(lo, hi) / k.get("tone", 1))))
+
+    def slow(lo, hi):
+        return round(1 + (U(lo, hi) - 1) * k.get("slow", 1), 2)
+
+    for _ in range(per):
+        if material == "vocal":
+            n = pick([1, 2, 3]); add("tape_up", "lift", f"tape up {n} (pitch and speed)", dict(tape=True, semis=n))
+            n = pick([2, 3, 4, 5]); add("clean_up", "lift", f"pitch up {n}", dict(semis=n))
+            p, d = space(0.12, 0.35); add("space", "space", f"some space (Supermassive {d})", p)
+            st = slow(1.1, 1.45); add("slow", "slow", f"slower ×{st}, same pitch", dict(stretch=st))
+            hz = tone(4500, 9500); add("tone", "tone", f"softer top (Tone {kh(hz)})", dict(tone=hz))
+            st = round(U(0.8, 0.92), 2); add("quick", "speed", f"a little quicker ×{st}, same pitch", dict(stretch=st))
+        elif material == "sustained":
+            n = pick([-12, -7, -5]); add("tape_down", "octave", {-12: "an octave down", -7: "a fifth down",
+                                                                -5: "a fourth down"}[n] + " (tape)", dict(tape=True, semis=n))
+            hz = tone(900, 3500); add("tone", "tone", f"darker (Tone {kh(hz)})", dict(tone=hz))
+            p, d = space(0.35, 0.75, decay=U(0.4, 0.85)); add("wash", "space", f"washed out (Supermassive {d})", p)
+            st = slow(1.4, 3.0); add("slow", "slow", f"slower ×{st}, same pitch", dict(stretch=st))
+            add("reverse", "reverse", "reversed", dict(reverse=True))
+            add("oct_up", "lift", "an octave up (shimmer)", dict(semis=12))
+        elif material == "melodic":
+            n = pick([-3, -2, -1, 1, 2, 3]); add("tape", "transpose", f"tape {'up' if n > 0 else 'down'} {abs(n)}", dict(tape=True, semis=n))
+            n = pick([5, 7, -5]); add("interval", "transpose", f"{'up' if n > 0 else 'down'} {abs(n)}", dict(semis=n))
+            p, d = space(0.2, 0.5); add("space", "space", f"some space (Supermassive {d})", p)
+            hz = tone(1800, 6000); add("tone", "tone", f"darker (Tone {kh(hz)})", dict(tone=hz))
+            st = slow(1.25, 2.2); add("slow", "slow", f"slower ×{st}, same pitch", dict(stretch=st))
+            add("reverse", "reverse", "reversed", dict(reverse=True))
+        else:  # percussion
+            n = pick([-4, -3, -2, -1, 1, 2, 3]); add("tape", "pitch", f"tape {'up' if n > 0 else 'down'} {abs(n)}", dict(tape=True, semis=n))
+            hz = tone(1800, 6000); add("tone", "tone", f"darker (Tone {kh(hz)})", dict(tone=hz))
+            add("reverse", "reverse", "reversed", dict(reverse=True))
     if material == "vocal":
-        add("tape_up2", "lift", "tape up 2 (pitch and speed)", dict(tape=True, semis=2))
-        add("clean_up3", "lift", "pitch up 3", dict(semis=3))
-        add("clean_up5", "lift", "pitch up 5 (a fourth: still in key)", dict(semis=5))
         if key:
             add("tune_own", "tune", f"tuned to its own key ({key}), natural", dict(tune_key=key, tune_strength=0.8, tune_speed=60))
         if project_key and project_key != key:
             add("tune_proj", "tune", f"tuned to your project ({project_key}), natural",
                 dict(tune_key=project_key, tune_strength=0.8, tune_speed=60))
-        add("space_light", "space", f"a little space (Supermassive {mix('space', .22):.0%})", _sm({}, mix=mix("space", 0.22)))
-        add("slow125", "slow", f"slower ×{slow('slow', 1.25)}, same pitch", dict(stretch=slow("slow", 1.25)))
-        add("warm", "tone", f"softer top (Tone {kh(tone('tone', 7000))})", dict(tone=tone("tone", 7000)))
-    elif material == "sustained":
-        add("oct_down", "octave", "an octave down (tape)", dict(tape=True, semis=-12))
-        add("fifth_down", "octave", "a fourth down (tape)", dict(tape=True, semis=-5))
-        add("dark", "tone", f"darker (Tone {kh(tone('tone', 2500))})", dict(tone=tone("tone", 2500)))
-        add("darker", "tone", f"much darker (Tone {kh(tone('tone', 1200))})", dict(tone=tone("tone", 1200)))
-        add("wash", "space", f"washed out (Supermassive {mix('space', .5):.0%})", _sm({}, mix=mix("space", 0.5), decay=0.6))
-        add("slow2", "slow", f"slower ×{slow('slow', 2.0)}, same pitch", dict(stretch=slow("slow", 2.0)))
-        add("slow15", "slow", f"slower ×{slow('slow', 1.5)}, same pitch", dict(stretch=slow("slow", 1.5)))
-        add("reverse", "reverse", "reversed", dict(reverse=True))
-    elif material == "melodic":
-        add("tape_up2", "transpose", "tape up 2", dict(tape=True, semis=2))
-        add("tape_down2", "transpose", "tape down 2", dict(tape=True, semis=-2))
-        add("fifth_up", "transpose", "up 7 (a fifth)", dict(semis=7))
-        add("space_light", "space", f"some space (Supermassive {mix('space', .3):.0%})", _sm({}, mix=mix("space", 0.3)))
-        add("dark", "tone", f"darker (Tone {kh(tone('tone', 3000))})", dict(tone=tone("tone", 3000)))
-        add("slow15", "slow", f"slower ×{slow('slow', 1.5)}, same pitch", dict(stretch=slow("slow", 1.5)))
-        add("reverse", "reverse", "reversed", dict(reverse=True))
-    else:  # percussion
-        add("tape_down2", "pitch", "tape down 2 (heavier)", dict(tape=True, semis=-2))
-        add("tape_up2", "pitch", "tape up 2 (tighter)", dict(tape=True, semis=2))
-        add("dark", "tone", f"darker (Tone {kh(tone('tone', 3500))})", dict(tone=tone("tone", 3500)))
-        add("reverse", "reverse", "reversed", dict(reverse=True))
-    if project_key and key and material != "vocal":
+    elif project_key and key:
         from .conform import parse_key
         try:  # the smallest move from its tonic to the project's (−6..+5 semitones)
             s = (parse_key(project_key)[0] - parse_key(key)[0] + 6) % 12 - 6
@@ -104,7 +130,7 @@ def moves(material, key=None, project_key=None, k=None):
     return M
 
 
-PAIRS = {"vocal": [("lift", "space"), ("tune", "space"), ("slow", "space")],
+PAIRS = {"vocal": [("lift", "space"), ("tune", "space"), ("slow", "space"), ("speed", "tone")],
          "sustained": [("octave", "space"), ("slow", "tone"), ("octave", "tone"), ("reverse", "space")],
          "melodic": [("transpose", "space"), ("slow", "tone")], "perc": [("pitch", "tone")]}
 
@@ -156,8 +182,16 @@ class Critic:
 # ---------------------------------------------------------------- your ratings of edits
 
 REASONS = ("too much", "too subtle", "sounds processed", "wrong mood")
-FAMILIES = ("lift", "transpose", "pitch", "octave", "tune", "space", "slow", "tone", "reverse", "project")
+FAMILIES = ("lift", "transpose", "pitch", "octave", "tune", "space", "slow", "speed", "tone", "reverse", "project")
 MATERIALS = ("vocal", "sustained", "melodic", "perc")
+_SHOWN = {}  # sample path -> the move types shown in its last two runs (the novelty penalty)
+
+
+def _types(move_id):
+    """'space~123+tone~456' -> ['space', 'tone']: ratings and novelty attach to the type, not the exact settings."""
+    return [m.split("~")[0] for m in (move_id or "").split("+") if m]
+
+
 _LAST = {}  # (sample path, move) -> what the last suggestion rendered: embeddings for rating it without re-rendering
 
 
@@ -247,7 +281,8 @@ def _learned(con, material):
             continue
         good = r["rating"] > 0
         w = 2.0 if r["reason"] == "sounds processed" else 1.0
-        bump(mv, r["move"], 0 if good else 1, w)
+        for t in _types(r["move"]):
+            bump(mv, t, 0 if good else 1, w)
         fams = (set((r["family"] or "").split("+")) | param_families(json.loads(r["params"] or "{}"))) - {"", "none"}
         for f in fams:
             bump(fam, f, 0 if good else 1, 1.0)
@@ -332,19 +367,30 @@ def suggest(rel, project_key=None, start=None, end=None, n=3, seed=None, log=Tru
     mprior, fprior, strength = _learned(con, material)
     em, em_info = edit_model(con)
     w_em = 0.5 * min(1.0, em_info["n"] / 30) if em else 0.0  # the edit model earns its say as your ratings grow
-    cands = [(i, f, l, p) for i, f, l, p in moves(material, key, project_key, k=strength)]
+    rng = np.random.default_rng(seed)
+    cands = [(i, f, l, p) for i, f, l, p in moves(material, key, project_key, k=strength, rng=rng)]
+    hist = _SHOWN.get(rel, [])  # [{ids, types, families}] for the last two runs on this sample
+    last = hist[-1] if hist else dict(ids=set(), types=set(), families=set())
+    older = hist[-2] if len(hist) > 1 else dict(ids=set(), types=set(), families=set())
     renders = {}
 
     def judge(i, f, l, p, e, t):
         close = float(e @ E0 / (np.linalg.norm(e) * np.linalg.norm(E0) + 1e-9))
         fams = f.split("+")
-        learned = 0.6 * float(np.mean([fprior(x) for x in fams])) + 0.8 * mprior(i)
+        learned = 0.6 * float(np.mean([fprior(x) for x in fams])) + 0.8 * float(np.mean([mprior(t) for t in _types(i)]))
+        # novelty: what this sample was just shown steps aside, so pressing ✨ again tries new things. The exact same
+        # edit (e.g. "reversed", which has no variants) steps aside the most.
+        ts = _types(i)
+        novelty = (-1.5 if i in last["ids"] else -0.6 if i in older["ids"] else 0) \
+            - 0.8 * sum(t in last["types"] for t in ts) / len(ts) - 0.3 * sum(t in older["types"] for t in ts) / len(ts) \
+            - (0.3 if set(fams) & last["families"] else 0)
         d = e / np.linalg.norm(e) - E0 / np.linalg.norm(E0)
         lm = em(d, p, material) if em else 0.0
         _LAST[(rel, i)] = dict(e=e, E0=E0, close=close, params=dict(p))
         return dict(id=i, family=f, label=l, params=p, taste=float(t), delta=float(t - t0), close=close,
                     learned=round(learned + w_em * lm, 2),
-                    score=float(t - t0 + LAMBDA * (close - 1) + learned + w_em * lm), e=e)
+                    score=float(t - t0 + LAMBDA * (close - 1) + learned + w_em * lm),
+                    rank=float(t - t0 + LAMBDA * (close - 1) + learned + w_em * lm + novelty + rng.normal(0, 0.2)), e=e)
 
     def run(items):
         ys = []
@@ -380,7 +426,7 @@ def suggest(rel, project_key=None, start=None, end=None, n=3, seed=None, log=Tru
             renders[i] = judge(i, f, l, p, e, t)
 
     # picks: best per family group (a pair counts as both its families), three different ones
-    ranked = sorted(renders.values(), key=lambda r: -r["score"])
+    ranked = sorted(renders.values(), key=lambda r: -r["rank"])  # score + novelty + a little exploration noise
     picks, used = [], set()
     for r in ranked:
         fams = set(r["family"].split("+"))
@@ -393,6 +439,8 @@ def suggest(rel, project_key=None, start=None, end=None, n=3, seed=None, log=Tru
     rest = [r for r in renders.values() if not set(r["family"].split("+")) & used]
     if rest:
         picks.append(dict(random.Random(seed).choice(rest), arm="wildcard"))
+    _SHOWN[rel] = (hist + [dict(ids={r["id"] for r in picks}, types={t for r in picks for t in _types(r["id"])},
+                                families={f for r in picks for f in r["family"].split("+")})])[-2:]
     out = []
     for r in picks:
         params = dict(r["params"], start=a0, end=full_end)

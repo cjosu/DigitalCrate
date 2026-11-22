@@ -662,7 +662,7 @@ async function sgRun(i){const s=S[i];$('sgbtn').disabled=true;$('sglist').innerH
  let r;try{r=await api('api/suggest',{path:s[F.path],project_key:PROJ.key||'',start:ED&&ED.sel?ED.sel[0]:0,end:ED&&ED.sel?ED.sel[1]:null})}
  catch(e){$('sgbtn').disabled=false;$('sgmsg').textContent="couldn't: "+e.message;return}
  $('sgbtn').disabled=false;if(r.error){$('sgmsg').textContent=r.error;return}
- SG={i,r};const up=r.suggestions.filter(x=>x.arm==='critic'&&x.delta>0).length;
+ SG={i,r,run:Date.now()};const up=r.suggestions.filter(x=>x.arm==='critic'&&x.delta>0).length;
  $('sgmsg').textContent=`tried ${r.tried} · `+(up?`${up} it thinks you'd like more than the original`:'it rates the original highest, so these are the ones it minds least');
  $('sglist').innerHTML=r.suggestions.map((x,k)=>`<div class="prow" data-sgk="${k}"><button class="play" data-sgplay="${k}">▶</button><div style="min-width:0">
   <div class="name">${x.arm==='wildcard'?'<span class="badge" style="background:#5b6370" title="picked at random from the rest, to check the model">wildcard</span> ':''}${esc(x.label)}</div>
@@ -686,7 +686,9 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-sgpl
   row.querySelector('[data-sgup]').classList.toggle('on',up);row.querySelector('[data-sgdown]').classList.toggle('on',!up);
   row.querySelector('[data-sgwhy]').hidden=up;sgRate({...base,rating:up?1:-1});return}
  if(b.dataset.sgreason!=null){b.parentNode.querySelectorAll('[data-sgreason]').forEach(z=>z.classList.toggle('on',z===b));sgRate({...base,rating:-1,reason:b.dataset.r});return}
- if(b.dataset.sgplay!=null){const was=players.get('sg'+k);stopAll();if(was)return;const a=new Audio(x.url);a.loop=true;a.play();players.set('sg'+k,a);b.classList.add('playing');sgFb(x,'play');return}
+ if(b.dataset.sgplay!=null){const key=`sg${SG.run}_${k}`,was=players.has(key);stopAll();if(was)return;  // ids per set of suggestions: slots repeat across samples
+  const a=new Audio(x.url);a.loop=true;a.play();players.set(key,a);b.classList.add('playing');
+  NP={path:S[SG.i][F.path],id:S[SG.i][F.id],label:`✨ edit: ${x.label} — ${lbl(SG.i)}`,i:SG.i,edit:true};drawNP();sgFb(x,'play');return}
  if(b.dataset.sguse!=null){stopAll();await sgApply(x);sgFb(x,'apply');document.querySelectorAll('[data-sgk]').forEach(r=>r.style.background=+r.dataset.sgk===k?'#1f2630':'');return}
  sgFb(x,'dismiss');b.closest('[data-sgk]').remove()},true);
 // rate your own edit (whatever the editor is set to): the same ratings teach the suggestions
