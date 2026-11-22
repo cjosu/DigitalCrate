@@ -20,7 +20,8 @@ import numpy as np
 
 from .taste import CATS, KINDS, N_PCA, _db, _library, fit, item_labels, scores_payload
 
-ENG = ["longer", "brighter", "noisier / breathier", "more pitched", "minor key", "a variation (reworked)"]
+ENG = ["longer", "brighter", "noisier / breathier", "more pitched", "minor key", "a variation (reworked)",
+       "cleaner (quality score)", "louder", "clearer key", "has a steady tempo"]
 WORDS = [
     "a woman singing softly", "a man singing softly", "a choir", "soulful r&b vocals", "a breathy whispered voice",
     "a vocal chop", "operatic singing", "spoken words", "humming", "a gospel choir",
@@ -206,7 +207,8 @@ def explain():
                  by_category=sorted([[c, round(float(np.mean(v))), len(v)] for c, v in by_cat.items()],
                                     key=lambda x: -x[1]),
                  by_kind=sorted([[c, round(float(np.mean(v))), len(v)] for c, v in by_kind.items()], key=lambda x: -x[1]),
-                 model="Bayesian logistic regression on CLAP sound features (64 dimensions) plus category, kind and "
-                       "six sound measurements, blended 55/45 with similarity to your favourites")
+                 model="Bayesian logistic regression on CLAP sound features (64 dimensions), category, kind, ten sound "
+                       "measurements and the song's style, blended 70/30 with closeness to your nearest favourite, "
+                       "plus a lift for songs you've starred samples from")
     _CACHE.update(key=key, value=value)
     return value

@@ -165,7 +165,7 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 - **Added recently:** narrows any sort to the latest run, or to the last day or week. With *for you* it shows the
   best of what just came in.
 - **🧠 Taste:** how well the "for you" model knows you, measured honestly (hidden favorites against samples you
-  heard and didn't star; about 78% here, where sample quality alone gets 48%), and how that changes as you rate.
+  heard and didn't star; about 82% here, where sample quality alone gets 48%), and how that changes as you rate.
   Also what it learns from, what it has learned in words ("warm analog synth pad", "a breathy whispered voice"…),
   where it's wrong, and the samples whose ★ or ✕ would teach it the most.
 - **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards. Choose which types it draws
@@ -230,7 +230,8 @@ flowchart LR
   `digitalcrate.toml`.
 - **Compatibility** (`build.py`, `pairing.py`): harmony (Camelot distance + chroma) × tempo (loops) × role and sound.
   A two-tower model trained on co-occurring stems from your own songs is available as an alternative "vibe" score.
-- **Taste** (`taste.py`): Bayesian logistic regression on CLAP embeddings, blended with nearest-favorite similarity;
+- **Taste** (`taste.py`): Bayesian logistic regression on CLAP embeddings, sound measurements and the song's audio
+  style, blended with closeness to your nearest favorite and a lift for songs you've starred from;
   implicit feedback counts listening time, replays and quick skips, and a short clip you played once and passed
   over while starring others counts as a weak *not this one* (a 1-second clip can't be skipped). Beta posteriors per technique steer the variations.
 - **Conforming** (`conform.py`): the smallest pitch shift to the project key; loops, rhythmic phrases and
