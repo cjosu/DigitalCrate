@@ -89,7 +89,11 @@ sketch. Click a saved sketch's name to open it without playing.
 
 **Drum lane:** drum one-shots you add (＋, a kit, or **🎛 to the sketchpad** on a song's drum rack) become pads in one
 drum lane, a step sequencer: 16 steps a bar, 1 or 2 bars, click a step for on → soft → off, swing, per-pad mute, and
-a ✨ starter pattern from the pad types (kick, snare, hats…). It's one lane, so mute, solo, its fader, bounce, stems
+a ✨ starter pattern from the pad types (kick, snare, hats…). **🔎 complete the kit** lists the kinds the kit is
+missing (snare, clap, hats, cymbals, shaker, tom, percussion), three hits each that sound like they were recorded with
+the pads you have; **🥁 build a kit around this** on any drum hit starts one. ("Goes well with" finds more of the same
+drum; this compares the recording's character, with what makes a kick a kick taken out: on your library's own songs
+it picks a song's other drums out of all of that kind with AUC 0.83.) It's one lane, so mute, solo, its fader, bounce, stems
 and the Live set treat it like any other.
 
 **Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,

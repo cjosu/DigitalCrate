@@ -188,8 +188,11 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-col]');con
  if(pop&&!pop.hidden&&!e.target.closest('#colpop'))pop.hidden=true},true);
 // rows and the sample panel get 📁
 const _rowHTMLc=rowHTML;rowHTML=function(i){return _rowHTMLc(i).replace('<span class="id"',colBtn(i)+'<span class="id"')};
-const _selectC=select;select=function(i,from){_selectC(i,from);const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
+const _selectC=select;select=function(i,from){_selectC(i,from);
+ if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('kitaround'))xb.insertAdjacentHTML('afterend',`<button id="kitaround" title="start (or add to) the sketchpad's drum lane with this hit, then find the rest of a kit that sounds like it">🥁 build a kit around this</button>`)}const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
 // C adds what's playing to the collection you used last (or opens the menu)
+document.addEventListener('click',async e=>{if(!e.target.closest('#kitaround'))return;e.stopPropagation();const i=st.sel;if(i==null)return;
+ await drumAdd(i);const l=drumLane();if(l){SK.open=true;drumFind(l)}},true);
 document.addEventListener('keydown',e=>{if(e.key!=='c'&&e.key!=='C')return;if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)||!NP||NP.edit||NP.i==null||!SERVED)return;
  if(!COLLAST||!COLS.some(c=>c.name===COLLAST)){toast('use 📁 once to pick a collection; then C adds to it');return}const on=!colsOf(S[NP.i][F.path]).includes(COLLAST);colToggle(COLLAST,NP.i,on)});
 // the Favorites tab's 📁 view
@@ -371,10 +374,11 @@ function skBar(ctx,dest,l,bar,t,L,arr){if(l.type==='drums'){drumBar(ctx,dest,l,b
 // ---------- the drum lane: drum one-shots as pads in a step sequencer (16 steps a bar, 1 or 2 bars, velocity, swing)
 // It's one lane, so mute / solo / its fader and every export (bounce, stems, Live set) treat it like any other.
 const DSTEPS=32;  // steps stored per pad (2 bars); a 1-bar pattern uses the first 16
-function drumKind(i){const t=((S[i][F.sub]||'')+' '+(S[i][F.inst]||'')).toLowerCase();
- return /kick|bass ?drum/.test(t)?'kick':/snare|rim|clap/.test(t)?'snare':/hat|cymbal|ride/.test(t)?'hat':/shaker|tamb/.test(t)?'shaker':/tom/.test(t)?'tom':'perc'}
+// the same kinds as drumkit.py (single hits; layered ones go by their first drum)
+function drumKind(i){const t=(S[i][F.sub]||'').toLowerCase();
+ return /^kick/.test(t)?'kick':/^snare/.test(t)?'snare':/rim|clap/.test(t)?'clap':/hat/.test(t)?'hat':/ride|crash|cymbal/.test(t)?'cymbal':/shaker|tamb/.test(t)?'shaker':/tom/.test(t)?'tom':'perc'}
 function drumStarter(kind){const s=new Array(DSTEPS).fill(0),on=(ks,v=1)=>ks.forEach(k=>{s[k]=v;s[k+16]=v});
- if(kind==='kick'){on([0,10]);on([8],0.75)}else if(kind==='snare')on([4,12]);else if(kind==='hat'){for(let k=0;k<DSTEPS;k+=2)s[k]=k%4?0.5:0.8}
+ if(kind==='kick'){on([0,10]);on([8],0.75)}else if(kind==='snare')on([4,12]);else if(kind==='clap')on([4,12],0.8);else if(kind==='cymbal')s[0]=0.8;else if(kind==='hat'){for(let k=0;k<DSTEPS;k+=2)s[k]=k%4?0.5:0.8}
  else if(kind==='shaker'){for(let k=0;k<DSTEPS;k++)s[k]=k%2?0.3:0.5}else if(kind==='tom')on([14],0.7);else on([6],0.6);return s}
 function drumLane(make){let l=SK.lanes.find(x=>x.type==='drums');if(l||!make)return l;if(SK.lanes.length>=8)return null;
  l={type:'drums',pads:[],bars:1,swing:0,db:-4,mute:false,solo:false,state:'ok',buf:null};SK.lanes.push(l);return l}
@@ -399,18 +403,27 @@ function drumLaneHTML(l,k){const n=16*l.bars;
  <div class="lname"><div class="name"><span class="badge" style="background:${col('Percussion')}">${AB.Percussion}</span>Drums · ${l.pads.length} pad${l.pads.length===1?'':'s'}</div><div class="meta">click a step: on → soft → off</div></div>
  <div class="ctl"><select data-dbars="${k}" title="pattern length"><option value="1">1 bar</option><option value="2" ${l.bars===2?'selected':''}>2 bars</option></select>
   <label title="delays every other 16th: 0 = straight">swing <input type="range" min="0" max="0.6" step="0.05" value="${l.swing}" data-dswing="${k}" style="width:70px"></label>
-  <button class="tbtn" data-dstart="${k}" title="a starter pattern from the pad types (kick, snare, hats…)">✨ starter</button><button class="tbtn" data-dclear="${k}">clear</button></div>
+  <button class="tbtn" data-dstart="${k}" title="a starter pattern from the pad types (kick, snare, hats…)">✨ starter</button><button class="tbtn" data-dclear="${k}">clear</button>
+  <button class="tbtn${l.find?' on':''}" data-dfind="${k}" title="hits for the kinds this kit is missing, that sound like they were recorded with the pads you have">🔎 complete the kit</button></div>
  <div class="fader" title="drum lane volume · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
  <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn" data-skx="${k}" title="remove the drum lane">✕</button>
  <div class="dgrid" data-dgrid="${k}" style="--n:${n}">${l.pads.map((p,r)=>{const s=S[p.i]||[];return `<div class="drow${p.mute?' muted':''}">
   <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><span class="dlab" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')}">${esc(s[F.sub]||'hit')}</span>
   <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}" data-dstep="${k}:${r}:${j}" ${v?`style="opacity:${(0.35+0.65*v).toFixed(2)}"`:''}></button>`).join('')}</div>
-  <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}</div></div>`}
+  <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
+function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading)return '<div class="sub dfind">listening for hits that match this kit…</div>';if(f.error)return `<div class="sub dfind">${esc(f.error)}</div>`;
+ if(!f.missing.length)return '<div class="sub dfind">every kind of hit is covered: kick, snare, clap, hats, cymbals, shaker, tom, percussion</div>';
+ return `<div class="dfind"><div class="sub">Missing from this kit, picked to sound like the same recording (room, tape, brightness):</div>${f.missing.map(m=>`<div class="dfrow"><span class="dlab">${esc(m.label)}</span><div class="dfpicks">${m.picks.map(p=>{const i=byPath.get(p.path);if(i==null)return'';const s=S[i];
+  return `<span class="dfpick"><button class="tbtn" data-dfplay="${esc(p.path)}" title="hear it">▶</button><span class="sub" title="${esc(s[F.artist])} — ${esc(s[F.title])} · ${esc(p.sub)}">${esc(s[F.artist]).slice(0,18)}${p.same_song?' · same song':''}</span><button class="tbtn" data-dfadd="${i}" title="add it as a pad (with a starter part)">＋</button></span>`}).join('')}</div></div>`).join('')}</div>`}
+async function drumFind(l){l.find={loading:true};drawSK();try{const r=await api('api/drumkit',{paths:l.pads.map(p=>p.path)});l.find=r.error?{error:r.error}:r}catch(e){l.find={error:"couldn't search: "+e.message}}drawSK()}
 // the playing step lights up
 function drumHeads(){const now=AC.currentTime;SK.lanes.forEach((l,k)=>{if(l.type!=='drums')return;const g=document.querySelector(`[data-dgrid="${k}"]`);if(!g)return;
  const L=barLen(),v=(l.sched||[]).filter(x=>now>=x.t&&now<x.t+L).pop(),cur=SK.playing&&v?(v.bar%l.bars)*16+Math.floor((now-v.t)/(L/16)):-1;
  if(g._cur===cur)return;g._cur=cur;g.querySelectorAll('.dstep.now').forEach(b=>b.classList.remove('now'));if(cur>=0)g.querySelectorAll(`[data-dstep$=":${cur}"]`).forEach(b=>b.classList.add('now'))})}
-$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dstart],[data-dclear]');if(!t)return;e.stopPropagation();
+$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dstart],[data-dclear],[data-dfind],[data-dfplay],[data-dfadd]');if(!t)return;e.stopPropagation();
+ if(t.dataset.dfind!=null){const l=SK.lanes[+t.dataset.dfind];if(l.find&&!l.find.loading){l.find=null;drawSK();return}drumFind(l);return}
+ if(t.dataset.dfplay!=null){stopAll();const a=new Audio(url(t.dataset.dfplay));a.play();players.set('df',a);a.onended=()=>players.delete('df');return}
+ if(t.dataset.dfadd!=null){const l=drumLane();await drumAdd(+t.dataset.dfadd);if(l&&l.find)drumFind(l);return}
  if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];p.steps[j]=!v?1:v>0.7?0.55:0;
   t.classList.toggle('on',!!p.steps[j]);t.style.opacity=p.steps[j]?(0.35+0.65*p.steps[j]).toFixed(2):'';return}
  if(t.dataset.dpad){const [k,r]=t.dataset.dpad.split(':').map(Number),p=SK.lanes[k].pads[r];if(!p.buf)return;AC.resume();const s=AC.createBufferSource(),g=AC.createGain();s.buffer=p.buf;g.gain.value=0.8*(p.norm||1);s.connect(g);g.connect(AC.destination);s.start();return}

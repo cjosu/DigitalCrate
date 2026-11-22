@@ -514,6 +514,9 @@ class Handler(SimpleHTTPRequestHandler):
                 from .suggest import feedback
                 feedback(path, req.get("id"), req.get("move"), req.get("family"), req.get("arm"), req.get("material"),
                          req.get("action"))
+            elif self.path == "/api/drumkit":
+                from .drumkit import complete
+                return self._json(complete(req.get("paths") or [], int(req.get("per", 3)), req.get("kinds")))
             elif self.path.startswith("/api/collections/"):
                 from . import collections_ as CO
                 op = self.path.rsplit("/", 1)[1]
