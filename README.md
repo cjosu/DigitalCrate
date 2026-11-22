@@ -130,6 +130,10 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   `digitalcrate backup --restore FILE` puts one back. The Processing page shows when the last one ran.
 - **Added recently:** narrows any sort to the latest run, or to the last day or week. With *for you* it shows the
   best of what just came in.
+- **🧠 Taste:** how well the "for you" model knows you, measured honestly (hidden favourites against samples you
+  heard and didn't star; about 78% here, where sample quality alone gets 48%), and how that changes as you rate.
+  Also what it learns from, what it has learned in words ("warm analog synth pad", "a breathy whispered voice"…),
+  where it's wrong, and the samples whose ★ or ✕ would teach it the most.
 - **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards.
 - **🌌 Galaxy:** every sample on a map by sound; hover to hear, colour by taste.
 

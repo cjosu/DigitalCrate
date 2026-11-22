@@ -304,6 +304,12 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.split("?")[0] in ("/pairtest", "/drumlabel"):
             return self._file(Path(__file__).resolve().parent / "static" / (self.path.split("?")[0][1:] + ".html"),
                               "text/html", {"Cache-Control": "no-store"})
+        if self.path.split("?")[0] == "/taste":
+            return self._file(Path(__file__).resolve().parent / "static" / "taste.html", "text/html",
+                              {"Cache-Control": "no-store"})
+        if self.path.startswith("/api/taste/explain"):
+            from .taste_report import explain
+            return self._json(explain())
         if self.path.split("?")[0] == "/activity":
             return self._file(Path(__file__).resolve().parent / "static" / "activity.html", "text/html",
                               {"Cache-Control": "no-store"})

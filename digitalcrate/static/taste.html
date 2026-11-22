@@ -1,0 +1,107 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your taste</title>
+<style>
+:root{--bg:#0e1013;--panel:#15181d;--line:#242932;--ink:#d9dde3;--mute:#7d8592;--acc:#e0a458;--acc2:#7fb0c9;--bad:#d96c6c;--ok:#8fc98f}
+*{box-sizing:border-box}[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:20px 16px 80px}
+main{max-width:1100px;margin:auto}a{color:var(--acc2)}
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}h1{font-size:20px;margin:0}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:0 0 10px;font-weight:600}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}@media(max-width:860px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.sub{color:var(--mute);font-size:12px}
+.big{font-size:40px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}.big small{font-size:14px;color:var(--mute);font-weight:400;margin-left:6px}
+.cmp{display:grid;grid-template-columns:150px 1fr 48px;gap:6px 10px;align-items:center;margin:12px 0 4px;font-size:13px}
+.hb{height:10px;background:var(--line);border-radius:3px;position:relative;overflow:hidden}.hb i{position:absolute;inset:0 auto 0 0;background:var(--acc)}
+.hb .mid{position:absolute;left:0;top:-2px;bottom:-2px;width:1px;background:var(--mute)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.stat b{display:block;font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}.stat span{font-size:12px;color:var(--mute)}
+.words{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.w{display:grid;grid-template-columns:1fr 70px;gap:4px 8px;align-items:center;font-size:13px}
+.wb{height:8px;border-radius:2px;background:var(--line);position:relative}.wb i{position:absolute;top:0;bottom:0;border-radius:2px}
+.ex{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #1d2128;font-size:13px}
+.ex .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button{font:inherit;color:var(--ink);background:#1b1f25;border:1px solid var(--line);border-radius:6px;padding:3px 9px;cursor:pointer}
+button:hover{border-color:var(--mute)}button.on{background:var(--acc);color:#000;border-color:var(--acc)}button.no.on{background:var(--bad);border-color:var(--bad)}
+.play{width:28px;height:28px;border-radius:50%;padding:0}.pct{font-variant-numeric:tabular-nums;color:var(--mute);font-size:12px;margin-right:6px}
+svg text{fill:var(--mute);font-size:10px}
+details summary{cursor:pointer;color:var(--acc2)}
+</style></head><body><main>
+<header><h1>🧠 Your taste model</h1><span class="sub" id="upd"></span><a href="/" style="margin-left:auto">← back to the library</a></header>
+<div id="app"><div class="card sub">Loading…</div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let D=null,timer=null,audio=null,playing=null;const rated={};
+async function load(){try{D=await (await fetch('api/taste/explain')).json()}catch(e){$('app').innerHTML='<div class="card">The server isn\'t reachable.</div>';return}
+ render();clearTimeout(timer);if(D.accuracy&&D.accuracy.measuring)timer=setTimeout(load,4000)}
+const pct=x=>Math.round(x*100)+'%';
+function render(){if(!D.ready){$('app').innerHTML='<div class="card">No samples yet.</div>';return}
+ const A=D.accuracy||{},S=D.signals,L=D.learned||{},E=D.examples;
+ $('upd').textContent=A.measuring?'measuring accuracy…':(A.when?'accuracy measured '+new Date(A.when*1000).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'');
+ $('app').innerHTML=`
+ <div class="grid"><div>
+ <section class="card"><h2>How well it knows you</h2>
+  ${A.auc==null?`<div class="sub">${A.measuring?'Measuring… (about 15 seconds)':'Star about 10 samples and it can be measured.'}</div>`:`
+  <div class="big">${pct(A.auc)}<small>of the time it picks your favourite</small></div>
+  <div class="sub" style="margin-top:8px">The honest test: a fifth of your ★ favourites is hidden, the model learns from everything else, then it's shown pairs of one hidden favourite and one sample you listened to but didn't star. This is how often it ranks the favourite higher. A coin flip gets 50%.</div>
+  <div class="cmp"><span>your taste model</span><div class="hb"><i style="width:${A.auc*100}%"></i></div><b>${pct(A.auc)}</b>
+   <span>sample quality alone</span><div class="hb"><i style="width:${(A.quality_auc||0)*100}%;background:var(--acc2)"></i></div><span>${pct(A.quality_auc||0)}</span>
+   <span>coin flip</span><div class="hb"><i style="width:50%;background:var(--mute)"></i></div><span>50%</span></div>
+  <div class="sub">"Quality" is how clean and isolated a sample is. Near 50% means what you star isn't about cleanliness: it's about sound and mood, which is what the model learns.</div>`}
+  ${chart()}
+ </section>
+ <section class="card"><h2>What it learns from</h2>
+  <div class="stats"><div class="stat"><b>${S.favourites}</b><span>★ favourites (strongest signal)</span></div><div class="stat"><b>${S.dislikes}</b><span>✕ not for me (strong)</span></div>
+  <div class="stat"><b>${S.liked_by_listening}</b><span>liked by listening</span></div><div class="stat"><b>${S.skipped}</b><span>skipped</span></div><div class="stat"><b>${S.listens.toLocaleString()}</b><span>plays in total</span></div></div>
+  <details style="margin-top:10px"><summary>How plays count</summary><div class="sub" style="margin-top:6px">
+  A sample counts as <b>liked by listening</b> after 3 plays or 12 seconds of listening in total; as <b>skipped</b> when every play of a longer sample stopped in the first 15%. Plays fade over about two months, so recent listening counts most. Stars and ✕ always win over plays. "Played to the end" doesn't count by itself: a half-second chop always plays to the end.<br><br>
+  To fill in the gaps, the model also treats a few thousand random samples you've never heard as very weak "probably not" examples (5% of a skip each). Most of the library is like that, so the model learns what sets your picks apart.</div></details>
+ </section>
+ <section class="card"><h2>Where it's going wrong</h2>
+  ${wrongHTML(E)}
+ </section>
+ </div><div>
+ <section class="card"><h2>What it has learned, in words</h2>
+  <div class="sub" style="margin-bottom:10px">Descriptions scored by the model, through CLAP, which places words and sounds in the same space. Read it as a hint, not a measurement.</div>
+  <div class="words"><div><div class="sub" style="margin-bottom:4px">leans toward</div>${words(L.words_up||[],'var(--ok)')}</div><div><div class="sub" style="margin-bottom:4px">leans away from</div>${words(L.words_down||[],'var(--bad)')}</div></div>
+ </section>
+ <section class="card"><h2>By category and kind</h2>
+  <div class="sub" style="margin-bottom:8px">Where an average sample of each ranks (50 = the middle of your library).</div>
+  ${bars(D.by_category)}<div style="height:10px"></div>${bars(D.by_kind)}
+  ${(L.features||[]).length?`<details style="margin-top:10px"><summary>Between two samples that sound alike…</summary><div class="sub" style="margin:6px 0">…it prefers the one that's: ${L.features.filter(f=>f[1]>0.1).map(f=>`<b>${esc(f[0])}</b>`).join(', ')||'—'}; and not the one that's ${L.features.filter(f=>f[1]<-0.1).map(f=>`<b>${esc(f[0])}</b>`).join(', ')||'—'}.</div></details>`:''}
+ </section>
+ <section class="card"><h2>Teach it the most</h2>
+  <div class="sub" style="margin-bottom:6px">Samples it's least sure about. A ★ or ✕ on these changes its mind the most.</div>
+  ${E.unsure.map(r=>exRow(r,true)).join('')}
+ </section>
+ <section class="card"><h2>Its top picks you haven't heard</h2>${E.top.map(r=>exRow(r,true)).join('')}</section>
+ </div></div>
+ <div class="sub">Model: ${esc(D.model)}. It refits whenever you star, ✕ or play something.</div>`}
+function wrongHTML(E){const miss=E.missed.filter(r=>r.pct<70),bad=E.wrong.filter(r=>r.pct>50);
+ const lowest=E.missed.length?Math.min(...E.missed.map(r=>r.pct)):null;
+ let h='<div class="sub" style="margin-bottom:6px">The number on the right is where it ranks a sample in your library (100 = its top pick). If the samples below have something in common, that\'s what it hasn\'t understood yet.</div>';
+ h+=miss.length?`<div class="sub" style="margin:6px 0 2px">★ favourites it ranks low</div>${miss.map(r=>exRow(r)).join('')}`
+  :lowest!=null?`<div class="sub" style="margin:6px 0">Every ★ favourite ranks in its top ${100-lowest}% (the lowest is at ${lowest}): it isn't badly wrong about any of them.</div>`:'';
+ h+=bad.length?`<div class="sub" style="margin:10px 0 2px">✕ samples it still ranks above the middle</div>${bad.map(r=>exRow(r)).join('')}`
+  :'<div class="sub" style="margin:6px 0">Everything you marked ✕ ranks below the middle.</div>';
+ return h}
+function chart(){const H=D.history||[];if(H.length<2)return H.length?'<div class="sub" style="margin-top:10px">The trend appears here after the next change to your ratings.</div>':'';
+ const W=480,Ht=120,p=24,xs=H.map((h,i)=>p+i*(W-2*p)/(H.length-1)),y=v=>Ht-p-(v-0.4)/(0.6)*(Ht-2*p);
+ const path=H.map((h,i)=>`${i?'L':'M'}${xs[i].toFixed(1)},${y(h.auc).toFixed(1)}`).join('');
+ return `<div class="sub" style="margin:12px 0 2px">Over time (each point is a measurement after your ratings changed)</div><div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${Ht}" width="100%" style="max-width:${W}px">
+ <line x1="${p}" x2="${W-p}" y1="${y(.5)}" y2="${y(.5)}" stroke="#2c323c" stroke-dasharray="3 3"/><text x="${W-p+2}" y="${y(.5)+3}">50%</text>
+ <path d="${path}" fill="none" stroke="var(--acc)" stroke-width="2"/>${H.map((h,i)=>`<circle cx="${xs[i]}" cy="${y(h.auc)}" r="3" fill="var(--acc)"><title>${new Date(h.ts*1000).toLocaleString()} · ${pct(h.auc)} · ${h.n_fav} favourites</title></circle>`).join('')}
+ <text x="${xs[0]}" y="${Ht-6}">${H[0].n_fav} ★</text><text x="${xs[xs.length-1]-20}" y="${Ht-6}">${H[H.length-1].n_fav} ★</text></svg></div>`}
+function words(ws,c){const m=Math.max(...ws.map(w=>Math.abs(w[1])),1);return `<div class="w">${ws.map(w=>`<span>${esc(w[0])}</span><div class="wb"><i style="left:0;width:${Math.abs(w[1])/m*100}%;background:${c}"></i></div>`).join('')}</div>`}
+function bars(rows){return `<div class="w" style="grid-template-columns:150px 1fr 40px">${(rows||[]).map(r=>`<span>${esc(r[0])} <span class="sub">${r[2].toLocaleString()}</span></span><div class="hb"><i style="width:${r[1]}%;background:${r[1]>=50?'var(--ok)':'var(--acc2)'}"></i></div><span class="sub">${r[1]}</span>`).join('')}</div>`}
+function exRow(r,rate){const st=rated[r.path];return `<div class="ex"><button class="play" data-p="${esc(r.path)}">${playing===r.path?'■':'▶'}</button>
+ <div class="t"><b>${esc(r.sub||'')}</b> · ${esc(r.artist||'')} — ${esc(r.title||'')}${r.why?`<div class="sub">${esc(r.why)}</div>`:''}</div>
+ <div><span class="pct" title="its score, as a percentile of your library">${r.pct}</span>${rate?`<button data-fav="${esc(r.path)}" data-id="${esc(r.id)}" class="${st==='fav'?'on':''}" title="★ favourite">★</button> <button data-no="${esc(r.path)}" data-id="${esc(r.id)}" class="no ${st==='no'?'on':''}" title="not for me">✕</button>`:''}</div></div>`}
+document.addEventListener('click',async e=>{const p=e.target.closest('[data-p]');if(p){const path=p.dataset.p;if(audio){audio.pause();audio=null}
+  if(playing===path){playing=null;render();return}playing=path;audio=new Audio('/'+path.split('/').map(encodeURIComponent).join('/'));audio.play();
+  const t0=Date.now();audio.onended=audio.onpause=()=>{fetch('api/event',{method:'POST',body:JSON.stringify({path,type:'listen',value:Math.min(1,(Date.now()-t0)/1000/Math.max(.3,audio?audio.duration||1:1))})}).catch(()=>{});if(playing===path){playing=null;render()}};render();return}
+ const f=e.target.closest('[data-fav]');if(f){const on=rated[f.dataset.fav]!=='fav';rated[f.dataset.fav]=on?'fav':null;
+  await fetch('api/fav',{method:'POST',body:JSON.stringify({path:f.dataset.fav,id:f.dataset.id,on,label:'from the Taste page'})});render();return}
+ const n=e.target.closest('[data-no]');if(n){const on=rated[n.dataset.no]!=='no';rated[n.dataset.no]=on?'no':null;
+  await fetch('api/event',{method:'POST',body:JSON.stringify({path:n.dataset.no,id:n.dataset.id,type:'dislike',value:on?1:0})});render()}});
+load();
+</script></body></html>
