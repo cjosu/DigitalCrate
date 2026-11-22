@@ -101,7 +101,7 @@ def write_page(data):
 
 TEMPLATE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DigitalCrate</title>
+<title>DigitalCrate</title><link rel="icon" href="studio/icon.svg">
 <style>
 :root{--bg:#0e1013;--panel:#15181d;--line:#242932;--ink:#d9dde3;--mute:#7d8592;--acc:#e0a458;--acc2:#7fb0c9;
 --VOX:#e0a458;--VATM:#d1857a;--PAD:#7fb0c9;--KEYS:#9fc29a;--MEL:#c4a7e0;--TEX:#8f8f86;--BASS:#6c7fd1;--PERC:#d96c6c}

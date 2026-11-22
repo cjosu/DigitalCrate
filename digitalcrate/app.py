@@ -183,28 +183,7 @@ exec {python} -m digitalcrate open
 """
 
 
-def icon_png(path, size=1024):
-    """The app icon: a record in a crate, drawn here so the repo needs no binary art."""
-    from PIL import Image, ImageDraw
-    s = size
-    im = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(im)
-    m = int(s * 0.09)
-    d.rounded_rectangle([m, m, s - m, s - m], radius=int(s * 0.2), fill=(20, 23, 28))
-    cx, cy, r = s // 2, int(s * 0.44), int(s * 0.27)  # the record, half out of the crate
-    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(10, 11, 13))
-    for k in range(1, 6):
-        rr = r - k * int(r * 0.12)
-        d.ellipse([cx - rr, cy - rr, cx + rr, cy + rr], outline=(42, 46, 54), width=max(2, s // 300))
-    lr = int(r * 0.33)
-    d.ellipse([cx - lr, cy - lr, cx + lr, cy + lr], fill=(224, 164, 88))
-    hr = max(4, int(r * 0.05))
-    d.ellipse([cx - hr, cy - hr, cx + hr, cy + hr], fill=(20, 23, 28))
-    top = int(s * 0.56)  # the crate front, with slats
-    d.rounded_rectangle([int(s * 0.2), top, int(s * 0.8), int(s * 0.82)], radius=int(s * 0.03), fill=(224, 164, 88))
-    for y in (0.64, 0.73):
-        d.rectangle([int(s * 0.2), int(s * y), int(s * 0.8), int(s * y) + max(3, s // 110)], fill=(170, 118, 56))
-    im.save(path)
+ICON = Path(__file__).resolve().parent / "static" / "icon.png"  # rendered from static/icon.svg (1024 px)
 
 
 def make_app(dest=Path.home() / "Applications"):
@@ -227,8 +206,7 @@ def make_app(dest=Path.home() / "Applications"):
     with tempfile.TemporaryDirectory() as t:
         iconset = Path(t) / "AppIcon.iconset"
         iconset.mkdir()
-        big = Path(t) / "icon.png"
-        icon_png(big)
+        big = ICON
         for px in (16, 32, 128, 256, 512):
             for scale in (1, 2):
                 name = f"icon_{px}x{px}{'@2x' if scale == 2 else ''}.png"

@@ -365,8 +365,8 @@ class Handler(SimpleHTTPRequestHandler):
             name = Path(unquote(self.path.split("?")[0])).name
             f = Path(__file__).resolve().parent / "static" / name
             if f.exists():
-                return self._file(f, "text/css" if name.endswith(".css") else "application/javascript",
-                                  {"Cache-Control": "no-store"})
+                types = {".css": "text/css", ".js": "application/javascript", ".svg": "image/svg+xml", ".png": "image/png"}
+                return self._file(f, types.get(f.suffix, "application/octet-stream"), {"Cache-Control": "no-store"})
         if self.path.startswith("/api/taste"):
             from .taste import scores_payload
             recent = 3 if "recent=1" in self.path else None
