@@ -106,6 +106,10 @@ def item_labels(con, recent_hours=None, durs=None):
                 out[p] = (1 if net > 0 else 0, min(1.0, abs(net)))
             elif plays.get(p) == 1 and durs.get(p, 9) <= 3 and any(starred.get(s, set()) - {p} for s in sess_of.get(p, ())):
                 out[p] = (0, PASSED_OVER)
+    from .collections_ import members
+    for p in members(con):  # in a collection: liked, a bit less than a star; a ✕ still wins
+        if p not in fav and not (p in out and out[p][0] == 0 and out[p][1] >= 1.5):
+            out[p] = (1, max(1.2, out.get(p, (1, 0))[1]))
     for p in fav:
         out[p] = (1, 1.5)
     return out

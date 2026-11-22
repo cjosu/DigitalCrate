@@ -334,6 +334,7 @@ function edStop(){const P=ED&&ED.P;if(!P)return;clearTimeout(P.timer);const now=
  ED.P=null;setTimeout(()=>{typeof drawNP==='function'&&drawNP();typeof edButtons==='function'&&edButtons();edPaint()},0)}
 async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden){box.hidden=true;edStop();return}box.hidden=false;
  if(!SERVED){box.innerHTML='<div class="sub">Editing needs the local server: run <code>python -m digitalcrate serve</code> and open http://localhost:8765</div>';return}
+ const isDrum=S[i][F.cat]==='Percussion';  // drums get a drum panel, and tape pitch by default (like a sampler)
  box.innerHTML=`<canvas id="edc" style="width:100%;height:120px;background:#101317;border-radius:6px;cursor:crosshair"></canvas>
  <div class="sub" id="edsel">drag to select · double-click selects one syllable/note · loading…</div>
  <div class="edrow"><button id="edplay">▶ selection</button><label class="sub"><input type="checkbox" id="edloop" checked> loop</label>
@@ -342,9 +343,13 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  <span>Pitch</span><input type="range" id="edpi" min="-12" max="12" step="1" value="0"><span id="edpiv">0 st</span>
  <span>Loop crossfade</span><input type="range" id="edxf" min="0" max="1000" step="10" value="20"><span id="edxfv">20 ms</span>
  <span title="a gentle low-pass: lower is darker">Tone</span><input type="range" id="edtone" min="0" max="100" step="1" value="100"><span id="edtonev">open</span></div>
+ ${isDrum?`<div class="edgrid" id="eddrum" style="margin-top:-2px"><span title="sharper attack: a transient shaper">Punch</span><input type="range" id="edpunch" min="0" max="100" step="1" value="0"><span id="edpunchv">off</span>
+ <span title="shortens the tail with a natural fade after the hit">Decay</span><input type="range" id="eddecay" min="0" max="100" step="1" value="0"><span id="eddecayv">natural</span>
+ <span title="saturation: rounder and louder, then crunchy">Drive</span><input type="range" id="eddrive" min="0" max="100" step="1" value="0"><span id="eddrivev">off</span>
+ <span title="removes rumble and boom below this">Low cut</span><input type="range" id="edlow" min="0" max="400" step="5" value="0"><span id="edlowv">off</span></div>`:''}
  <div class="edgrid" style="margin-top:-2px"><span>Fade in</span><input type="range" id="edfi" min="0" max="2000" step="5" value="10"><span id="edfiv">10 ms</span>
  <span id="edfol">Fade out</span><input type="range" id="edfo" min="0" max="2000" step="5" value="40"><span id="edfov">40 ms</span></div>
- <div class="edrow sub"><label title="Rubber Band's formant mode: keeps a voice's character on big shifts, but scored lowest in your blind shootout"><input type="checkbox" id="edfm"> keep formants</label><label title="pitch and speed change together, like a turntable or tape (Re-Pitch: the best-rated engine for pitch in your blind test)"><input type="checkbox" id="edtape"> tape</label><label><input type="checkbox" id="edrev"> reverse</label>
+ <div class="edrow sub"><label title="Rubber Band's formant mode: keeps a voice's character on big shifts, but scored lowest in your blind shootout"><input type="checkbox" id="edfm"> keep formants</label><label title="pitch and speed change together, like a turntable or tape (Re-Pitch: the best-rated engine for pitch in your blind test)"><input type="checkbox" id="edtape"${isDrum?' checked':''}> tape</label><label><input type="checkbox" id="edrev"> reverse</label>
  <span title="Fade in: start of playback. Fade out: end of a one-shot, or when you stop. Loop crossfade: between loop passes.">ⓘ which fade applies when</span></div>
  <div class="edrow"><button id="edprev">▶ preview edit</button><button id="edreset" title="put every setting and the selection back to how they started">↺ reset</button><input id="edname" placeholder="name (optional)" style="flex:1;min-width:120px"><button id="edsave" class="pill">save as new</button></div>
  <div class="sub" id="edmsg">original is never modified · the new sample remembers where it came from</div>`;
@@ -367,7 +372,9 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  c.ondblclick=e=>{const t=tx(e),b=[0,...ED.onsets,ED.buf.duration];let k=b.findIndex(x=>x>t);if(k<1)k=1;ED.sel=[b[k-1],b[k]];edDraw();
  if(ED.P&&ED.P.loop)edChanged();else edPlaySel()};
  $('edplay').onclick=edToggleSel;$('edzoom').onclick=()=>{const d=ED.buf.duration;ED.view&&(ED.view[1]-ED.view[0])<d-1e-3?edZoom(null):edZoom('sel')};$('edall').onclick=()=>{ED.sel=[0,ED.buf.duration];edDraw();edChanged()};
- ['edst','edpi','edfm','edrev','edfi','edfo','edxf','edtape','edtone'].forEach(id=>$(id).addEventListener('change',edChanged));
+ ['edst','edpi','edfm','edrev','edfi','edfo','edxf','edtape','edtone','edpunch','eddecay','eddrive','edlow'].forEach(id=>$(id)&&$(id).addEventListener('change',edChanged));
+ if($('eddrum')){const lab={edpunch:v=>v?v+'%':'off',eddecay:v=>v?decayS(v).toFixed(2)+' s':'natural',eddrive:v=>v?v+'%':'off',edlow:v=>v?v+' Hz':'off'};
+  Object.entries(lab).forEach(([id,f])=>$(id).addEventListener('input',()=>$(id+'v').textContent=f(+$(id).value)))}
  $('edtone').addEventListener('input',()=>{const v=+$('edtone').value;$('edtonev').textContent=v>=100?'open':(toneHz(v)/1000).toFixed(1)+' kHz'});
  $('edtape').addEventListener('change',()=>{if($('edtape').checked)$('edfm').checked=false});$('edfm').addEventListener('change',()=>{if($('edfm').checked)$('edtape').checked=false});
  $('edloop').addEventListener('change',()=>{if(ED.P){ED.P.loop=$('edloop').checked;if(!ED.P.loop){const last=ED.P.segs[ED.P.segs.length-1];ED.P.end=last?last.t0+last.len:AC.currentTime}}});
@@ -392,9 +399,12 @@ function edButtons(){if(!$('edprev'))return;const m=ED&&ED.P&&ED.P.mode;
  $('edprev').textContent=m==='prev'?'■ stop preview':'▶ preview edit';$('edprev').classList.toggle('playing',m==='prev');
  $('edplay').textContent=m==='sel'?'■ stop':'▶ selection';$('edplay').classList.toggle('playing',m==='sel')}
 // Tone slider 0..100 -> low-pass cutoff, log scale 300 Hz..20 kHz (100 = off)
+// Decay slider 0..100 -> 0 (natural) or 0.03..2 s on a log scale
+const decayS=v=>v?0.03*Math.pow(2/0.03,(v-1)/99):0,decayVal=s=>s?Math.max(1,Math.round(1+99*Math.log(s/0.03)/Math.log(2/0.03))):0;
 const toneHz=v=>Math.round(300*Math.pow(20000/300,v/100)),toneVal=hz=>hz>=19000?100:Math.round(100*Math.log(hz/300)/Math.log(20000/300));
 function edParams(){return{start:+ED.sel[0].toFixed(3),end:+ED.sel[1].toFixed(3),stretch:+$('edst').value,semis:+$('edpi').value,
- formant:$('edfm').checked,tape:$('edtape').checked,tone:+$('edtone').value>=100?20000:toneHz(+$('edtone').value),reverse:$('edrev').checked,fade_in:+$('edfi').value,fade_out:+$('edfo').value,normalize:true,loop_xfade:$('edloop').checked?+$('edxf').value:0}}
+ formant:$('edfm').checked,tape:$('edtape').checked,tone:+$('edtone').value>=100?20000:toneHz(+$('edtone').value),reverse:$('edrev').checked,
+ ...($('eddrum')?{punch:+$('edpunch').value/100,decay:+decayS(+$('eddecay').value).toFixed(3),drive:+$('eddrive').value/100,lowcut:+$('edlow').value}:{}),fade_in:+$('edfi').value,fade_out:+$('edfo').value,normalize:true,loop_xfade:$('edloop').checked?+$('edxf').value:0}}
 // ---------- resizable sample panel (remembered per browser)
 (function(){const app=document.querySelector('.app'),sp=$('dsplit'),KEY='atlasDetailW',set=w=>{w=Math.max(340,Math.min(window.innerWidth-560,w));app.style.setProperty('--dw',w+'px');return w};
  try{const v=+localStorage.getItem(KEY);if(v)set(v)}catch(e){}
@@ -555,7 +565,7 @@ function drawRack(){const n=RACK.ids.length,pages=Math.max(1,Math.ceil(n/16)),p0
  <div id="rackgrid" class="rackgrid">${Array.from({length:16},(_,k)=>{const i=RACK.ids[p0+k];if(i==null)return`<div class="rpad empty"></div>`;const s=S[i];
   return `<div class="rpad" data-rp="${k}" title="${esc(s[F.sub])} · ${esc(s[F.artist])} — ${esc(s[F.title])} (${s[F.id]})"><div class="rtop"><b>${RKEYS[k].toUpperCase()}</b><button class="rx" data-rx="${p0+k}" title="drop this pad">✕</button></div>
    ${wave(s[F.env],120,22,'#7d8592')}<span>${esc(RSHORT[s[F.sub]]||s[F.sub])} <i>${p0+k+1}</i></span></div>`}).join('')}</div>
- <div class="edrow"><button id="rackexp" class="pill">⇩ Drum Rack to Ableton</button><button data-close>close</button></div>`)}
+ <div class="edrow"><button id="rackexp" class="pill">⇩ Drum Rack to Ableton</button>${SERVED?'<button id="racksk" title="a playable kit from this rack (up to two of each kind: kick, snare, hats…) as a drum lane in the sketchpad, with a starter pattern">🎛 to the sketchpad</button>':''}<button data-close>close</button></div>`)}
 $('modalBody').addEventListener('mousedown',e=>{if(!RACK.open)return;const x=e.target.closest('[data-rx]');if(x){e.stopPropagation();RACK.ids.splice(+x.dataset.rx,1);
   if(RACK.page*16>=RACK.ids.length&&RACK.page>0)RACK.page--;drawRack();return}
  const pg=e.target.closest('[data-rpage]');if(pg){RACK.page=+pg.dataset.rpage;drawRack();RACK.ids.slice(RACK.page*16,RACK.page*16+16).forEach(rackLoad);return}

@@ -87,6 +87,11 @@ tucks it away while it keeps playing: a small bar at the bottom says so, with **
 play are heard over the sketch (the now-playing bar says *with the sketch*), and Space stops the sample, then the
 sketch. Click a saved sketch's name to open it without playing.
 
+**Drum lane:** drum one-shots you add (＋, a kit, or **🎛 to the sketchpad** on a song's drum rack) become pads in one
+drum lane, a step sequencer: 16 steps a bar, 1 or 2 bars, click a step for on → soft → off, swing, per-pad mute, and
+a ✨ starter pattern from the pad types (kick, snare, hats…). It's one lane, so mute, solo, its fader, bounce, stems
+and the Live set treat it like any other.
+
 **Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,
 a texture, a vocal chop and a bass from other songs that fit it in key and sound. ★ and ✕ change what they pick,
 and **↻ new kits** deals a fresh set.
@@ -148,6 +153,16 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 
 - **Project mode:** set a key and tempo (or follow Ableton Live over **Link**); previews, the sketchpad and exports are
   shifted by the smallest interval that fits and stretched to the tempo.
+- **📁 Collections:** save samples for a project you have in mind. 📁 on any sample (or **C** while one plays, for
+  the collection you used last) adds it to one or more named collections; the Favorites tab's 📁 view plays,
+  sketches, exports or groups each into sets. Each is also a folder of links in `SampleLibrary/Collections/`, so you
+  can browse it in Ableton, and the taste model counts a collected sample as a like.
+- **🧩 Sets that fit together:** on the Favorites tab, your favorites grouped into sets of 3–6 where every pair fits
+  (key and the notes played, tempo for loops, role, sound: the "goes well with" score), each with what would complete
+  it from the rest of your library, a missing role first. Play a set together, open it in the sketchpad, or export it.
+- **Drum editing:** for percussion the editor adds **Punch** (a transient shaper), **Decay** (a shorter, natural tail),
+  **Drive** (saturation) and **Low cut**, and pitch defaults to tape, like a sampler; ✨ suggestions for drums are
+  punchier, tighter, crunchier, lo-fi or heavier.
 - **Editor:** non-destructive trims (drag either edge of a selection), stretch, pitch (clean or **tape**: pitch and
   speed together), **Tone** (darker), fades, reverse and **Tune to**:
   tape-style tuning toward a key with natural glide and drift. ↺ reset starts over.
@@ -288,6 +303,7 @@ SampleLibrary/
   Textures & Field/ · Bass & Sub/ · Percussion/      each split by subtype
   Edits/            your edits, bounces, chord pads and pad patterns (with provenance)
   Favorites/        hardlinks to starred samples
+  Collections/      a folder of hardlinks per collection
   _data/trash/      deleted samples, until `digitalcrate trash --empty`
   _By Key/ · _By Tempo/ · Kits/      hardlinked views (no extra disk space)
   _Reference/       reference-only artists (style queries, never exported)

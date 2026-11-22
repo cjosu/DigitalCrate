@@ -103,7 +103,9 @@ Object.values(tabs).forEach(id=>$(id).addEventListener('click',()=>Object.values
 const _render=render;
 render=function(){drawSBanner();if('CGY'.includes(st.tab)&&typeof drawCats==='function')drawCats();if(st.tab==='C'){paintWheel();drawBanner();return renderCrate()}if(st.tab==='G'){paintWheel();drawBanner();return renderGalaxy()}
  if(st.tab==='Y'){paintWheel();drawBanner();return renderScout()}
- _render();if(st.tab==='K')renderKitExtras();if(st.tab==='S'&&SOUND&&SOUND.at)annotateAt()};
+ if(st.tab==='F'&&FAVVIEW==='sets'&&SERVED){paintWheel();drawBanner();return renderSets()}
+ if(st.tab==='F'&&FAVVIEW==='cols'&&SERVED){paintWheel();drawBanner();return renderCollections()}
+ _render();if(st.tab==='K')renderKitExtras();if(st.tab==='F'&&SERVED)$('list').insertAdjacentHTML('afterbegin',favViewBar());if(st.tab==='S'&&SOUND&&SOUND.at)annotateAt()};
 function annotateAt(){document.querySelectorAll('#list .row[data-i]').forEach(r=>{const p=S[+r.dataset.i][F.path],a=SOUND.at.get(p);const m=r.querySelector('.meta');
  if(a&&m&&!m.dataset.at){m.dataset.at=1;m.insertAdjacentHTML('beforeend',` · <span style="color:var(--acc)">like the reference @ ${a}</span>`)}})}
 // rows get a ＋ (add to sketchpad)
@@ -142,6 +144,76 @@ function renderCrate(){const c=buildCrate(false),all=[...c.paths,...c.wild],ids=
  $('crnew').onclick=()=>{buildCrate(true);renderCrate()};
  $('list').querySelectorAll('[data-crmix]').forEach(b=>b.onclick=()=>{const v=b.dataset.crmix;let m=crateMix();
   m=v===''?[]:m.includes(v)?m.filter(x=>x!==v):[...m,v];try{localStorage.setItem('atlasCrateMix',JSON.stringify(m))}catch(e){}buildCrate(true);renderCrate()});mark()}
+
+// ---------- 🧩 sets: favourites that fit together (sets.py), on the Favorites tab
+let FAVVIEW=lsj('atlasFavView','list'),SETS=null;
+const favViewBar=()=>`<div class="chips" style="margin:0 16px 10px;display:flex;gap:6px;align-items:center"><span class="sub">View:</span><button data-favview="list" class="${FAVVIEW==='list'?'on':''}">★ list</button><button data-favview="sets" class="${FAVVIEW==='sets'?'on':''}" title="your favourites grouped into sets that fit together, and what would complete each">🧩 sets that fit together</button><button data-favview="cols" class="${FAVVIEW==='cols'?'on':''}" title="collections: samples saved for a project you have in mind">📁 collections</button></div>`;
+document.addEventListener('click',e=>{const b=e.target.closest('[data-favview]');if(!b)return;FAVVIEW=b.dataset.favview;try{localStorage.setItem('atlasFavView',JSON.stringify(FAVVIEW))}catch(err){}render()});
+async function renderSets(){const L=$('list');$('count').textContent='your favourites, grouped into sets that fit together';
+ const key=[...FAV.keys()].sort().join('|');
+ if(!SETS||SETS.key!==key){L.innerHTML=favViewBar()+'<div class="sub" style="margin:12px 16px">grouping your favourites…</div>';
+  try{SETS=await api('api/sets');SETS.key=key}catch(e){L.innerHTML=favViewBar()+`<div class="empty">couldn't group them: ${esc(e.message)}</div>`;return}}
+ if(st.tab!=='F'||FAVVIEW!=='sets')return;
+ const ids=ps=>ps.map(p=>byPath.get(p)).filter(i=>i!=null&&!GONE.has(i));
+ L.innerHTML=favViewBar()+`<div class="hint" style="margin:0 16px 12px">Every pair in a set fits: key (and the notes actually played), tempo for loops, role and sound, scored like "goes well with". ${SETS.loose?`${SETS.loose} favourites don't fit a set strongly yet; starring more fills them in.`:''}</div>`
+  +(SETS.sets.length?SETS.sets.map((s,k)=>{const m=ids(s.members),c=s.complete.filter(x=>byPath.has(x.path)&&!GONE.has(byPath.get(x.path)));
+   return `<div class="kit"><h3><span>Set ${k+1} · ${esc(s.name)} <span class="sub">${m.length} samples · every pair fits ≥ ${Math.round(s.weakest*100)}%</span></span><button data-setplay="${k}">▶ play together</button> <button data-setsk="${k}" title="open the set in the sketchpad">🎛 sketch</button> <button data-setexp="${k}">⇩ export</button></h3>
+   ${m.map(rowHTML).join('')}
+   ${c.length?`<div class="sub" style="margin:10px 0 4px">Would complete it, from the rest of your library (fits every sample above):</div>${c.map(x=>{const i=byPath.get(x.path);return rowHTML(i).replace('<div class="meta">',`<div class="meta">${x.new_role?'<span style="color:var(--acc)">adds a new role</span> · ':''}fit ${Math.round(x.fit*100)}% · `)}).join('')}`:''}</div>`}).join('')
+   :'<div class="empty">No sets yet: star a few more samples that sound good together.</div>');mark()}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-setplay],[data-setsk],[data-setexp]');if(!b||!SETS)return;e.stopPropagation();
+ const k=+(b.dataset.setplay??b.dataset.setsk??b.dataset.setexp),s=SETS.sets[k],m=s.members.map(p=>byPath.get(p)).filter(i=>i!=null&&!GONE.has(i));
+ if(b.dataset.setplay!=null){playTogether(m);return}
+ if(b.dataset.setsk!=null){skStop();SK.lanes=[];SK.drums=null;SK.name=`Set ${k+1} · ${s.name}`;for(const i of m)await skAdd(i);skPlay();return}
+ b.textContent='exporting…';try{const r=await api('api/export',{scope:'paths',paths:m.map(i=>S[i][F.path]),name:`Set ${k+1} ${s.name}`.replace(/[^\w #·-]/g,'')});b.textContent=`exported ${r.count} ✓`}catch(err){b.textContent='error'}},true);
+
+// ---------- 📁 collections: samples saved with a project in mind (collections_.py)
+let COLS=[],COLLAST=lsj('atlasColLast','');
+const colsOf=p=>COLS.filter(c=>c.set.has(p)).map(c=>c.name);
+async function colLoad(){if(!SERVED)return;try{COLS=(await api('api/collections')).map(c=>({...c,set:new Set(c.paths)}))}catch(e){COLS=[]}
+ document.querySelectorAll('[data-col]').forEach(b=>b.classList.toggle('on',colsOf(b.dataset.colp).length>0))}
+const colBtn=(i,big)=>SERVED?`<button class="${big?'':'xp '}${colsOf(S[i][F.path]).length?'on':''}" data-col="${i}" data-colp="${esc(S[i][F.path])}" title="add to a collection (a project you have in mind)">📁${big?' collection':''}</button>`:'';
+async function colToggle(name,i,on){const p=S[i][F.path];
+ await api(`api/collections/${on?'add':'remove'}`,{name,path:p,id:S[i][F.id]});COLLAST=name;try{localStorage.setItem('atlasColLast',JSON.stringify(name))}catch(e){}
+ await colLoad();toast(on?`added to “${name}”`:`removed from “${name}”`)}
+function colPop(b){const i=+b.dataset.col,p=S[i][F.path];let pop=$('colpop');if(!pop){pop=document.createElement('div');pop.id='colpop';pop.className='colpop';document.body.appendChild(pop)}
+ const names=COLS.map(c=>c.name).sort((a,c)=>(c===COLLAST)-(a===COLLAST)),mine=new Set(colsOf(p));
+ pop.innerHTML=`<div class="sub" style="margin-bottom:6px">Collections for this sample</div>${names.map(n=>`<label class="colrow"><input type="checkbox" data-colname="${esc(n)}" ${mine.has(n)?'checked':''}> ${esc(n)} <span class="sub">${COLS.find(c=>c.name===n).n}</span></label>`).join('')||'<div class="sub">none yet</div>'}
+ <div style="display:flex;gap:6px;margin-top:8px"><input id="colnew" placeholder="new collection, e.g. Night drive EP" style="flex:1;min-width:0"><button id="colmk">＋</button></div>`;
+ const r=b.getBoundingClientRect();pop.style.left=Math.max(8,Math.min(innerWidth-280,r.left-120))+'px';pop.style.top=(r.bottom+6+scrollY)+'px';pop.hidden=false;pop.dataset.i=i;
+ pop.onchange=async e=>{const n=e.target.dataset.colname;if(n!=null)await colToggle(n,i,e.target.checked)};
+ const mk=async()=>{const n=$('colnew').value.trim();if(!n)return;await colToggle(n,i,true);colPop(b)};$('colmk').onclick=mk;$('colnew').onkeydown=e=>{if(e.key==='Enter')mk()};setTimeout(()=>$('colnew').focus(),0)}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-col]');const pop=$('colpop');
+ if(b){e.stopPropagation();e.preventDefault();if(pop&&!pop.hidden&&+pop.dataset.i===+b.dataset.col){pop.hidden=true;return}colPop(b);return}
+ if(pop&&!pop.hidden&&!e.target.closest('#colpop'))pop.hidden=true},true);
+// rows and the sample panel get 📁
+const _rowHTMLc=rowHTML;rowHTML=function(i){return _rowHTMLc(i).replace('<span class="id"',colBtn(i)+'<span class="id"')};
+const _selectC=select;select=function(i,from){_selectC(i,from);const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
+// C adds what's playing to the collection you used last (or opens the menu)
+document.addEventListener('keydown',e=>{if(e.key!=='c'&&e.key!=='C')return;if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)||!NP||NP.edit||NP.i==null||!SERVED)return;
+ if(!COLLAST||!COLS.some(c=>c.name===COLLAST)){toast('use 📁 once to pick a collection; then C adds to it');return}const on=!colsOf(S[NP.i][F.path]).includes(COLLAST);colToggle(COLLAST,NP.i,on)});
+// the Favorites tab's 📁 view
+let COLSEL=lsj('atlasColSel','');
+async function renderCollections(){const L=$('list');await colLoad();if(st.tab!=='F'||FAVVIEW!=='cols')return;
+ if(!COLS.some(c=>c.name===COLSEL))COLSEL=(COLS[0]||{}).name||'';const c=COLS.find(x=>x.name===COLSEL);
+ $('count').textContent=`${COLS.length} collection${COLS.length===1?'':'s'}`+(SERVED?' · also in SampleLibrary/Collections':'');
+ const ids=c?c.paths.map(p=>byPath.get(p)).filter(i=>i!=null&&!GONE.has(i)):[];
+ L.innerHTML=favViewBar()+(COLS.length?`<div class="chips" style="margin:0 16px 12px;display:flex;gap:6px;flex-wrap:wrap">${COLS.map(x=>`<button data-colsel="${esc(x.name)}" class="${x.name===COLSEL?'on':''}">📁 ${esc(x.name)} <span class="sub">${x.n}</span></button>`).join('')}</div>`:'')
+  +(c?`<div class="kit"><h3><span>📁 ${esc(c.name)} <span class="sub">${ids.length} samples</span></span><button data-colplay>▶ play together</button> <button data-colsk title="open it in the sketchpad (drum hits go to the drum lane)">🎛 sketch</button> <button data-colexp>⇩ export</button> <button data-colsets title="its samples grouped into sets that fit together">🧩 sets</button> <button data-colren>rename</button> <button data-coldel title="removes the collection, not the samples">delete</button></h3>
+   <div id="colsets"></div>${ids.map(rowHTML).join('')||'<div class="empty">Empty: add samples with 📁</div>'}</div>`
+  :`<div class="empty">No collections yet. Click 📁 on any sample (or press C while one plays) to save it to a collection for a project you have in mind.</div>`);mark()}
+document.addEventListener('click',async e=>{const t=e.target.closest('[data-colsel],[data-colplay],[data-colsk],[data-colexp],[data-colsets],[data-colren],[data-coldel]');if(!t)return;e.stopPropagation();
+ if(t.dataset.colsel!=null){COLSEL=t.dataset.colsel;try{localStorage.setItem('atlasColSel',JSON.stringify(COLSEL))}catch(err){}renderCollections();return}
+ const c=COLS.find(x=>x.name===COLSEL);if(!c)return;const ids=c.paths.map(p=>byPath.get(p)).filter(i=>i!=null&&!GONE.has(i));
+ if(t.dataset.colplay!=null){playTogether(ids);return}
+ if(t.dataset.colsk!=null){skStop();SK.lanes=[];SK.name=c.name;for(const i of ids)await skAdd(i);skPlay();return}
+ if(t.dataset.colexp!=null){t.textContent='exporting…';try{const r=await api('api/export',{scope:'paths',paths:ids.map(i=>S[i][F.path]),name:c.name});t.textContent=`exported ${r.count} ✓`}catch(err){t.textContent='error'}return}
+ if(t.dataset.colsets!=null){const box=$('colsets');box.innerHTML='<div class="sub">grouping…</div>';const r=await api('api/sets?collection='+encodeURIComponent(c.name));
+  box.innerHTML=r.sets.length?r.sets.map((s,k)=>`<div class="sub" style="margin:6px 0 2px">🧩 set ${k+1} · ${esc(s.name)} · every pair fits ≥ ${Math.round(s.weakest*100)}% · ${s.members.length} samples</div>`).join('')+'<div class="sub" style="margin-bottom:8px">(the full sets view with play and sketch buttons is in 🧩 sets for favourites)</div>':`<div class="sub">${r.note||'no sets that fit tightly yet: add a few more samples'}</div>`;return}
+ if(t.dataset.colren!=null){const n=window.prompt?prompt('New name',c.name):null;if(!n||n===c.name)return;try{await api('api/collections/rename',{name:c.name,new:n});COLSEL=n;renderCollections()}catch(err){toast(err.message)}return}
+ if(t.dataset.coldel!=null){if(t.dataset.armed!=='1'){t.dataset.armed='1';t.textContent='delete? (samples stay)';setTimeout(()=>{t.dataset.armed='';t.textContent='delete'},3000);return}
+  await api('api/collections/delete',{name:c.name});COLSEL='';renderCollections()}},true);
+colLoad();
 
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;
@@ -257,13 +329,15 @@ const barLen=()=>240/(PROJ.bpm||120);
 // repeat on the clip's own length in whole bars, so it comes back as it ends (powers of two left every lane
 // silent together for bars at a time); a slightly longer clip's tail crossfades into the next pass
 const skEvery=dur=>Math.max(1,Math.min(16,Math.round(dur/barLen())));
-async function skAdd(i){if(!SERVED){toast('the sketchpad needs the local server');return}if(SK.lanes.length>=8){toast('the sketchpad holds 8 lanes');return}
+async function skAdd(i){if(!SERVED){toast('the sketchpad needs the local server');return}
+ if(S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop')return drumAdd(i);  // drum hits become pads in the drum lane
+ if(SK.lanes.length>=8){toast('the sketchpad holds 8 lanes');return}
  if(SK.lanes.some(l=>l.path===S[i][F.path])){toast('already in the sketch');return}
  const patch={};if(!PROJ.key&&S[i][F.cam])patch.key=keyFromCam(S[i][F.cam]);if(!PROJ.bpm)patch.bpm=S[i][F.bpm]||120;if(Object.keys(patch).length){Object.assign(PROJ,patch);try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
  const loop=S[i][F.kind]==='loop';
  const lane={i,path:S[i][F.path],db:0,mute:false,solo:false,every:loop?0:skEvery(S[i][F.dur]),offset:0,buf:null,state:'loading'};
  SK.lanes.push(lane);SK.open=true;drawSK();drawProj();await skLoad(lane);drawSK();toast(`added to the sketch (${SK.lanes.length})`)}
-async function skLoad(lane){lane.state='loading';lane.att=null;try{const ab=await (await fetch(conformURL(lane.path,lane.nat?'':PROJ.key,PROJ.bpm)+(lane.src?`&src=${lane.src}`:''))).arrayBuffer();lane.buf=await AC.decodeAudioData(ab);lane.norm=skNorm(lane.buf);
+async function skLoad(lane){if(lane.type==='drums'){await drumLoad(lane);return}lane.state='loading';lane.att=null;try{const ab=await (await fetch(conformURL(lane.path,lane.nat?'':PROJ.key,PROJ.bpm)+(lane.src?`&src=${lane.src}`:''))).arrayBuffer();lane.buf=await AC.decodeAudioData(ab);lane.norm=skNorm(lane.buf);
   if(S[lane.i]&&S[lane.i][F.kind]!=='loop'&&!lane.pulse)lane.pulse=await api('api/pulse?path='+encodeURIComponent(lane.path)).catch(()=>null);lane.state='ok'}catch(e){lane.state='error'}
  if(lane.db==null)lane.db=lane.vol!=null?Math.max(-24,Math.min(6,Math.round(20*Math.log10(Math.max(lane.vol,0.01)/0.8)*2)/2)):0}
 // relative volume: every lane is levelled to the same loudness when it loads, so 0 dB on every fader = equally loud;
@@ -292,8 +366,66 @@ function skVoice(ctx,dest,l,t,dur,arr,xf=0){const s=ctx.createBufferSource();s.b
  const fi=Math.min(Math.max(0.004,(l.fin||0)/1000),dur/2),fo=Math.min(Math.max(0.004,xf,(l.fout||0)/1000),dur/2);
  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+fi);g.gain.setValueAtTime(1,Math.max(t+fi,t+dur-fo));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,off,dur);
  if(ctx===AC){(l.on||(l.on=[])).push({t0:t,off,dur});if(l.on.length>8)l.on.shift()}  /* remembered for the playhead */if(arr){arr.push(s);s.onended=()=>{const k=arr.indexOf(s);if(k>=0)arr.splice(k,1)}}}
-function skBar(ctx,dest,l,bar,t,L,arr){if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
+function skBar(ctx,dest,l,bar,t,L,arr){if(l.type==='drums'){drumBar(ctx,dest,l,bar,t,L,arr);return}if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
  else{if(bar%l.every)return;const cut=R>l.every*L;skVoice(ctx,dest,l,t+l.offset*L/4,cut?l.every*L+0.15:R,arr,cut?0.15:0)}}  // a longer clip fades out under the next pass
+// ---------- the drum lane: drum one-shots as pads in a step sequencer (16 steps a bar, 1 or 2 bars, velocity, swing)
+// It's one lane, so mute / solo / its fader and every export (bounce, stems, Live set) treat it like any other.
+const DSTEPS=32;  // steps stored per pad (2 bars); a 1-bar pattern uses the first 16
+function drumKind(i){const t=((S[i][F.sub]||'')+' '+(S[i][F.inst]||'')).toLowerCase();
+ return /kick|bass ?drum/.test(t)?'kick':/snare|rim|clap/.test(t)?'snare':/hat|cymbal|ride/.test(t)?'hat':/shaker|tamb/.test(t)?'shaker':/tom/.test(t)?'tom':'perc'}
+function drumStarter(kind){const s=new Array(DSTEPS).fill(0),on=(ks,v=1)=>ks.forEach(k=>{s[k]=v;s[k+16]=v});
+ if(kind==='kick'){on([0,10]);on([8],0.75)}else if(kind==='snare')on([4,12]);else if(kind==='hat'){for(let k=0;k<DSTEPS;k+=2)s[k]=k%4?0.5:0.8}
+ else if(kind==='shaker'){for(let k=0;k<DSTEPS;k++)s[k]=k%2?0.3:0.5}else if(kind==='tom')on([14],0.7);else on([6],0.6);return s}
+function drumLane(make){let l=SK.lanes.find(x=>x.type==='drums');if(l||!make)return l;if(SK.lanes.length>=8)return null;
+ l={type:'drums',pads:[],bars:1,swing:0,db:-4,mute:false,solo:false,state:'ok',buf:null};SK.lanes.push(l);return l}
+async function drumPadLoad(p){if(p.buf)return;try{p.buf=await AC.decodeAudioData(await (await fetch(url(p.path))).arrayBuffer());p.norm=skNorm(p.buf)}catch(e){p.err=true}}
+async function drumLoad(l){l.state='loading';await Promise.all(l.pads.map(drumPadLoad));
+ l.buf=l.pads.map(p=>p.buf).filter(Boolean).sort((a,b)=>b.duration-a.duration)[0]||AC.createBuffer(1,1,44100);l.state='ok'}  // buf: so "is it loaded" checks pass
+async function drumAdd(i,{quiet=false,starter=true}={}){const l=drumLane(true);if(!l){toast('the sketchpad holds 8 lanes');return}
+ if(l.pads.some(p=>p.path===S[i][F.path])){if(!quiet)toast('already in the drum lane');return}if(l.pads.length>=16){toast('the drum lane holds 16 pads');return}
+ if(!PROJ.bpm){PROJ.bpm=S[i][F.bpm]||120;try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
+ const kind=drumKind(i),first=!l.pads.some(p=>drumKind(p.i)===kind);  // a starter pattern for the first pad of each kind
+ const pad={i,path:S[i][F.path],db:0,mute:false,steps:starter&&first?drumStarter(kind):new Array(DSTEPS).fill(0)};
+ l.pads.push(pad);SK.open=true;drawSK();drawProj();await drumLoad(l);drawSK();if(!quiet)toast(`pad ${l.pads.length} in the drum lane (${kind})`)}
+function drumBar(ctx,dest,l,bar,t,L,arr){const base=(bar%l.bars)*16,st=L/16,solo=l.pads.some(p=>p.solo);
+ if(ctx===AC){(l.sched||(l.sched=[])).push({t,bar});if(l.sched.length>8)l.sched.shift()}
+ l.pads.forEach(p=>{if(!p.buf||p.mute||(solo&&!p.solo))return;for(let s=0;s<16;s++){const v=p.steps[base+s];if(!v)continue;
+  const tt=t+s*st+(s%2?l.swing*st:0),src=ctx.createBufferSource(),g=ctx.createGain();src.buffer=p.buf;
+  g.gain.value=v*(p.norm||1)*Math.pow(10,(p.db||0)/20);src.connect(g);g.connect(dest);src.start(Math.max(tt,ctx.currentTime));
+  if(arr){arr.push(src);src.onended=()=>{const k=arr.indexOf(src);if(k>=0)arr.splice(k,1)}}}})}
+function drumLaneHTML(l,k){const n=16*l.bars;
+ return `<div class="lane dlane${l.mute?' muted':''}" data-ln="${k}">
+ <label class="onoff" title="turn the drum lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label>
+ <div class="lname"><div class="name"><span class="badge" style="background:${col('Percussion')}">${AB.Percussion}</span>Drums · ${l.pads.length} pad${l.pads.length===1?'':'s'}</div><div class="meta">click a step: on → soft → off</div></div>
+ <div class="ctl"><select data-dbars="${k}" title="pattern length"><option value="1">1 bar</option><option value="2" ${l.bars===2?'selected':''}>2 bars</option></select>
+  <label title="delays every other 16th: 0 = straight">swing <input type="range" min="0" max="0.6" step="0.05" value="${l.swing}" data-dswing="${k}" style="width:70px"></label>
+  <button class="tbtn" data-dstart="${k}" title="a starter pattern from the pad types (kick, snare, hats…)">✨ starter</button><button class="tbtn" data-dclear="${k}">clear</button></div>
+ <div class="fader" title="drum lane volume · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
+ <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn" data-skx="${k}" title="remove the drum lane">✕</button>
+ <div class="dgrid" data-dgrid="${k}" style="--n:${n}">${l.pads.map((p,r)=>{const s=S[p.i]||[];return `<div class="drow${p.mute?' muted':''}">
+  <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><span class="dlab" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')}">${esc(s[F.sub]||'hit')}</span>
+  <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}" data-dstep="${k}:${r}:${j}" ${v?`style="opacity:${(0.35+0.65*v).toFixed(2)}"`:''}></button>`).join('')}</div>
+  <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}</div></div>`}
+// the playing step lights up
+function drumHeads(){const now=AC.currentTime;SK.lanes.forEach((l,k)=>{if(l.type!=='drums')return;const g=document.querySelector(`[data-dgrid="${k}"]`);if(!g)return;
+ const L=barLen(),v=(l.sched||[]).filter(x=>now>=x.t&&now<x.t+L).pop(),cur=SK.playing&&v?(v.bar%l.bars)*16+Math.floor((now-v.t)/(L/16)):-1;
+ if(g._cur===cur)return;g._cur=cur;g.querySelectorAll('.dstep.now').forEach(b=>b.classList.remove('now'));if(cur>=0)g.querySelectorAll(`[data-dstep$=":${cur}"]`).forEach(b=>b.classList.add('now'))})}
+$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dstart],[data-dclear]');if(!t)return;e.stopPropagation();
+ if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];p.steps[j]=!v?1:v>0.7?0.55:0;
+  t.classList.toggle('on',!!p.steps[j]);t.style.opacity=p.steps[j]?(0.35+0.65*p.steps[j]).toFixed(2):'';return}
+ if(t.dataset.dpad){const [k,r]=t.dataset.dpad.split(':').map(Number),p=SK.lanes[k].pads[r];if(!p.buf)return;AC.resume();const s=AC.createBufferSource(),g=AC.createGain();s.buffer=p.buf;g.gain.value=0.8*(p.norm||1);s.connect(g);g.connect(AC.destination);s.start();return}
+ if(t.dataset.dmute){const [k,r]=t.dataset.dmute.split(':').map(Number),p=SK.lanes[k].pads[r];p.mute=!p.mute;drawSK();return}
+ if(t.dataset.dpx){const [k,r]=t.dataset.dpx.split(':').map(Number),l=SK.lanes[k];l.pads.splice(r,1);if(!l.pads.length)SK.lanes.splice(k,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
+ const l=SK.lanes[+(t.dataset.dstart??t.dataset.dclear)];
+ if(t.dataset.dclear!=null){l.pads.forEach(p=>p.steps.fill(0));drawSK();return}
+ const seen=new Set();l.pads.forEach(p=>{const kd=drumKind(p.i);p.steps=seen.has(kd)?new Array(DSTEPS).fill(0):drumStarter(kd);seen.add(kd)});drawSK()},true);
+$('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.dbars!=null){const l=SK.lanes[+t.dataset.dbars];l.bars=+t.value;
+  if(l.bars===2)l.pads.forEach(p=>{if(!p.steps.slice(16).some(Boolean))for(let j=0;j<16;j++)p.steps[16+j]=p.steps[j]});drawSK()}},true);  // 1 → 2 bars: the second bar starts as a copy
+document.addEventListener('click',async e=>{if(!e.target.closest('#racksk'))return;e.stopPropagation();
+ const per={},order=['kick','snare','hat','shaker','tom','perc'],ids=[];  // a playable kit: up to 2 of each kind, 12 pads at most
+ RACK.ids.forEach(i=>{const k=drumKind(i);(per[k]||(per[k]=[])).push(i)});order.forEach(k=>(per[k]||[]).slice(0,2).forEach(i=>ids.length<12&&ids.push(i)));const l=drumLane(true);if(!l){toast('the sketchpad holds 8 lanes');return}
+ for(const i of ids)await drumAdd(i,{quiet:true});toast(`${ids.length} pads in the drum lane · press ▶ in the sketchpad`)},true);
+$('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dswing!=null)SK.lanes[+t.dataset.dswing].swing=+t.value},true);
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
  stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)
 SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
@@ -301,7 +433,7 @@ SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destinat
 function skTick(){if(!SK.playing)return;const L=barLen(),ahead=1.2+Math.max(0,...SK.lanes.map(l=>l.buf&&l.every?Math.min(8,skAttack(l)):0));while(SK.start+SK.nextBar*L<AC.currentTime+ahead){const t=SK.start+SK.nextBar*L;SK.lanes.forEach(l=>{if(l.g)skBar(AC,l.g,l,SK.nextBar,t,L,SK.voices)});SK.nextBar++}SK.timer=setTimeout(skTick,90)}
 function skStop(){SK.playing=false;clearTimeout(SK.timer);const now=AC.currentTime;if(SK.master){SK.master.gain.setTargetAtTime(0,now,0.015);const m=SK.master;setTimeout(()=>{try{m.disconnect()}catch(e){}},150)}
  SK.voices.forEach(s=>{try{s.stop(now+0.08)}catch(e){}});SK.voices=[];SK.lanes.forEach(l=>l.on=[]);drawSK()}
-function skAnim(){skHeads();if(!SK.playing)return;const el=$('skpos');if(el){const L=barLen(),t=AC.currentTime-SK.start;el.textContent=t<0?'waiting for the bar…':`bar ${Math.floor(t/L)+1} · beat ${Math.floor(t%L/(L/4))+1}`}requestAnimationFrame(skAnim)}
+function skAnim(){skHeads();drumHeads();if(!SK.playing)return;const el=$('skpos');if(el){const L=barLen(),t=AC.currentTime-SK.start;el.textContent=t<0?'waiting for the bar…':`bar ${Math.floor(t/L)+1} · beat ${Math.floor(t%L/(L/4))+1}`}requestAnimationFrame(skAnim)}
 function skWave(c,buf,trim){if(!c||!buf)return;const dpr=devicePixelRatio||1,W=c.clientWidth*dpr,H=30*dpr;c.width=W;c.height=H;const g=c.getContext('2d'),d=buf.getChannelData(0),st2=Math.max(1,Math.floor(d.length/W));
  const [ta,tb]=trim||[0,1],xa=ta*W,xb=tb*W;
  for(let x=0;x<W;x++){let m=0;for(let k=x*st2;k<Math.min(d.length,(x+1)*st2);k+=4)m=Math.max(m,Math.abs(d[k]));g.fillStyle=x>=xa&&x<=xb?'#8cc0da':'#3a4048';g.fillRect(x,H/2-m*H/2,1,Math.max(1,m*H))}
@@ -363,7 +495,7 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
  <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skals" title="a Live set: one audio track per lane, a clip wherever it plays, at the sketch's tempo (muted lanes come in as muted tracks). Opens in Live.">⇩ Live set</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button></h3>
- ${SK.lanes.map((l,k)=>{const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
+ ${SK.lanes.map((l,k)=>{if(l.type==='drums')return drumLaneHTML(l,k);const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
   const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,
    loop||l.state!=='ok'?'':l.src?`tempo-matched to ${PROJ.bpm}`:pu?`pulse ≈ ${pu.bpm} bpm`:'no pulse'].filter(Boolean).join(' · ');
   const fit=!loop&&l.state==='ok'&&pu&&!l.src;
@@ -412,9 +544,9 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.dataset.skx!=null){SK.lanes.splice(+t.dataset.skx,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
  if(t.dataset.go!=null){select(+t.dataset.go,'list');return}
  if(t.id==='sksave'){const name=($('skname').value||'').trim()||`Sketch ${new Date().toLocaleString()}`;SK.name=name;
-  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
+  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>l.type==='drums'?{type:'drums',bars:l.bars,swing:l.swing,db:l.db||0,mute:l.mute,solo:l.solo,pads:l.pads.map(p=>({path:p.path,db:p.db||0,mute:!!p.mute,steps:p.steps}))}:({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
-  api('api/export',{scope:'paths',paths:SK.lanes.map(l=>l.path),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
+  api('api/export',{scope:'paths',paths:SK.lanes.flatMap(l=>l.type==='drums'?l.pads.map(p=>p.path):[l.path]),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
  if(t.id==='skstems'){skStems(+$('skbars').value);return}if(t.id==='skals'){skStems(+$('skbars').value,true);return}});
 // aligned stems: render every audible lane alone over the same N bars, so each file starts on bar 1 and they all line up
@@ -424,8 +556,8 @@ async function skStems(bars,als){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){
  // stems: only what you hear; a Live set: every lane, the silent ones as muted tracks you can bring back
  const lanes=als?SK.lanes:SK.lanes.filter(l=>!off(l));if(!lanes.length){toast('every lane is muted');return}toast(`rendering ${lanes.length} ${als?'tracks':'stems'}…`);
  const stems=[];for(const l of lanes){const ctx=new OfflineAudioContext(2,Math.ceil(bars*L*sr),sr),g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);
-  for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null);const s=S[l.i];
-  stems.push({label:`${AB[s[F.cat]]} ${s[F.artist]} - ${s[F.title]}`,wav:wavB64(await ctx.startRendering()),mute:off(l),category:s[F.cat],drums:s[F.cat]==='Percussion'})}
+  for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null);const s=l.type==='drums'?null:S[l.i];
+  stems.push({label:s?`${AB[s[F.cat]]} ${s[F.artist]} - ${s[F.title]}`:`DRUMS ${l.pads.length} pads`,wav:wavB64(await ctx.startRendering()),mute:off(l),category:s?s[F.cat]:'Percussion',drums:!s||s[F.cat]==='Percussion'})}
  try{const r=await api('api/stems',{name,key:PROJ.key,bpm:PROJ.bpm,stems,als:!!als,bars});
   toast(als?`Live set “${r.als.split('/').pop()}” written · opening it in Live`:`${r.files.length} stems → ${r.dest.split('/').slice(-2).join('/')} · set Live to ${PROJ.bpm} bpm, ⌘-drag them in to get one track each`)}catch(e){toast((als?'Live set':'stems')+' failed: '+e.message)}}
 $('sk').addEventListener('input',e=>{const t=e.target;
@@ -437,9 +569,9 @@ async function skBounce(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toa
  const L=barLen(),sr=44100,len=bars*L,tail=SK.lanes.some(l=>l.every)?Math.min(4,Math.max(...SK.lanes.map(l=>l.buf.duration))):0;
  const ctx=new OfflineAudioContext(2,Math.ceil((len)*sr),sr),solo=SK.lanes.some(l=>l.solo);
  SK.lanes.forEach(l=>{if(l.mute||(solo&&!l.solo))return;const g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null)});
- toast('bouncing…');const buf=await ctx.startRendering();const first=SK.lanes[0];
+ toast('bouncing…');const buf=await ctx.startRendering();const first=SK.lanes.find(l=>l.path)||{path:(SK.lanes[0].pads[0]||{}).path};
  try{const r=await api('api/bounce',{parent:first.path,wav:wavB64(buf),kind:'loop',bpm:PROJ.bpm,bars,key:PROJ.key,prefix:'Sketch',name:($('skname').value||'').trim(),
-   tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null}))}});
+   tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>l.type==='drums'?{type:'drums',bars:l.bars,swing:l.swing,db:l.db||0,mute:l.mute,solo:l.solo,pads:l.pads.map(p=>({path:p.path,db:p.db||0,mute:!!p.mute,steps:p.steps}))}:({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null}))}});
   const j=addRow(first.i,r.row);toast('bounced → new sample (★ favourited)');select(j,'go')}catch(e){toast('bounce failed: '+e.message)}}
 function addRow(i,n){const row=S[i].slice();Object.assign(row,{[F.id]:n.id,[F.path]:n.path,[F.cat]:n.category,[F.sub]:n.subtype,[F.kind]:n.kind,[F.cam]:n.cam,[F.key]:n.key,[F.bpm]:n.bpm,[F.dur]:n.dur,
  [F.env]:n.env,[F.note]:n.note,[F.bars]:n.bars,[F.start]:n.start,[F.parent]:n.parent,[F.root]:n.root,[F.ops]:n.ops});
@@ -458,7 +590,7 @@ async function renderKitExtras(){const L=$('list');
  L.querySelectorAll('[data-skload]').forEach(b=>b.onclick=e=>{e.preventDefault();const x=sk.find(z=>z.name===b.dataset.skload);skOpen(x.name,JSON.parse(x.state),false)});
  L.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=async()=>{await api('api/sketch/delete',{name:b.dataset.skdel});render()})}
 async function skOpen(name,s,play=true){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
- SK.name=name;SK.lanes=s.lanes.map(l=>({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.i!=null);
+ SK.name=name;SK.lanes=s.lanes.map(l=>l.type==='drums'?{...l,state:'loading',buf:null,pads:l.pads.map(p=>({...p,i:byPath.get(p.path),buf:null})).filter(p=>p.i!=null)}:({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
  const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();if(play)skPlay()}
 document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kitrack]');if(kr){e.stopPropagation();const k=D.kits[+kr.dataset.kitrack];kr.textContent='building…';
   try{const r=await api('api/export',{scope:'paths',paths:kitMembers(k).map(i=>S[i][F.path]),name:k.name,rack:true,reveal:true});kr.textContent=`rack ✓ (${r.count})`}catch(err){kr.textContent='error'}return}
@@ -671,7 +803,8 @@ async function sgRun(i){const s=S[i];$('sgbtn').disabled=true;$('sglist').innerH
   <div class="sgwhy" data-sgwhy="${k}" hidden style="grid-column:1/-1">${SGREASONS.map(w=>`<button data-sgreason="${k}" data-r="${w}">${w}</button>`).join(' ')}<span class="sub"> why? (optional)</span></div></div>`).join('');
  const L=r.learning||{};$('sgmsg').textContent+=L.ratings?` · learning from ${L.ratings} rating${L.ratings>1?'s':''}`+(L.model_on?(L.model_auc!=null?` (its edit model predicts your 👍/👎 ${Math.round(L.model_auc*100)}% of the time)`:' (edit model on)'):''):' · rate them 👍/👎 to teach it'}
 async function sgApply(x){const p=x.params,set=(id,v)=>{const el=$(id);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v;el.dispatchEvent(new Event('input'))};
- set('edst',p.stretch||1);set('edpi',p.semis||0);set('edfm',false);set('edtape',!!p.tape);set('edrev',!!p.reverse);set('edtone',toneVal(p.tone||20000));
+ set('edst',p.stretch||1);set('edpi',p.semis||0);set('edfm',false);set('edtape',!!p.tape||(!!$('eddrum')&&!p.semis));
+ if($('eddrum')){set('edpunch',Math.round((p.punch||0)*100));set('eddecay',decayVal(p.decay||0));set('eddrive',Math.round((p.drive||0)*100));set('edlow',p.lowcut||0)}set('edrev',!!p.reverse);set('edtone',toneVal(p.tone||20000));
  if($('tnkey')){const k=p.tune_key||'';if(k&&![...$('tnkey').options].some(o=>o.value===k))$('tnkey').insertAdjacentHTML('beforeend',`<option value="${esc(k)}">${esc(k)}</option>`);
   $('tnkey').value=k;set('tnstr',p.tune_strength??0.8);set('tnspd',p.tune_speed??60);set('tndet',0);set('tndri',0)}
  if($('fxp')){const pl=(p.plugins||[])[0];if(($('fxp').value||'')!==(pl?pl.path:'')){$('fxp').value=pl?pl.path:'';$('fxp').dispatchEvent(new Event('change'))}
@@ -781,7 +914,7 @@ $('expbtn').onclick=()=>{if(!SERVED){toast('needs the local server');return}
 // ================= stop everything =================
 $('stop').onclick=()=>{stopAll();skStop();padsStopLoop()};
 
-window.CRATE={setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ};  // hooks for tools/screenshots.py and the console
+window.CRATE={setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd};  // hooks for tools/screenshots.py and the console
 drawProj();if(PROJ.link)linkPoll();render();
 })();
 

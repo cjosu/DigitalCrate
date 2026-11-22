@@ -352,6 +352,14 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.split("?")[0] == "/taste":
             return self._file(Path(__file__).resolve().parent / "static" / "taste.html", "text/html",
                               {"Cache-Control": "no-store"})
+        if self.path.split("?")[0] == "/api/sets":
+            from urllib.parse import parse_qs, urlparse
+            from .sets import sets
+            q = parse_qs(urlparse(self.path).query)
+            return self._json(sets(collection=(q.get("collection") or [None])[0]))
+        if self.path == "/api/collections":
+            from .collections_ import listing
+            return self._json(listing())
         if self.path.startswith("/api/taste/explain"):
             from .taste_report import explain
             return self._json(explain())
@@ -506,6 +514,20 @@ class Handler(SimpleHTTPRequestHandler):
                 from .suggest import feedback
                 feedback(path, req.get("id"), req.get("move"), req.get("family"), req.get("arm"), req.get("material"),
                          req.get("action"))
+            elif self.path.startswith("/api/collections/"):
+                from . import collections_ as CO
+                op = self.path.rsplit("/", 1)[1]
+                if op == "add":
+                    return self._json(CO.add(req["name"], path, req.get("id")))
+                if op == "remove":
+                    return self._json(CO.remove(req["name"], path))
+                if op == "create":
+                    return self._json(CO.create(req["name"]))
+                if op == "delete":
+                    return self._json(CO.delete(req["name"]))
+                if op == "rename":
+                    return self._json(CO.rename(req["name"], req["new"]))
+                return self._json({"error": "unknown"}, 404)
             elif self.path in ("/api/trash/delete", "/api/trash/restore"):
                 from . import trash
                 ids = [str(x) for x in req.get("ids", [])][:2000]

@@ -17,7 +17,7 @@ from .db import connect
 
 TRASH = C.DATA_DIR / "trash"
 # tables holding per-sample rows, and the column that points at the sample
-SIDE = [("favorites", "path"), ("variants", "sample_id"), ("overrides", "sample_id"), ("words", "sample_id"),
+SIDE = [("favorites", "path"), ("collection_items", "path"), ("variants", "sample_id"), ("overrides", "sample_id"), ("words", "sample_id"),
         ("drum_labels", "sample_id"), ("embeddings", "path")]
 
 
@@ -61,6 +61,9 @@ def delete(ids):
         files = [f for f in files if _move(f, True)]
         if rows.get("favorites"):
             _fav_target(s["path"]).unlink(missing_ok=True)
+        from .collections_ import _link
+        for c in rows.get("collection_items", []):  # its links in Collections/ (a hardlink would keep it audible there)
+            _link(c["collection"], s["path"]).unlink(missing_ok=True)
         con.execute("DELETE FROM samples WHERE id=?", (sid,))
         con.execute("INSERT OR REPLACE INTO trash VALUES (?,?,?,?,?,?)",
                     (sid, s["path"], s["track_id"], json.dumps(rows, default=_blob), json.dumps(files), time.time()))
@@ -100,6 +103,9 @@ def restore(ids):
         con.commit()
         for fav in rows.get("favorites", []):  # re-make the Favorites/ link
             set_fav(fav["path"], True, fav.get("sample_id"), fav.get("label"))
+        from .collections_ import add as collect
+        for c in rows.get("collection_items", []):  # and the Collections/ links
+            collect(c["collection"], c["path"], c.get("sample_id"))
         con.execute("UPDATE events SET value=0 WHERE sample_id=? AND type='delete'", (sid,))
         con.commit()
         back.append(sid)

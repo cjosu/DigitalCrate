@@ -109,9 +109,15 @@ def moves(material, key=None, project_key=None, k=None, rng=None, per=2):
             hz = tone(1800, 6000); add("tone", "tone", f"darker (Tone {kh(hz)})", dict(tone=hz))
             st = slow(1.25, 2.2); add("slow", "slow", f"slower ×{st}, same pitch", dict(stretch=st))
             add("reverse", "reverse", "reversed", dict(reverse=True))
-        else:  # percussion
-            n = pick([-4, -3, -2, -1, 1, 2, 3]); add("tape", "pitch", f"tape {'up' if n > 0 else 'down'} {abs(n)}", dict(tape=True, semis=n))
-            hz = tone(1800, 6000); add("tone", "tone", f"darker (Tone {kh(hz)})", dict(tone=hz))
+        else:  # percussion: what you'd do on a drum channel
+            n = pick([-4, -3, -2, -1, 1, 2, 3]); add("tape", "pitch", f"tuned {'up' if n > 0 else 'down'} {abs(n)} (tape)", dict(tape=True, semis=n))
+            x = round(U(0.35, 0.85) * k.get("punch", 1), 2); add("punch", "punch", f"punchier (Punch {x:.0%})", dict(punch=min(1, x)))
+            x = round(U(0.07, 0.35) / k.get("decay", 1), 2); add("decay", "decay", f"shorter, tighter (Decay {x} s)", dict(decay=x))
+            x = round(U(0.25, 0.7) * k.get("drive", 1), 2); add("drive", "drive", f"crunchier (Drive {x:.0%})", dict(drive=min(1, x)))
+            hz, x, lc = tone(2500, 4500), round(U(0.15, 0.35), 2), int(U(70, 160))
+            add("lofi", "tone", f"lo-fi (Tone {kh(hz)}, Drive {x:.0%}, Low cut {lc} Hz)", dict(tone=hz, drive=x, lowcut=lc))
+            n = pick([-2, -3]); x = round(U(0.3, 0.6), 2)
+            add("heavy", "pitch", f"heavier (tape down {abs(n)}, Punch {x:.0%})", dict(tape=True, semis=n, punch=x))
             add("reverse", "reverse", "reversed", dict(reverse=True))
     if material == "vocal":
         if key:
@@ -132,7 +138,7 @@ def moves(material, key=None, project_key=None, k=None, rng=None, per=2):
 
 PAIRS = {"vocal": [("lift", "space"), ("tune", "space"), ("slow", "space"), ("speed", "tone")],
          "sustained": [("octave", "space"), ("slow", "tone"), ("octave", "tone"), ("reverse", "space")],
-         "melodic": [("transpose", "space"), ("slow", "tone")], "perc": [("pitch", "tone")]}
+         "melodic": [("transpose", "space"), ("slow", "tone")], "perc": [("punch", "decay"), ("pitch", "decay"), ("drive", "decay")]}
 
 
 # ---------------------------------------------------------------- the critic
@@ -182,7 +188,8 @@ class Critic:
 # ---------------------------------------------------------------- your ratings of edits
 
 REASONS = ("too much", "too subtle", "sounds processed", "wrong mood")
-FAMILIES = ("lift", "transpose", "pitch", "octave", "tune", "space", "slow", "speed", "tone", "reverse", "project")
+FAMILIES = ("lift", "transpose", "pitch", "octave", "tune", "space", "slow", "speed", "tone", "reverse", "project",
+            "punch", "decay", "drive")
 MATERIALS = ("vocal", "sustained", "melodic", "perc")
 _SHOWN = {}  # sample path -> the move types shown in its last two runs (the novelty penalty)
 
@@ -217,6 +224,9 @@ def param_families(p):
         f.add("reverse")
     if p.get("tune_key"):
         f.add("tune")
+    for x in ("punch", "decay", "drive"):
+        if p.get(x):
+            f.add(x)
     return f
 
 
@@ -226,7 +236,8 @@ def _param_feats(p):
     mixes = [v for pl in (p.get("plugins") or []) for k, v in (pl.get("params") or {}).items() if k == "mix"]
     return [abs(sm) / 12, float(sm > 0), float(bool(p.get("tape"))), np.log(p.get("stretch") or 1),
             np.log(20000 / min(20000, p.get("tone") or 20000)) / np.log(66), float(bool(p.get("reverse"))),
-            float(bool(p.get("tune_key"))), (mixes[0] / 100 if mixes and mixes[0] > 1 else (mixes[0] if mixes else 0))]
+            float(bool(p.get("tune_key"))), (mixes[0] / 100 if mixes and mixes[0] > 1 else (mixes[0] if mixes else 0)),
+            p.get("punch") or 0, min(1, (p.get("decay") or 0) / 2), p.get("drive") or 0, (p.get("lowcut") or 0) / 400]
 
 
 def rate(rel, rating, reason=None, params=None, move=None, family=None, material=None, arm=None, source="suggestion"):

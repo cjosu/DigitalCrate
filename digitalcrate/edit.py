@@ -44,6 +44,9 @@ def clean_params(p):
                 formant=bool(p.get("formant")), reverse=bool(p.get("reverse")),
                 tape=bool(p.get("tape")),  # pitch and speed together (Re-Pitch: best on voices in the blind test)
                 tone=min(20000.0, max(200.0, float(p.get("tone") or 20000))),  # low-pass cutoff, Hz (20000 = off)
+                # drums (drum_fx): punch 0..1 (transient boost), decay s (0 = natural), drive 0..1, lowcut Hz (0 = off)
+                punch=min(1.0, max(0.0, float(p.get("punch") or 0))), decay=min(4.0, max(0.0, float(p.get("decay") or 0))),
+                drive=min(1.0, max(0.0, float(p.get("drive") or 0))), lowcut=min(1000.0, max(0.0, float(p.get("lowcut") or 0))),
                 fade_in=float(p.get("fade_in") or 5) / 1000, fade_out=float(p.get("fade_out") or 30) / 1000,
                 normalize=bool(p.get("normalize", True)), loop_xfade=float(p.get("loop_xfade") or 0) / 1000,
                 tune_key=(p.get("tune_key") or None), tune_strength=float(p.get("tune_strength") if p.get("tune_strength") is not None else 0.8),
@@ -53,6 +56,39 @@ def clean_params(p):
                 plugins=[dict(path=str(x["path"]), params=dict(x.get("params") or {})) for x in (p.get("plugins") or [])
                          if x.get("path")],
                 tail=min(20.0, float(p.get("tail") or 0)))
+
+
+def _smooth(x, ms):
+    """One-pole smoothing with a time constant in ms (forward only, so attacks stay sharp)."""
+    from scipy.signal import lfilter
+    a = np.exp(-1.0 / max(1.0, ms / 1000 * SR))
+    return lfilter([1 - a], [1, -a], x)
+
+
+def drum_fx(y, p):
+    """Percussion shaping, in the order a drum channel would have it: low cut, punch, decay, drive."""
+    y = y.astype(np.float32)
+    if p["lowcut"] >= 20:  # 24 dB/oct: rumble and boom out, the hit stays
+        from pedalboard import HighpassFilter, Pedalboard
+        y = Pedalboard([HighpassFilter(cutoff_frequency_hz=p["lowcut"]), HighpassFilter(cutoff_frequency_hz=p["lowcut"])])(y, SR)
+    env = np.abs(y).max(0)
+    if p["punch"] > 0:  # transient shaper: where a fast envelope jumps above a slow one, turn it up
+        fast, slow = _smooth(env, 1.0), _smooth(env, 30.0)
+        boost = np.clip((fast - slow) / (slow + 1e-4), 0, 3)
+        gain = _smooth(1 + 1.5 * p["punch"] * boost, 2.0)
+        y = y * gain[None].astype(np.float32)
+        env = np.abs(y).max(0)
+    if p["decay"] > 0:  # a natural fade after the hit: -40 dB at `decay` seconds, then trimmed
+        pk = int(np.argmax(_smooth(env, 2.0)))
+        t = np.arange(y.shape[1] - pk) / SR
+        g = np.ones(y.shape[1], np.float32)
+        g[pk:] = np.exp(-t / (p["decay"] / 4.6))
+        y = y * g[None]
+        y = y[:, : min(y.shape[1], pk + int(p["decay"] * 1.5 * SR))]
+    if p["drive"] > 0:  # saturation: rounder and louder, then crunchy
+        k = 1 + 9 * p["drive"]
+        y = np.tanh(k * y) / np.tanh(k)
+    return y.astype(np.float32)
 
 
 def render(rel, p):
@@ -78,6 +114,8 @@ def render(rel, p):
         y = tune(y, p.get("tune_key") or "C", strength=p["tune_strength"] if p.get("tune_key") else 0,
                  speed_ms=p["tune_speed"], detune_cents=p["tune_detune"], drift_cents=p["tune_drift"],
                  engine=p["tune_engine"])
+    if p["punch"] or p["decay"] or p["drive"] or p["lowcut"]:
+        y = drum_fx(y, p)
     if p["tone"] < 19000:  # darker: a gentle 12 dB/oct low-pass
         from pedalboard import LowpassFilter, Pedalboard
         y = Pedalboard([LowpassFilter(cutoff_frequency_hz=p["tone"]), LowpassFilter(cutoff_frequency_hz=p["tone"] * 1.4)])(
