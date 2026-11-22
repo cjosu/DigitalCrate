@@ -45,6 +45,8 @@ def main():
     ly.add_argument("--limit", type=int)
     rl = sub.add_parser("reloop", help="re-cut old loops onto Beat This downbeats, in place (dry run without --fix)")
     rl.add_argument("--fix", action="store_true"); rl.add_argument("--limit", type=int)
+    tr = sub.add_parser("trash", help="deleted samples: how many and how much space; --empty deletes them for good")
+    tr.add_argument("--empty", action="store_true")
     cr = sub.add_parser("credits", help="check unmined songs' sample credits on MusicBrainz (sample-based ones are skipped)")
     cr.add_argument("--limit", type=int)
     sy = sub.add_parser("styles", help="tag every song with Discogs styles from its audio (genre gaps, related music)")
@@ -190,6 +192,12 @@ def main():
         from .reloop import run as reloop
         reloop(a.fix, a.limit)
         print("TASK DONE", flush=True)
+    elif a.cmd == "trash":
+        from . import trash
+        if a.empty:
+            r = trash.empty(); print(f"emptied: {r['n']} samples, {r['mb']} MB freed (no undo for these now)")
+        else:
+            r = trash.summary(); print(f"{r['n']} deleted samples in the trash ({r['mb']} MB). digitalcrate trash --empty frees the space.")
     elif a.cmd == "credits":
         from .mbz import run as credits
         credits(a.limit)

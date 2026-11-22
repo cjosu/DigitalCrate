@@ -446,6 +446,10 @@ class Handler(SimpleHTTPRequestHandler):
                 log_event(row["path"], "star", 1, row["id"])  # you made it: counts as a like
                 set_fav(row["path"], True, row["id"], f"edit of {req.get('label', path)}")
                 return self._json({"row": _with_partners(row)})
+            elif self.path in ("/api/trash/delete", "/api/trash/restore"):
+                from . import trash
+                ids = [str(x) for x in req.get("ids", [])][:2000]
+                return self._json(trash.delete(ids) if self.path.endswith("delete") else trash.restore(ids))
             elif self.path == "/api/recat":
                 from .recat import recategorise
                 res = recategorise(req["id"], req["category"], req["subtype"])

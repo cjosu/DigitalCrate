@@ -273,6 +273,25 @@ async function loadTaste(){if(!SERVED)return;try{const a=await (await fetch('api
  const first=!TASTE.loaded;
  TASTE={loaded:true,score:a.score||{},discover:a.discover||{},vibe:b.score||{},disliked:new Set([...(a.disliked||[]),...TASTE.disliked]),n:a.n_labels||0};
  if(first)render();else{$('refresh').hidden=false;const c=$('count');if(c&&!c.textContent.includes('taste'))render.countOnly&&render.countOnly()}}catch(e){}}
+// ---------- deleting samples (served only): files go to _data/trash, undo brings them back
+let GONE=new Set();
+const trashBtn=i=>SERVED?`<button class="xp" data-del="${i}" title="delete this sample (you can undo)">🗑</button>`:'';
+async function delSamples(idx,what){idx=idx.filter(i=>!GONE.has(i));if(!idx.length){toast('nothing to delete');return}
+ let r;try{r=await (await fetch('api/trash/delete',{method:'POST',body:JSON.stringify({ids:idx.map(i=>S[i][F.id])})})).json()}catch(e){r={error:'server not reachable'}}
+ if(r.error){toast('delete failed: '+r.error);return}
+ const ok=new Set(r.deleted),gone=idx.filter(i=>ok.has(S[i][F.id]));
+ gone.forEach(i=>{GONE.add(i);FAV.delete(S[i][F.path]);const a=players.get(i);if(a){a.pause();players.delete(i)}});
+ const y=document.querySelector('main').scrollTop;render();document.querySelector('main').scrollTop=y;
+ if(st.sel!=null){if(GONE.has(st.sel)){st.sel=null;$('detail').innerHTML='<div class="empty">Deleted.</div>'}else select(st.sel)}
+ const t=$('toast');t.innerHTML=`🗑 deleted ${esc(what)} <button id="undel">undo</button>`;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,10000);
+ $('undel').onclick=async()=>{t.textContent='restoring…';try{await fetch('api/trash/restore',{method:'POST',body:JSON.stringify({ids:gone.map(i=>S[i][F.id])})});
+  gone.forEach(i=>GONE.delete(i));await loadFavs();toast(`restored ${gone.length}`)}catch(e){toast('undo failed')}}}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-del],[data-delsong]');if(!b)return;e.stopPropagation();e.preventDefault();
+ if(b.dataset.del!=null){const i=+b.dataset.del;delSamples([i],`${S[i][F.sub]} from ${S[i][F.title]}`);return}
+ const all=trk(+b.dataset.delsong),keep=all.filter(i=>FAV.has(S[i][F.path])||S[i][F.parent]||(D.variants[i]||[]).some(v=>FAV.has(v[3]))),go=all.filter(i=>!keep.includes(i));
+ const s=S[all[0]];if(!go.length){toast('only favourites and edits left in this song');return}
+ if(b.dataset.armed!=='1'){b.dataset.armed='1';b.textContent=`🗑 delete ${go.length} sample${go.length>1?'s':''}${keep.length?` (keeping ${keep.length} ★/edits)`:''}? click again`;setTimeout(()=>{if(b.isConnected){b.dataset.armed='';b.textContent='🗑'+(b.closest('h2')?" delete this song's samples":'')}},4000);return}
+ delSamples(go,`${go.length} samples from ${s[F.artist]} — ${s[F.title]}`)},true);
 let refitT=null;function scheduleRefit(){clearTimeout(refitT);refitT=setTimeout(loadTaste,4000)}
 function sendEvent(path,type,value,id){if(!SERVED)return;fetch('api/event',{method:'POST',body:JSON.stringify({path,type,value,id})}).catch(()=>{});scheduleRefit()}
 const listenStart=new Map();
@@ -652,7 +671,7 @@ function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').va
  if(st.moods.size&&![...st.moods].every(m=>s[F.tags].includes(m)))return;
  if(q&&!(`${s[F.artist]} ${s[F.title]} ${s[F.tags].join(' ')} ${s[F.inst]} ${s[F.id]} ${s[F.cat]} ${s[F.sub]} ${s[F.genre]} ${WORDS[i]||''}`.toLowerCase().includes(q)))return;out.push(i)});
  const wv=$('wsel').value;if(wv)out=out.filter(i=>wv==='w'?WORDS[i]:WORDLESS.has(i));
- out=out.filter(i=>!TASTE.disliked.has(S[i][F.path]));
+ out=out.filter(i=>!TASTE.disliked.has(S[i][F.path])&&!GONE.has(i));
  const sv=$('since').value;if(sv){const lim=sv==='batch'?BATCH0:Date.now()/60000-sv*1440;out=out.filter(i=>(BORN[i]||0)>=lim)}
  const k=$('sort').value;
  const byKey=(arr,f)=>{const v=new Float64Array(S.length);arr.forEach(i=>v[i]=f(i));return arr.sort((a,b)=>v[b]-v[a])};
@@ -674,6 +693,7 @@ function rowHTML(i){const s=S[i],c=col(s[F.cat]);const bpm=s[F.bpm]?`${s[F.bpm]}
 const OVR=new Set((D.overridden||[]).map(i=>S[i][F.id]));
 const BYID=new Map(S.map((s,i)=>[s[F.id],i]));
 const BYTRACK=new Map();S.forEach((s,i)=>{if(!BYTRACK.has(s[F.tid]))BYTRACK.set(s[F.tid],[]);BYTRACK.get(s[F.tid]).push(i)});
+const trk=t=>(BYTRACK.get(t)||[]).filter(j=>!GONE.has(j));
 BYTRACK.forEach(l=>l.sort((a,b)=>S[a][F.start]-S[b][F.start]||S[b][F.dur]-S[a][F.dur]));
 const byPath=new Map(S.map((s,i)=>[s[F.path],i]));
 function render(){paintWheel();drawCats();const L=$('list');$('refresh').hidden=true;drawBanner();
@@ -689,9 +709,11 @@ function render(){paintWheel();drawCats();const L=$('list');$('refresh').hidden=
    <div style="min-width:0"><div class="name">${esc(f.label||f.path)}</div><div class="meta">${esc(f.path)}</div></div><div class="right">${star(f.path,f.sample_id,f.label)}</div></div>`}).join('')
    :'<div class="empty">No favourites yet — click ★ on any sample or variation.</div>';mark();return}
  if(st.tab==='A'){renderArtists();return}
- if(st.tab==='K'){const shown=D.kits.map((k,ki)=>[k,ki]).filter(([k])=>kitMembers(k).length>=3),hid=D.kits.length-shown.length;
+ if(st.tab==='K'){if(SERVED&&TASTE.loaded&&P_READY&&!P_FAIL&&(KITS_FOR!==String(TASTE.n)||$('kitnew')?.dataset.go==='1'))dealKits();
+  const shown=D.kits.map((k,ki)=>[k,ki]).filter(([k])=>kitMembers(k).length>=3),hid=D.kits.length-shown.length;
   $('count').textContent=`${shown.length} kits`+(hid?` · ${hid} hidden: mostly ${[...st.excl].join(', ')}`:'')+(st.excl.size?` · ${[...st.excl].join(', ')} samples left out`:'');
-  L.innerHTML=shown.length?shown.map(([k,ki])=>`<div class="kit"><h3><span>${esc(k.name)}</span><button data-kit="${ki}">▶ play together</button> <button data-kitexp="${esc(k.name)}" data-kiti="${ki}">⇩ export</button></h3>${kitMembers(k).map(rowHTML).join('')}</div>`).join(''):'<div class="empty">No kits yet.</div>';return}
+  const kitHead=SERVED?`<div class="hint" style="margin:4px 0 10px">${D.kits[0]?.yours?`Dealt for you: each kit starts from a vocal your taste model rates highly and adds samples from other songs that fit it. ★ and ✕ samples (here or anywhere) to steer what it picks; listening counts too.`:(TASTE.loaded&&P_READY?'':'Loading your taste model… kits will be dealt for you in a moment.')} <button id="kitnew" title="deal a new set of kits">↻ new kits</button></div>`:'';
+  L.innerHTML=kitHead+(shown.length?shown.map(([k,ki])=>`<div class="kit"><h3><span>${esc(k.name)}</span><button data-kit="${ki}">▶ play together</button> <button data-kitexp="${esc(k.name)}" data-kiti="${ki}">⇩ export</button></h3>${kitMembers(k).map(rowHTML).join('')}</div>`).join(''):'<div class="empty">No kits yet.</div>');const kn=$('kitnew');if(kn)kn.onclick=()=>{kn.dataset.go='1';render();document.querySelector('main').scrollTop=0};return}
  const ids=filtered();$('count').textContent=`${ids.length.toLocaleString()} of ${S.length.toLocaleString()} samples`+(st.excl.size?` · excluding ${[...st.excl].join(', ')}`:'')+(SERVED?` · taste model: ${TASTE.n} ratings`:'');
  const gm=$('grp').value;
  if(gm&&ids.length){const keyOf={track:i=>S[i][F.artist]+' — '+S[i][F.title],type:i=>S[i][F.cat]+' / '+S[i][F.sub],genre:i=>S[i][F.genre]}[gm];
@@ -699,7 +721,7 @@ function render(){paintWheel();drawCats();const L=$('list');$('refresh').hidden=
   let groups=[...g.entries()];if(gm!=='track')groups.sort((a,b)=>b[1].length-a[1].length);
   const shownGroups=gm==='track'?groups.slice(0,Math.ceil(st.shown/3)):groups;
   L.innerHTML=shownGroups.map(([k,l])=>{const open=st.open.has(gm+k),lim=open?Math.min(l.length,60):per;
-   return `<div class="kit"><h3><span>${esc(k)}</span><span class="sub">${l.length} samples ${l.length>per?`<button data-grp="${esc(gm+k)}">${open?'collapse':'show more'}</button>`:''}</span></h3>${l.slice(0,lim).map(rowHTML).join('')}</div>`}).join('')
+   return `<div class="kit"><h3><span>${esc(k)}</span><span class="sub">${l.length} samples ${gm==='track'&&SERVED?`<button data-delsong="${S[l[0]][F.tid]}" title="delete every sample cut from this song, except your favourites and edits">🗑</button> `:''}${l.length>per?`<button data-grp="${esc(gm+k)}">${open?'collapse':'show more'}</button>`:''}</span></h3>${l.slice(0,lim).map(rowHTML).join('')}</div>`}).join('')
    +(gm==='track'&&g.size>shownGroups.length?`<button class="more" id="more">show more tracks</button>`:'');mark();return}
  L.innerHTML=ids.length?ids.slice(0,st.shown).map(rowHTML).join('')+(ids.length>st.shown?`<button class="more" id="more">show more (${ids.length-st.shown})</button>`:''):'<div class="empty">Nothing matches these filters.</div>';mark()}
 $('list').addEventListener('click',async e=>{const stb=e.target.closest('[data-showt]');if(stb){e.preventDefault();showTracks([stb.dataset.showt],{label:stb.dataset.tlabel||''});return}const ke=e.target.closest('[data-kitexp]');if(ke){const r=await (await fetch('api/export',{method:'POST',body:JSON.stringify({scope:'paths',paths:kitMembers(D.kits[+ke.dataset.kiti]).map(i=>S[i][F.path]),name:ke.dataset.kitexp})})).json();ke.textContent=r.error?'error':`exported ${r.count} ✓`;return}
@@ -714,7 +736,7 @@ $('list').addEventListener('click',async e=>{const stb=e.target.closest('[data-s
 let HIST=[];
 // Goes-well-with: the best partners overall plus the best few of each category. "All" spreads categories out
 // (each repeat of a category is discounted 15% for ordering only); a chip shows one category, best first.
-function goPool(i){return (P[i]||[]).filter(([j])=>!st.excl.has(S[j][F.genre]))}
+function goPool(i){return (P[i]||[]).filter(([j])=>!st.excl.has(S[j][F.genre])&&!GONE.has(j))}
 function goList(i){const pool=goPool(i);if(st.gcat){const f=pool.filter(([j])=>S[j][F.cat]===st.gcat);if(f.length)return f}
  const left=pool.slice(),out=[],n={};while(left.length&&out.length<30){let bk=0,bv=-1;
   left.forEach((p,k)=>{const v=p[1]*Math.pow(0.85,n[S[p[0]][F.cat]]||0);if(v>bv){bv=v;bk=k}});const p=left.splice(bk,1)[0];n[S[p[0]][F.cat]]=(n[S[p[0]][F.cat]]||0)+1;out.push(p)}
@@ -723,13 +745,36 @@ function goChips(i){if(!P_READY)return '<div class="sub" id="goload">loading goe
  const cur=st.gcat&&cnt[st.gcat]?st.gcat:'';
  return `<div class="chips" style="margin:6px 0 8px"><button data-gcat="" class="${cur?'':'on'}">All</button>${cs.map(c=>`<button data-gcat="${esc(c)}" class="${cur===c?'on':''}" title="${esc(c)}"><span class="badge" style="background:${col(c)};margin-right:4px">${AB[c]}</span>${cnt[c]}</button>`).join('')}</div>`}
 // kits are built for everyone; the members in genres you've excluded are left out when shown, played or exported
-const kitMembers=k=>k.m.filter(i=>!st.excl.has(S[i][F.genre]));
+const kitMembers=k=>k.m.filter(i=>!st.excl.has(S[i][F.genre])&&!GONE.has(i)&&!TASTE.disliked.has(S[i][F.path]));
+// Kits for you (served): each starts from a vocal the taste model rates highly, chosen with some chance so ↻ deals new
+// ones, then adds a pad, chords or melody, a texture, a vocal chop and a bass from that sample's goes-with picks, each
+// from a different song, ranked by fit and your taste. They're re-dealt when your ratings change (★ ✕ and listening).
+const KIT_ROLES=[['Pads & Atmospheres'],['Chords & Keys','Melodies & Leads'],['Textures & Field'],['Vocals'],['Pads & Atmospheres','Melodies & Leads','Bass & Sub']];
+let KITS_FOR=null;
+function dealKits(n=24){const sc=TASTE.score,ok=i=>!GONE.has(i)&&!TASTE.disliked.has(S[i][F.path])&&!st.excl.has(S[i][F.genre]);
+ const ranked=S.map((_,i)=>i).filter(i=>sc[S[i][F.path]]!=null&&ok(i)).sort((a,b)=>sc[S[b][F.path]]-sc[S[a][F.path]]);
+ const pct=new Map(ranked.map((i,r)=>[i,1-r/ranked.length]));
+ const seeds=ranked.filter(i=>/^Vocal/.test(S[i][F.cat])&&S[i][F.sub]!=='Chops'&&(P[i]||[]).length).slice(0,400);
+ // weighted draw without replacement: higher-rated seeds are likelier, but never certain
+ const w=seeds.map((i,r)=>Math.exp(-r/90)*Math.random()),order=seeds.map((i,r)=>[i,w[r]]).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
+ const kits=[],usedT=new Set(),perA={};
+ for(const s of order){if(kits.length>=n)break;const a=S[s][F.artist];if(usedT.has(S[s][F.tid])||(perA[a]||0)>=2)continue;
+  const ch=[s],tr=new Set([S[s][F.tid]]);
+  for(const roles of KIT_ROLES){const fit=new Map();
+   ch.forEach((c,ci)=>(P[c]||[]).forEach(([j,v])=>{if(j==null||!roles.includes(S[j][F.cat])||tr.has(S[j][F.tid])||ch.includes(j)||!ok(j))return;
+    if(roles[0]==='Vocals'&&S[j][F.sub]!=='Chops')return;fit.set(j,(fit.get(j)||0)+v*(ci===0?0.6:0.4/(ch.length-1||1)))}));
+   let best=null,bs=-1;fit.forEach((v,j)=>{const x=v*(0.6+0.4*(pct.get(j)??0.5));if(x>bs){bs=x;best=j}});
+   if(best!=null&&bs>0.2){ch.push(best);tr.add(S[best][F.tid])}}
+  if(ch.length<4)continue;usedT.add(S[s][F.tid]);perA[a]=(perA[a]||0)+1;
+  const r=S[s],bpm=(ch.map(c=>S[c]).find(x=>x[F.kind]==='loop'&&x[F.bpm])||r)[F.bpm],cam=r[F.cam]||'';
+  kits.push({name:`ForYou${String(kits.length+1).padStart(2,'0')}_${cam?cam.padStart(3,'0'):'xx'}-${(r[F.key]||'').replace(/[\s_]/g,'')}_${bpm?Math.round(bpm)+'bpm':'free'}_${(r[F.tags][0]||'mixed').replace(/[\s_]/g,'-')}`,m:ch,yours:true})}
+ if(kits.length){D.kits.length=0;D.kits.push(...kits)}KITS_FOR=String(TASTE.n);return kits.length}
 function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==i)HIST.push({i:st.sel,scroll:$('detail').scrollTop});else if(from==='list')HIST=[];
  st.sel=i;vcur=0;document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',+r.dataset.i===i));const s=S[i];
  const back=HIST.length?`<div style="margin-bottom:10px"><button id="back">← back to ${esc(S[HIST[HIST.length-1].i][F.artist])} — ${esc(S[HIST[HIST.length-1].i][F.title])}</button> <span class="sub">${HIST.length>1?HIST.length+' steps · ':''}Backspace</span></div>`:'';
  $('detail').innerHTML=back+`<span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span><span class="sub">${esc(s[F.cat])} / ${esc(s[F.sub])}</span>
  <div class="big">${esc(s[F.artist])} — ${esc(s[F.title])}</div>${wave(s[F.env],368,48,col(s[F.cat]))}
- <div style="margin:10px 0;display:flex;gap:6px;align-items:center">${star(s[F.path],s[F.id],`${s[F.artist]} — ${s[F.title]} · ${s[F.sub]}`)}<button data-play="${i}" class="play" style="width:auto;border-radius:6px;padding:4px 12px">▶ play</button><button id="edopen">✎ edit</button><button data-xp="${esc(s[F.path])}" title="export this clip to Ableton">⇩ export</button>
+ <div style="margin:10px 0;display:flex;gap:6px;align-items:center">${star(s[F.path],s[F.id],`${s[F.artist]} — ${s[F.title]} · ${s[F.sub]}`)}<button data-play="${i}" class="play" style="width:auto;border-radius:6px;padding:4px 12px">▶ play</button><button id="edopen">✎ edit</button><button data-xp="${esc(s[F.path])}" title="export this clip to Ableton">⇩ export</button>${SERVED?`<button data-del="${i}" title="delete this sample (you can undo)">🗑 delete</button>`:''}
  <span class="sub">to <input id="xpname" value="${esc(xpName())}" style="width:110px;padding:2px 6px" title="export folder name under User Library/Samples/DigitalCrate"></span></div>
  <div class="ed" id="editor" hidden></div>
  ${provHTML(i)}
@@ -738,7 +783,7 @@ function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==
  <span>Sounds like</span><span>${esc(s[F.inst].replace('_',' '))}${s[F.tags].length?' · '+s[F.tags].map(esc).join(', '):''}</span><span>Category</span><span><select id="rcat">${Object.keys(D.subtypes).map(c=>`<option ${c===s[F.cat]?'selected':''}>${esc(c)}</option>`).join('')}</select>
  <select id="rsub">${D.subtypes[s[F.cat]].map(c=>`<option ${c===s[F.sub]?'selected':''}>${esc(c)}</option>`).join('')}</select>
  <button id="rsave" class="pill" hidden>save</button>${OVR.has(s[F.id])?' <span class="sub">(your correction)</span>':''}</span>
- <span>Source</span><span><a href="#" data-showt2="${s[F.tid]}">this track (${(BYTRACK.get(s[F.tid])||[]).length})</a>${rackBtn([s[F.tid]],`${s[F.artist]} - ${s[F.title]}`)}${(()=>{const a=ARTISTS.find(x=>x.name.toLowerCase()===((s[F.artist]||'Unknown artist').trim().toLowerCase()));if(!a)return'';
+ <span>Source</span><span><a href="#" data-showt2="${s[F.tid]}">this track (${trk(s[F.tid]).length})</a>${rackBtn([s[F.tid]],`${s[F.artist]} - ${s[F.title]}`)}${(()=>{const a=ARTISTS.find(x=>x.name.toLowerCase()===((s[F.artist]||'Unknown artist').trim().toLowerCase()));if(!a)return'';
   const al=(D.tracks[s[F.tid]]||[])[4]||'(no album)',ts=a.albums.get(al)||[];return `${ts.length>1?` · <a href="#" data-aalb2="${esc(a.name)}|${esc(al)}">this album (${ts.reduce((x,t)=>x+t[2],0)})</a>`:''}${a.tracks.length>1?` · <a href="#" data-aall2="${esc(a.name)}">everything by ${esc(a.name)} (${a.n})</a>`:''}`})()}</span>
  <span>Genre</span><span>${esc(s[F.genre])}</span><span>Quality</span><span>${s[F.q]}</span>
  ${s[F.refm]?`<span>Echoes</span><span>${esc(s[F.refm])} <span class="sub">(${Math.round(s[F.ref]*100)}% similar)</span></span>`:''}
@@ -747,12 +792,12 @@ function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==
  <div id="vars">${[[0,'original','',s[F.path]],...D.variants[i]].map(([k,t,c,p])=>`<div class="prow vrow" data-v="${k}">
  <button class="play" data-vp="${esc(p)}" data-vk="${k}">▶</button><div style="min-width:0"><div class="name">${String(k).padStart(2,'0')} · ${esc(t.replace('_',' '))}</div>
  <div class="meta">${esc(c)}</div></div>${star(p,s[F.id],`${s[F.artist]} — ${s[F.title]} · ${String(k).padStart(2,'0')} ${t}`)}${nope(p,s[F.id])}${xp(p)}</div>`).join('')}</div>`:''}
- <h2 style="display:flex;gap:6px;align-items:center"><button data-rel="go" class="${st.rel==='go'?'on':''}">Goes well with</button><button data-rel="song" class="${st.rel==='song'?'on':''}">Same song (${(BYTRACK.get(s[F.tid])||[]).length-1})</button>${hq('goes')}</h2>
+ <h2 style="display:flex;gap:6px;align-items:center"><button data-rel="go" class="${st.rel==='go'?'on':''}">Goes well with</button><button data-rel="song" class="${st.rel==='song'?'on':''}">Same song (${trk(s[F.tid]).length-1})</button>${SERVED&&st.rel==='song'?`<button data-delsong="${s[F.tid]}" title="delete every sample cut from this song, except your favourites and edits">🗑 delete this song's samples</button>`:''}${hq('goes')}</h2>
  <div class="hint">${st.rel==='go'?'▶ auditions alone · ⧉ plays it together with the selected sample':'every sample cut from this track, in song order · ⧉ plays it with the selected one'}</div>
- ${st.rel==='song'?(BYTRACK.get(s[F.tid])||[]).filter(j=>j!==i).map(j=>{const t=S[j];return`<div class="prow"><button class="play" data-play="${j}">▶</button>
+ ${st.rel==='song'?trk(s[F.tid]).filter(j=>j!==i).map(j=>{const t=S[j];return`<div class="prow"><button class="play" data-play="${j}">▶</button>
  <div style="min-width:0"><div class="name"><span class="badge" style="background:${col(t[F.cat])}">${AB[t[F.cat]]}</span>${Math.floor(t[F.start]/60)}:${String(t[F.start]%60).padStart(2,'0')} · ${esc(t[F.sub])} · ${t[F.dur]}s${t[F.note]?' · '+t[F.note]:''}</div>
  <div class="meta">${t[F.cam]||'—'} ${esc(t[F.key])}${t[F.tags].length?' · '+t[F.tags].map(esc).join(', '):''}</div></div>
- <div style="display:flex;gap:6px;align-items:center">${star(t[F.path],t[F.id],lbl(j))}${nope(t[F.path],t[F.id])}${xp(t[F.path])}<button data-pair="${j}" title="play together">⧉</button><button data-go="${j}" title="open">→</button></div></div>`}).join('')
+ <div style="display:flex;gap:6px;align-items:center">${star(t[F.path],t[F.id],lbl(j))}${nope(t[F.path],t[F.id])}${xp(t[F.path])}${trashBtn(j)}<button data-pair="${j}" title="play together">⧉</button><button data-go="${j}" title="open">→</button></div></div>`}).join('')
  :goChips(i)+goList(i).map(([j,sc,h,v])=>{const t=S[j];return`<div class="prow"><button class="play" data-play="${j}">▶</button>
  <div style="min-width:0"><div class="name"><span class="badge" style="background:${col(t[F.cat])}">${AB[t[F.cat]]}</span>${t[F.cam]||'—'} ${esc(t[F.key])} · ${t[F.bpm]?t[F.bpm]:'free'} · ${t[F.dur]}s</div>
  <div class="meta">${esc(t[F.artist])} — ${esc(t[F.title])}</div></div>
