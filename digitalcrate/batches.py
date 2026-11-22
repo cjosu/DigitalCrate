@@ -1,5 +1,4 @@
-"""What to mine next, and how much of the library has been mined: used by the Processing page (/activity) and
-research/next_batch.py, research/diverse_batch.py.
+"""What to mine next, and how much of the library has been mined: used by the Processing page (/activity).
 
 Two ways to pick a batch of unmined songs, both from the quick scout pass ("promise" = how exposed the singing is,
 how pad-like and how sparse the song is):

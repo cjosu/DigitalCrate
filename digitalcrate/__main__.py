@@ -24,7 +24,7 @@ def main():
     p.add_argument("--drum-only", action="store_true",
                    help="songs that so far only went through `drums` (they have drum samples but no others)")
     p.add_argument("--limit", type=int)
-    p.add_argument("--ids-file", help="a JSON list of track ids to mine (from the Processing page or research/*_batch.py)")
+    p.add_argument("--ids-file", help="a JSON list of track ids to mine (e.g. from the Processing page)")
     p.add_argument("--build", action="store_true", help="rebuild the browser page when done")
     p.add_argument("--words", action="store_true", help="transcribe the new vocal samples' words before rebuilding")
     p.add_argument("--separate", choices=["auto", "always", "never"], default="auto",

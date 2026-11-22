@@ -24,7 +24,7 @@ CATS = ["Vocals", "Vocal Atmospheres", "Pads & Atmospheres", "Chords & Keys", "M
         "Textures & Field", "Bass & Sub", "Percussion"]
 KINDS = ["loop", "free", "phrase", "oneshot"]
 TECH_FILE = C.DATA_DIR / "technique_taste.json"
-N_PCA = 64  # 32 -> 64 lifted held-out accuracy (research/taste_variants.py)
+N_PCA = 64  # 32 -> 64 lifted held-out accuracy (held-out test)
 
 
 def _db():

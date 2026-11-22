@@ -345,7 +345,7 @@ def _suggest_following(row, segs, style, notes, tonic, mode, n_options):
             continue
         if any(rp == roots(q) for _, (s2, q) in picks[1:]):
             continue
-        picks.append(("reharmonised", (sc, path)))
+        picks.append(("reharmonized", (sc, path)))
         if len(picks) >= n_options:
             break
     mid = float(np.median([p for _, _, p, _ in notes])) if notes else 64.0

@@ -1,34 +1,36 @@
 # DigitalCrate
 
-**Turn your record collection into a playable sample library.** DigitalCrate listens to the music you own, cuts out
+[![tests](https://github.com/jaredhuling/DigitalCrate/actions/workflows/tests.yml/badge.svg)](https://github.com/jaredhuling/DigitalCrate/actions/workflows/tests.yml)
+
+**Turn your music/record collection into a playable sample library.** DigitalCrate listens to the music you own, excerpts
 the *clean* moments (exposed vocals, pads, chords, textures, drum hits), tags each with key, tempo, instrument and
-mood, and gives you a browser-based studio to find, combine and reshape them before they go into Ableton Live.
+mood, and gives you a browser-based studio to find, combine and reshape them before they go into a DAW like Ableton Live.
 
 ![Browsing: category tabs, "goes well with", the Artists view](docs/img/browse.gif)
 
-- **Mine** vocals, choirs, pads, chords, melodies, textures and drums from your own music, keeping only what's clean.
+- **Mine** vocals, choirs, pads, chords, melodies, textures and drums from your own music, keeping only clean samples.
 - **Find** sounds by category, artist, album, key, mood, or by *describing* them ("dusty piano chords, melancholy").
 - **Combine** them in a sketchpad that keeps everything in key and on the grid, with chord progressions suggested
-  for any sample and Drum Racks built from any song.
-- **Export** to Ableton: organised folders, aligned stems, MIDI, and ready-made Drum Racks.
+  for any sample and Drum Racks built from any song with percussive elements.
+- **Export** to Ableton: organized folders, aligned stems, MIDI, and ready-made Drum Racks.
 - **Learn your taste** from stars, skips and listening, and rank what you haven't heard yet.
 
-Not sure what something does? The small **?** buttons next to the less obvious features explain them.
+The small **?** buttons next to the less obvious features explain them.
 
 ## Quick start
 
-macOS on Apple Silicon (tested on an M4, macOS 15) with Python 3.11 and `brew install ffmpeg rubberband`. Linux
-should mostly work apart from the Ableton-specific parts; Windows is untested.
+macOS on Apple Silicon (tested on an M4, macOS 15) with Python 3.11 and `brew install ffmpeg rubberband`. Other
+platforms aren't supported (see [Limitations](#limitations)).
 
 ```bash
-git clone <this repo> digitalcrate && cd digitalcrate
+git clone https://github.com/jaredhuling/DigitalCrate.git digitalcrate && cd digitalcrate
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python --no-deps -r requirements.lock   # exact tested set (see note)
 uv pip install --python .venv/bin/python --no-deps -e .
 cp digitalcrate.example.toml digitalcrate.toml                             # where your music is, where the library goes
 
 source .venv/bin/activate
-digitalcrate scan              # catalogue your music (tags only, fast, incremental)
+digitalcrate scan              # catalog your music (tags only, fast, incremental)
 digitalcrate scout             # rank tracks by how sample-worthy they sound
 digitalcrate process --top 200 # mine the 200 most promising tracks
 digitalcrate drums --top 100   # drum hits and loops from tracks with live drummers
@@ -51,7 +53,7 @@ Category **tabs** across the top (with live counts), an **Artists** view (artist
 one-click filters for *this track · this album · everything by this artist* in the sample panel. The panel on the
 right resizes by dragging its edge.
 
-**Goes well with** lists partners for the selected sample, scored on key (the Camelot wheel *and* the notes they
+The **Goes well with** feature lists partners for the selected sample, scored on key (the Camelot wheel *and* the notes they
 actually use), tempo, arrangement role and sound. You get the best overall plus the best few of every other
 category; chips show one category at a time. **⧉** plays a pair together, **💾** saves it as a sketch.
 
@@ -61,7 +63,7 @@ category; chips show one category at a time. **⧉** plays a pair together, **�
 
 Layer up to 8 samples, in the project key and tempo. Open any auto-built **kit** in it, or add samples with **＋**.
 
-- **Timing you can see:** amber lines are the project's bars and beats as each lane plays; white ticks are the clip's
+- **Visual timing:** amber lines are the project's bars and beats as each lane plays; white ticks are the clip's
   own attacks; ▼ marks the attack placed on the beat.
 - **Pads vs rhythm:** each lane is checked for a steady pulse (Essentia's beat tracker). Pads and textures play from
   their start; rhythmic clips can **⟷ match tempo** so every attack stays on the grid, and **↺ re-align** fits a
@@ -78,13 +80,13 @@ Layer up to 8 samples, in the project key and tempo. Open any auto-built **kit**
 ![Chord suggestions with the keyboard following the progression](docs/img/chords.gif)
 
 **🎼 chords** suggests progressions that suit a sample and plays them on a synth pad, with the chord lighting up on
-a keyboard. Each chord is scored on how much of what the sample plays falls on its notes (and penalised for clashing a
+a keyboard. Each chord is scored on how much of what the sample plays falls on its notes (and penalized for clashing a
 semitone away); whole progressions are then chosen for good functional movement and smooth voice leading, in a
-flavour that follows the sample's mood (soulful → 7ths and 9ths, dark → minor 9ths, ethereal → sus and add9).
+flavor that follows the sample's mood (soulful → 7ths and 9ths, dark → minor 9ths, ethereal → sus and add9).
 Voicings sit in a different register from the sample so they don't mask it.
 
 If the sample has **chords of its own**, suggestions change where it does: *follows* enriches its chords in another
-register, *reharmonised* swaps in chords that still contain what it plays.
+register, *reharmonized* swaps in chords that still contain what it plays.
 
 **Bass** adds a bassline built from the chords: held roots, root and fifth, an 8th-note pulse, syncopated R&B, or a
 walking line with chromatic approach notes (the default follows the sample: walking for jazz, held roots where the
@@ -96,7 +98,7 @@ render the pad and the bass straight into the sketchpad as two lanes.
 ![Slicing a vocal into pads and recording a pattern](docs/img/pads.gif)
 
 **🎹 pads** cuts a sample at its syllables or notes, one slice per key (`1–4 · Q–R · A–F · Z–V`), like an MPC.
-Replay the pieces in a new order, **● record** a quantised 1–4 bar pattern over a click, and save it as a new sample,
+Replay the pieces in a new order, **● record** a quantized 1–4 bar pattern over a click, and save it as a new sample,
 or send every slice to Ableton as a Drum Rack.
 
 ### Drum Racks from any song
@@ -123,19 +125,19 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 - **Variations:** generative reworks chosen by what you've liked, including vocals tuned to their own key.
 - **⚙ Processing:** the mining runs in one place. Watch progress, see the current song and errors, and stop a
   run. Start a new one in three modes: *breadth* (one song per artist, artists never mined first, spread across
-  genres), *most promising*, or *like my favourites*. You can preview a run before starting it, and see how much
+  genres), *most promising*, or *like my favorites*. You can preview a run before starting it, and see how much
   of each genre is mined. Whole-library passes (styles, lyrics, sample credits) start and show progress here too.
 - **Backups:** `digitalcrate backup --install` copies what can't be re-made (ratings, listening history,
-  favourites, sketches, labels, edits, config) to `~/Documents/DigitalCrate Backups` every night, keeping 14.
+  favorites, sketches, labels, edits, config) to `~/Documents/DigitalCrate Backups` every night, keeping 14.
   `digitalcrate backup --restore FILE` puts one back. The Processing page shows when the last one ran.
 - **Added recently:** narrows any sort to the latest run, or to the last day or week. With *for you* it shows the
   best of what just came in.
-- **🧠 Taste:** how well the "for you" model knows you, measured honestly (hidden favourites against samples you
+- **🧠 Taste:** how well the "for you" model knows you, measured honestly (hidden favorites against samples you
   heard and didn't star; about 78% here, where sample quality alone gets 48%), and how that changes as you rate.
   Also what it learns from, what it has learned in words ("warm analog synth pad", "a breathy whispered voice"…),
   where it's wrong, and the samples whose ★ or ✕ would teach it the most.
 - **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards.
-- **🌌 Galaxy:** every sample on a map by sound; hover to hear, colour by taste.
+- **🌌 Galaxy:** every sample on a map by sound; hover to hear, color by taste.
 
   ![The sample galaxy](docs/img/10-galaxy.png)
 - **🔭 Scout:** searches YouTube and listens to a minute of each result, scoring it for *raw singing*, for
@@ -145,7 +147,7 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   audio rather than read from tags). The songs behind the samples you like give your style profile (Medieval,
   Contemporary R&B, Neo Soul, Gospel…); guided scouting searches YouTube with it and scores each result for how much
   it sounds like those styles. It also suggests artists you don't have, that ListenBrainz listeners pair with yours.
-  The styles also fill genre gaps for untagged songs, and power a *like my favourites* mining mode.
+  The styles also fill genre gaps for untagged songs, and power a *like my favorites* mining mode.
 - **Lyrics:** Whisper transcribes the words in vocal samples (in whatever language is sung). Search finds lyrics, and
   a filter shows samples *with words* or *wordless* (oohs, hums, vowels). Whisper "hears" *Thank you.* in silence and
   pads, so that and other hallucinations are filtered out.
@@ -194,13 +196,13 @@ flowchart LR
   `digitalcrate.toml`.
 - **Compatibility** (`build.py`, `pairing.py`): harmony (Camelot distance + chroma) × tempo (loops) × role and sound.
   A two-tower model trained on co-occurring stems from your own songs is available as an alternative "vibe" score.
-- **Taste** (`taste.py`): Bayesian logistic regression on CLAP embeddings, blended with nearest-favourite similarity;
+- **Taste** (`taste.py`): Bayesian logistic regression on CLAP embeddings, blended with nearest-favorite similarity;
   implicit feedback counts listening time and replays. Beta posteriors per technique steer the variations.
 - **Conforming** (`conform.py`): the smallest pitch shift to the project key; loops, rhythmic phrases and
   tempo-matched clips are stretched with Signalsmith Stretch, other clips Re-Pitched tape-style. Engines were picked by
   blind listening against Rubber Band, WORLD and a neural vocoder.
 - **Chords** (`harmony.py`): pitch profiles from basic-pitch notes + CQT chroma; diatonic plus borrowed vocabulary
-  coloured by mood; beam search over steps (or the sample's own chord changes) with functional and voice-leading
+  colored by mood; beam search over steps (or the sample's own chord changes) with functional and voice-leading
   terms; rootless upper voicings over a bass root.
 </details>
 
@@ -208,17 +210,17 @@ flowchart LR
 
 ```text
 digitalcrate <command>
-scan [--root DIR]                  catalogue the music folder (or an extra folder)
+scan [--root DIR]                  catalog the music folder (or an extra folder)
 scout                              rank tracks for sample-worthy material
 process [filters]                  --artist A --match S --genre G --all --top N --drum-only --reprocess
-                                   --ids-file F (from research/diverse_batch.py) --words --build (rebuild after)
+                                   --ids-file F (a JSON list of track ids) --words --build (rebuild after)
 drums --top N                      mine percussion
 build                              moods, compatibility, kits, folder views, Browser.html
 serve [--port 8765]                the app
 taste                              fit the taste model, report held-out accuracy
 ingest URL|FILE|FOLDER [--drums]   add a source (YouTube via yt-dlp) and mine it
 export --favorites|--kit K|--ids … [--name N] [--rack] [--key Fm --bpm 124]
-backup [--install] [--restore ZIP]  back up ratings, favourites, sketches, labels, edits (nightly with --install)
+backup [--install] [--restore ZIP]  back up ratings, favorites, sketches, labels, edits (nightly with --install)
 ytscout "query" [--n 15] [--mode voice|pads|guided] [--style "Funk / Soul---Neo Soul"]
 styles                             tag every song with Discogs styles from its audio (about an hour)
 lyrics                             transcribe the words in vocal samples (Whisper; about 2 s each)
@@ -254,6 +256,7 @@ running app (private names are scrubbed).
 ## Tests
 
 ```bash
+uv pip install --python .venv/bin/python -e ".[dev]"   # once: adds pytest
 pytest           # engines, genre mapping, keys, chord theory and voicings, stems alignment (seconds)
 pytest --slow    # end to end on a synthetic track in a throwaway library: scan → process → build → serve
 ```
@@ -269,7 +272,7 @@ pytest --slow    # end to end on a synthetic track in a throwaway library: scan 
   chords.
 - Single-user and local; the server binds to `127.0.0.1`.
 
-## Credits and licences
+## Credits and licenses
 
 Built on [Demucs](https://github.com/facebookresearch/demucs),
 [audio-separator](https://github.com/nomadkaraoke/python-audio-separator) (MelBand RoFormer, MDX23C DrumSep),
@@ -282,9 +285,9 @@ Built on [Demucs](https://github.com/facebookresearch/demucs),
 [Beat This!](https://github.com/CPJKU/beat_this), [Pedalboard](https://github.com/spotify/pedalboard),
 Essentia's [Discogs-EffNet](https://essentia.upf.edu/models.html) (CC BY-NC-SA 4.0),
 [MusicBrainz](https://musicbrainz.org) and [ListenBrainz](https://listenbrainz.org). Model
-licences: [`models/README.md`](models/README.md).
+licenses: [`models/README.md`](models/README.md).
 
-**Licence:** [AGPL-3.0](LICENSE), because Essentia is AGPL-3.0 and several other dependencies are GPL.
+**License:** [AGPL-3.0](LICENSE), because Essentia is AGPL-3.0 and several other dependencies are GPL.
 
 **On sampling:** this tool helps you find material; it doesn't clear it. Whether you can release music that uses a
 sample depends on where it came from: your call, and often a conversation with the rights holder.

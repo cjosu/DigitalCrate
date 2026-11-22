@@ -1,0 +1,24 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-14  # Apple Silicon, like the app needs
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: System tools
+        run: brew install ffmpeg rubberband
+      - uses: astral-sh/setup-uv@v5
+      - name: Install (the exact tested set, as in the README)
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python --no-deps -r requirements.lock
+          uv pip install --python .venv/bin/python --no-deps -e .
+          uv pip install --python .venv/bin/python pytest
+      - name: Tests
+        run: .venv/bin/python -m pytest -q

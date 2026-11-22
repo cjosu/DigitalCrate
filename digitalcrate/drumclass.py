@@ -2,7 +2,7 @@
 
 Which pieces strike in a hit (kick, snare, hats…) is predicted from the CLAP embedding with one logistic model per
 piece, so combos come out naturally. On your first 108 labels it got the subtype right about half the time, against
-under a fifth for the pipeline's separation-based labels (research/drum_eval.py, drum_clf.py). Labels marked
+under a fifth for the pipeline's separation-based labels. Labels marked
 "not sure" count for less; repeat labels of the same hit are averaged.
 """
 import numpy as np

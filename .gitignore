@@ -22,3 +22,6 @@ _data/
 .pytest_cache/
 *.egg-info/
 build/
+
+# private experiments live outside the repo
+research/

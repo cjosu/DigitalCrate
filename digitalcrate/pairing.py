@@ -5,7 +5,7 @@ together, so they're examples of things that fit. A small two-tower network lear
 score a candidate partner highly when it would sit in the same arrangement, with partners from other songs in the
 batch as negatives. Embeddings are centred per category first so "both are vocals" isn't what it matches on.
 
-On held-out songs (research/vibe_eval.py) it ranks a song's real partner above other songs' samples with AUC 0.82,
+On held-out songs it ranks a song's real partner above other songs' samples with AUC 0.82,
 against 0.70 for the plain CLAP similarity used before.
 """
 import numpy as np
