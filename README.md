@@ -14,6 +14,8 @@ mood, and gives you a browser-based studio to find, combine and reshape them bef
   for any sample and Drum Racks built from any song with percussive elements.
 - **Export** to Ableton: organized folders, aligned stems, MIDI, and ready-made Drum Racks.
 - **Learn your taste** from stars, skips and listening, and rank what you haven't heard yet.
+- **Open it like any Mac app:** a one-line install, a first-run setup that asks where your music is, and no command
+  line needed after that (though it's all there).
 
 The small **?** buttons next to the less obvious features explain them.
 
@@ -61,9 +63,14 @@ digitalcrate serve             # → http://localhost:8765
 
 ### Browse
 
-Category **tabs** across the top (with live counts), an **Artists** view (artist → album → song, searchable, A–Z), and
-one-click filters for *this track · this album · everything by this artist* in the sample panel. The panel on the
-right resizes by dragging its edge.
+Category **tabs** across the top (with live counts), the **🎲 Crate** right next to Samples, an **Artists** view
+(artist → album → song, searchable, A–Z), and one-click filters for *this track · this album · everything by this
+artist* in the sample panel. The panel on the right resizes by dragging its edge.
+
+**★** keeps a sample (and links it into `Favorites/`), **✕** says *not for me* (it disappears from every list and
+teaches the taste model). **🗑 delete** in the sample panel removes a sample for good, and *Same song* can delete
+everything cut from a song at once (your favorites and edits are kept). Deleted files go to a trash folder: **undo**
+brings them back, and `digitalcrate trash --empty` frees the space.
 
 The **Goes well with** feature lists partners for the selected sample, scored on key (the Camelot wheel *and* the notes they
 actually use), tempo, arrangement role and sound. You get the best overall plus the best few of every other
@@ -73,7 +80,12 @@ category; chips show one category at a time. **⧉** plays a pair together, **�
 
 ![Sketchpad: playheads, trimming, relative faders, tempo matching](docs/img/sketch.gif)
 
-Layer up to 8 samples, in the project key and tempo. Open any auto-built **kit** in it, or add samples with **＋**.
+Layer up to 8 samples, in the project key and tempo. Open a **kit** in it, or add samples with **＋**. **▾ hide**
+tucks it away while it keeps playing; the 🎛 sketchpad button brings it back.
+
+**Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,
+a texture, a vocal chop and a bass from other songs that fit it in key and sound. ★ and ✕ change what they pick,
+and **↻ new kits** deals a fresh set.
 
 - **Visual timing:** amber lines are the project's bars and beats as each lane plays; white ticks are the clip's
   own attacks; ▼ marks the attack placed on the beat.
@@ -135,6 +147,10 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 - **Editor:** non-destructive trims (drag either edge of a selection), stretch, pitch, fades, reverse and **Tune to**:
   tape-style tuning toward a key with natural glide and drift. ↺ reset starts over.
 - **Variations:** generative reworks chosen by what you've liked, including vocals tuned to their own key.
+- **First run:** the app asks for your music folder and where samples should go (saved to
+  `~/.config/digitalcrate/digitalcrate.toml`), listens to a random few hundred songs, mines the most promising, and
+  opens the library. **⚙** next to the logo changes the folders later; **⏻** turns DigitalCrate off (mining runs
+  keep going).
 - **⚙ Processing:** the mining runs in one place. Watch progress, see the current song and errors, and stop a
   run. Start a new one in three modes: *breadth* (one song per artist, artists never mined first, spread across
   genres), *most promising*, or *like my favorites*. You can preview a run before starting it, and see how much
@@ -196,7 +212,8 @@ flowchart LR
 <details>
 <summary>Details: mining, source policy, compatibility, taste, conforming</summary>
 
-- **Mining** (`process.py`, `extract.py`, `analyze.py`): Essentia finds tempo, beats and key. Stems are separated
+- **Mining** (`process.py`, `extract.py`, `analyze.py`): Essentia finds tempo and key; Beat This! finds the beats and
+  downbeats, so loops start on the one (`digitalcrate reloop --fix` re-cuts loops mined before it). Stems are separated
   (Demucs, or MelBand RoFormer for cleaner vocals) only when drums or bass are present; where a stem is effectively
   alone, the original mix is used instead. Candidates (phrases, syllable chops, bar-aligned loops, free windows,
   one-shots, vocal atmospheres) are scored 0–1 for cleanliness from drum bleed, stem dominance, percussiveness,
@@ -252,6 +269,7 @@ SampleLibrary/
   Textures & Field/ · Bass & Sub/ · Percussion/      each split by subtype
   Edits/            your edits, bounces, chord pads and pad patterns (with provenance)
   Favorites/        hardlinks to starred samples
+  _data/trash/      deleted samples, until `digitalcrate trash --empty`
   _By Key/ · _By Tempo/ · Kits/      hardlinked views (no extra disk space)
   _Reference/       reference-only artists (style queries, never exported)
   Browser.html (+ Browser-partners.js, the goes-with picks, loaded after the list) · _data/samples.sqlite
@@ -263,7 +281,8 @@ from a C-minor track (Camelot 5A), its own note A♭, 136 bpm, cut at 1:42, ID `
 
 ## Configuration
 
-Paths go in `digitalcrate.toml` (see `digitalcrate.example.toml`) or `DIGITALCRATE_MUSIC`, `DIGITALCRATE_LIBRARY`,
+The setup page saves your folders to `~/.config/digitalcrate/digitalcrate.toml`. Paths can also go in a
+`digitalcrate.toml` in the repo (see `digitalcrate.example.toml`), which takes precedence, or `DIGITALCRATE_MUSIC`, `DIGITALCRATE_LIBRARY`,
 `DIGITALCRATE_FOUND`, `DIGITALCRATE_ABLETON_SAMPLES`. A `[genres]` table (artist = family) overrides genre tags, which
 are often wrong; run `digitalcrate build` after editing. Thresholds live in `digitalcrate/config.py`, models in
 [`models/README.md`](models/README.md). `tools/gifs.py` and `tools/screenshots.py` regenerate the docs images from the

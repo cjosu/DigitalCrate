@@ -7,6 +7,7 @@ that matters and turned into a palette-optimised GIF. Private names (reference-o
 are replaced live on every frame, and a dot shows where the mouse is.
 """
 import json
+import re
 import os
 import subprocess
 import sys
@@ -44,12 +45,18 @@ INIT = """
 """.replace("__NAMES__", json.dumps(PRIVATE))
 
 
+WRITES = re.compile(r"/api/(event|fav|trash/|sketch/(save|delete)|edit/save|pair/save|recat|bounce|quit|setup/)")
+
+
 class Clip:
     def __init__(self, b, name):
         self.name, self.dir = name, tempfile.mkdtemp()
         self.ctx = b.new_context(viewport={"width": W, "height": H}, record_video_dir=self.dir,
                                  record_video_size={"width": W, "height": H})
         self.ctx.add_init_script(INIT)
+        # recording must not change your library: listens, stars, ✕, deletes, saved sketches and edits are dropped
+        self.ctx.route(WRITES, lambda r: r.fulfill(status=200, content_type="application/json", body="{}")
+                       if r.request.method == "POST" else r.continue_())
         self.t0 = time.time()
         self.page = self.ctx.new_page()
         self.start = None
@@ -121,8 +128,9 @@ def browse(b):
 
 def sketch(b):
     c = Clip(b, "sketch"); c.go(); pg = c.page
-    pg.click("#tabK"); pg.wait_for_timeout(1500)
-    k = pg.evaluate("D.kits.findIndex(k=>k.name.startsWith('Kit006'))")
+    pg.wait_for_function("P_READY&&TASTE.loaded", timeout=60000)
+    pg.click("#tabK"); pg.wait_for_function("D.kits[0]&&D.kits[0].yours", timeout=30000); pg.wait_for_timeout(800)
+    k = pg.evaluate("D.kits.findIndex(k=>kitMembers(k).length>=5)")
     pg.locator(f"[data-kitsk='{k}']").click()
     pg.wait_for_function("SK.lanes.length&&SK.lanes.every(l=>l.state==='ok')", timeout=60000); pg.wait_for_timeout(1500)
     c.action(); pg.wait_for_timeout(2500)
