@@ -94,7 +94,8 @@ function drawSBanner(){const b=$('sbanner');if(!SOUND||!(st.tab==='S'||st.tab===
  b.innerHTML=`≈ <b>${esc(SOUND.label)}</b> — closest first; your other filters still apply &nbsp;<button id="sclear">✕ clear</button>`;$('sclear').onclick=()=>{SOUND=null;if(soundMode)$('sndbtn').click();render()}}
 
 // ================= tabs: crate · galaxy · scout =================
-document.querySelector('.tabs').insertAdjacentHTML('beforeend',`<button id="tabC" title="today's crate: 20 picks for you + wildcards">🎲 Crate</button><button id="tabG" title="every sample on a map by sound">🌌 Galaxy</button><button id="tabY" title="scout YouTube for raw singing">🔭 Scout</button>`);
+$('tabS').insertAdjacentHTML('afterend',`<button id="tabC" title="today's crate: 20 picks for you + wildcards">🎲 Crate</button>`);
+document.querySelector('.tabs').insertAdjacentHTML('beforeend',`<button id="tabG" title="every sample on a map by sound">🌌 Galaxy</button><button id="tabY" title="scout YouTube for raw singing">🔭 Scout</button>`);
 const MYTABS={C:'tabC',G:'tabG',Y:'tabY'};
 function setTab(k){st.tab=k;document.querySelectorAll('.tabs button').forEach(b=>b.classList.remove('on'));const id=tabs[k]||MYTABS[k];if($(id))$(id).classList.add('on');render()}
 Object.entries(MYTABS).forEach(([k,id])=>$(id).onclick=()=>setTab(k));
