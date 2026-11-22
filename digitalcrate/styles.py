@@ -48,7 +48,11 @@ def _session():
     if _sess is None:
         import onnxruntime as ort
         _ensure()
-        _sess = ort.InferenceSession(str(MODEL), providers=["CPUExecutionProvider"])
+        import os
+        so = ort.SessionOptions()
+        if os.environ.get("DC_THREADS"):
+            so.intra_op_num_threads = int(os.environ["DC_THREADS"])
+        _sess = ort.InferenceSession(str(MODEL), so, providers=["CPUExecutionProvider"])
     return _sess
 
 

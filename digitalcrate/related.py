@@ -63,8 +63,22 @@ def hide_style(full, hide=True):
     return sorted(h)
 
 
+_PROF = {}
+
+
 def profile(con=None, top=16):
+    """(cached until the styles, your favourites, ratings or hidden styles change)"""
     con = con or connect()
+    key = (tuple(con.execute("SELECT COUNT(*) FROM styles WHERE probs IS NOT NULL").fetchone()),
+           tuple(con.execute("SELECT COUNT(*), MAX(added_at) FROM favorites").fetchone()),
+           tuple(con.execute("SELECT COUNT(*), MAX(ts) FROM events WHERE type != 'listen'").fetchone()),
+           tuple(sorted(hidden_styles())), top)
+    if _PROF.get("key") != key:
+        _PROF.update(key=key, value=_profile(con, top))
+    return _PROF["value"]
+
+
+def _profile(con, top):
     names = classes()
     rows = con.execute("SELECT track_id, probs FROM styles WHERE probs IS NOT NULL").fetchall()
     if not rows:
