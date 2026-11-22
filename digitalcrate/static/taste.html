@@ -89,15 +89,20 @@ function wrongHTML(E){const miss=E.missed.filter(r=>r.pct<70),bad=E.wrong.filter
   :'<div class="sub" style="margin:6px 0">Everything you marked ✕ ranks below the middle.</div>';
  return h}
 function chart(){const H=D.history||[];if(H.length<2)return H.length?'<div class="sub" style="margin-top:10px">The trend appears here after the next change to your ratings.</div>':'';
- const W=480,Ht=120,p=24,xs=H.map((h,i)=>p+i*(W-2*p)/(H.length-1)),y=v=>Ht-p-(v-0.4)/(0.6)*(Ht-2*p);
+ // the vertical scale fits the data (not 0-100%), so a change of a point or two is visible; gridlines say where it is
+ const keys=['auc','auc_regression','auc_trees'],vals=H.flatMap(h=>keys.map(k=>h[k]).filter(v=>v!=null));
+ let lo=Math.min(...vals),hi=Math.max(...vals);const pad=Math.max(0.01,(hi-lo)*0.15);lo-=pad;hi+=pad;if(hi-lo<0.06){const m=(hi+lo)/2;lo=m-0.03;hi=m+0.03}
+ const W=520,Ht=200,L=44,R=14,T=12,B=28,xs=H.map((h,i)=>L+i*(W-L-R)/(H.length-1)),y=v=>T+(hi-v)/(hi-lo)*(Ht-T-B);
+ const step=(hi-lo)>0.2?0.05:(hi-lo)>0.08?0.02:0.01,grid=[];for(let g=Math.ceil(lo/step)*step;g<=hi+1e-9;g+=step)grid.push(+g.toFixed(3));
  const line=k=>{const pts=H.map((h,i)=>h[k]!=null?[xs[i],y(h[k])]:null).filter(Boolean);return pts.length>1?pts.map((q,i)=>`${i?'L':'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(''):''};
- const path=line('auc'),pr=line('auc_regression'),pt=line('auc_trees');
+ const path=line('auc'),pr=line('auc_regression'),pt=line('auc_trees'),last=H[H.length-1];
  return `<div class="sub" style="margin:12px 0 2px">Over time (each point is a measurement after your ratings changed)</div><div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${Ht}" width="100%" style="max-width:${W}px">
- <line x1="${p}" x2="${W-p}" y1="${y(.5)}" y2="${y(.5)}" stroke="#2c323c" stroke-dasharray="3 3"/><text x="${W-p+2}" y="${y(.5)+3}">50%</text>
+ ${grid.map(g=>`<line x1="${L}" x2="${W-R}" y1="${y(g)}" y2="${y(g)}" stroke="#242932"/><text x="${L-6}" y="${y(g)+3}" text-anchor="end">${Math.round(g*100)}%</text>`).join('')}
  ${pr?`<path d="${pr}" fill="none" stroke="#c9a36b" stroke-width="1.5" stroke-dasharray="4 3"/>`:''}${pt?`<path d="${pt}" fill="none" stroke="#8fc98f" stroke-width="1.5" stroke-dasharray="4 3"/>`:''}
- <path d="${path}" fill="none" stroke="var(--acc)" stroke-width="2"/>${H.map((h,i)=>`<circle cx="${xs[i]}" cy="${y(h.auc)}" r="3" fill="var(--acc)"><title>${new Date(h.ts*1000).toLocaleString()} · ${pct(h.auc)} · ${h.n_fav} favourites</title></circle>`).join('')}
- <text x="${xs[0]}" y="${Ht-6}">${H[0].n_fav} ★</text><text x="${xs[xs.length-1]-20}" y="${Ht-6}">${H[H.length-1].n_fav} ★</text></svg></div>
- ${pr||pt?'<div class="sub">— your model &nbsp; <span style="color:#c9a36b">- - regression alone</span> &nbsp; <span style="color:#8fc98f">- - trees alone</span></div>':''}`}
+ <path d="${path}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${H.map((h,i)=>`<circle cx="${xs[i]}" cy="${y(h.auc)}" r="3.5" fill="var(--acc)"><title>${new Date(h.ts*1000).toLocaleString()} · ${pct(h.auc)}${h.auc_regression!=null?` (regression ${pct(h.auc_regression)}, trees ${pct(h.auc_trees)})`:''} · ${h.n_fav} favourites</title></circle>`).join('')}
+ <text x="${xs[xs.length-1]}" y="${y(last.auc)-8}" text-anchor="end" style="fill:var(--ink);font-size:11px">${pct(last.auc)}</text>
+ <text x="${L}" y="${Ht-8}">${H[0].n_fav} ★</text><text x="${W-R}" y="${Ht-8}" text-anchor="end">${last.n_fav} ★</text></svg></div>
+ <div class="sub">${pr||pt?'— your model &nbsp; <span style="color:#c9a36b">- - regression alone</span> &nbsp; <span style="color:#8fc98f">- - trees alone</span> &nbsp; · ':''}the scale is zoomed in to the range measured (a coin flip would be 50%)</div>`}
 function words(ws,c){const m=Math.max(...ws.map(w=>Math.abs(w[1])),1);return `<div class="w">${ws.map(w=>`<span>${esc(w[0])}</span><div class="wb"><i style="left:0;width:${Math.abs(w[1])/m*100}%;background:${c}"></i></div>`).join('')}</div>`}
 function bars(rows){return `<div class="w" style="grid-template-columns:150px 1fr 40px">${(rows||[]).map(r=>`<span>${esc(r[0])} <span class="sub">${r[2].toLocaleString()}</span></span><div class="hb"><i style="width:${r[1]}%;background:${r[1]>=50?'var(--ok)':'var(--acc2)'}"></i></div><span class="sub">${r[1]}</span>`).join('')}</div>`}
 function exRow(r,rate){const st=rated[r.path];return `<div class="ex"><button class="play" data-p="${esc(r.path)}">${playing===r.path?'■':'▶'}</button>
