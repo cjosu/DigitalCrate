@@ -1,6 +1,6 @@
-<img src="digitalcrate/static/icon.png" alt="DigitalCrate icon" width="140" align="right">
-
 # DigitalCrate
+
+<img src="digitalcrate/static/icon.png" alt="DigitalCrate icon" width="140" align="right">
 
 [![tests](https://github.com/jaredhuling/DigitalCrate/actions/workflows/tests.yml/badge.svg)](https://github.com/jaredhuling/DigitalCrate/actions/workflows/tests.yml)
 
