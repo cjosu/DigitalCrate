@@ -655,6 +655,8 @@ openEditor=async function(i){await _openEditorSg(i);const box=$('editor');if(!bo
  const row=$('edprev').closest('.edrow'),d=document.createElement('div');d.id='edsg';d.style.margin='6px 0';
  d.innerHTML=`<div class="edrow"><button id="sgbtn" title="try a dozen edits that suit this kind of sound and let your taste model pick">✨ suggest edits</button>${hq('suggest')}<span class="sub" id="sgmsg"></span></div><div id="sglist"></div>`;
  row.parentNode.insertBefore(d,row);$('sgbtn').onclick=()=>sgRun(i)};
+const SGREASONS=['too much','too subtle','sounds processed','wrong mood'];
+const sgRate=(body)=>api('api/suggest/rate',body).catch(()=>{});
 const sgFb=(x,action)=>SG&&api('api/suggest/feedback',{path:S[SG.i][F.path],id:S[SG.i][F.id],move:x.id,family:x.family,arm:x.arm,material:x.material,action}).catch(()=>{});
 async function sgRun(i){const s=S[i];$('sgbtn').disabled=true;$('sglist').innerHTML='';$('sgmsg').textContent='trying a dozen edits on the selection… (a few seconds)';
  let r;try{r=await api('api/suggest',{path:s[F.path],project_key:PROJ.key||'',start:ED&&ED.sel?ED.sel[0]:0,end:ED&&ED.sel?ED.sel[1]:null})}
@@ -665,7 +667,9 @@ async function sgRun(i){const s=S[i];$('sgbtn').disabled=true;$('sglist').innerH
  $('sglist').innerHTML=r.suggestions.map((x,k)=>`<div class="prow" data-sgk="${k}"><button class="play" data-sgplay="${k}">▶</button><div style="min-width:0">
   <div class="name">${x.arm==='wildcard'?'<span class="badge" style="background:#5b6370" title="picked at random from the rest, to check the model">wildcard</span> ':''}${esc(x.label)}</div>
   <div class="meta">${x.delta>=0?'+':''}${x.delta.toFixed(2)} taste · ${Math.round(x.close*100)}% like the original</div></div>
-  <div style="display:flex;gap:6px"><button data-sguse="${k}" title="set the editor to this edit, then adjust anything">use</button><button data-sgno="${k}" title="not this one (it learns which kinds of edit you keep)">✕</button></div></div>`).join('')}
+  <div style="display:flex;gap:6px"><button data-sgup="${k}" title="I like this edit">👍</button><button data-sgdown="${k}" title="I don't like this edit">👎</button><button data-sguse="${k}" title="set the editor to this edit, then adjust anything">use</button></div>
+  <div class="sgwhy" data-sgwhy="${k}" hidden style="grid-column:1/-1">${SGREASONS.map(w=>`<button data-sgreason="${k}" data-r="${w}">${w}</button>`).join(' ')}<span class="sub"> why? (optional)</span></div></div>`).join('');
+ const L=r.learning||{};$('sgmsg').textContent+=L.ratings?` · learning from ${L.ratings} rating${L.ratings>1?'s':''}`+(L.model_on?(L.model_auc!=null?` (its edit model predicts your 👍/👎 ${Math.round(L.model_auc*100)}% of the time)`:' (edit model on)'):''):' · rate them 👍/👎 to teach it'}
 async function sgApply(x){const p=x.params,set=(id,v)=>{const el=$(id);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v;el.dispatchEvent(new Event('input'))};
  set('edst',p.stretch||1);set('edpi',p.semis||0);set('edfm',false);set('edtape',!!p.tape);set('edrev',!!p.reverse);set('edtone',toneVal(p.tone||20000));
  if($('tnkey')){const k=p.tune_key||'';if(k&&![...$('tnkey').options].some(o=>o.value===k))$('tnkey').insertAdjacentHTML('beforeend',`<option value="${esc(k)}">${esc(k)}</option>`);
@@ -675,11 +679,32 @@ async function sgApply(x){const p=x.params,set=(id,v)=>{const el=$(id);if(!el)re
    Object.entries(pl.params||{}).forEach(([k,v])=>{const el=$('fxctl').querySelector(`[data-fx="${CSS.escape(k)}"]`);if(!el)return;if(el.type==='checkbox')el.checked=!!v;else el.value=v;el.dataset.touched=1;el.dispatchEvent(new Event('input'))});
    if(p.tail!=null){$('fxtail').value=p.tail;$('fxtail').dispatchEvent(new Event('input'))}}}
  ED.sugg=x;edChanged();$('edmsg').textContent=`set to “${x.label}” · adjust anything, then ▶ preview edit or save as new`}
-document.addEventListener('click',async e=>{const b=e.target.closest('[data-sgplay],[data-sguse],[data-sgno]');if(!b||!SG)return;e.stopPropagation();
- const k=+(b.dataset.sgplay??b.dataset.sguse??b.dataset.sgno),x=SG.r.suggestions[k];
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-sgplay],[data-sguse],[data-sgno],[data-sgup],[data-sgdown],[data-sgreason]');if(!b||!SG)return;e.stopPropagation();
+ const k=+(b.dataset.sgplay??b.dataset.sguse??b.dataset.sgno??b.dataset.sgup??b.dataset.sgdown??b.dataset.sgreason),x=SG.r.suggestions[k];
+ const base={path:S[SG.i][F.path],move:x.id,family:x.family,material:x.material,arm:x.arm,params:x.params,source:'suggestion'};
+ if(b.dataset.sgup!=null||b.dataset.sgdown!=null){const up=b.dataset.sgup!=null,row=b.closest('[data-sgk]');
+  row.querySelector('[data-sgup]').classList.toggle('on',up);row.querySelector('[data-sgdown]').classList.toggle('on',!up);
+  row.querySelector('[data-sgwhy]').hidden=up;sgRate({...base,rating:up?1:-1});return}
+ if(b.dataset.sgreason!=null){b.parentNode.querySelectorAll('[data-sgreason]').forEach(z=>z.classList.toggle('on',z===b));sgRate({...base,rating:-1,reason:b.dataset.r});return}
  if(b.dataset.sgplay!=null){const was=players.get('sg'+k);stopAll();if(was)return;const a=new Audio(x.url);a.loop=true;a.play();players.set('sg'+k,a);b.classList.add('playing');sgFb(x,'play');return}
  if(b.dataset.sguse!=null){stopAll();await sgApply(x);sgFb(x,'apply');document.querySelectorAll('[data-sgk]').forEach(r=>r.style.background=+r.dataset.sgk===k?'#1f2630':'');return}
  sgFb(x,'dismiss');b.closest('[data-sgk]').remove()},true);
+// rate your own edit (whatever the editor is set to): the same ratings teach the suggestions
+const _openEditorRate=openEditor;
+openEditor=async function(i){await _openEditorRate(i);const box=$('editor');if(!box||box.hidden||!$('edprev')||$('edrate')||!SERVED)return;
+ const d=document.createElement('div');d.id='edrate';d.className='edrow sub';
+ d.innerHTML=`<span>rate this edit:</span><button id="edup" title="I like this edit">👍</button><button id="eddown" title="I don't like this edit">👎</button><span id="edwhy" hidden>${SGREASONS.map(w=>`<button data-edr="${w}">${w}</button>`).join(' ')}</span><span id="edrmsg"></span>`;
+ $('edprev').closest('.edrow').after(d);
+ const send=async(rating,reason)=>{$('edrmsg').textContent='listening…';const p=edParams();
+  try{await api('api/suggest/rate',{path:S[i][F.path],rating,reason:reason||null,params:p,move:ED.sugg&&!edMoved(p,ED.sugg.params)?ED.sugg.id:null,
+   family:ED.sugg&&!edMoved(p,ED.sugg.params)?ED.sugg.family:null,arm:ED.sugg&&!edMoved(p,ED.sugg.params)?ED.sugg.arm:null,source:'editor'});
+   $('edrmsg').textContent=reason?' noted: '+reason:' noted: it learns from this'}catch(err){$('edrmsg').textContent=' couldn\'t save the rating'}};
+ $('edup').onclick=()=>{$('edup').classList.add('on');$('eddown').classList.remove('on');$('edwhy').hidden=true;send(1)};
+ $('eddown').onclick=()=>{$('eddown').classList.add('on');$('edup').classList.remove('on');$('edwhy').hidden=false;send(-1)};
+ $('edwhy').onclick=e=>{const r=e.target.dataset.edr;if(!r)return;$('edwhy').querySelectorAll('button').forEach(z=>z.classList.toggle('on',z===e.target));send(-1,r)}};
+// has the edit been changed since a suggestion set it? (then it's your edit, not the suggestion)
+const edNz=(k,v)=>{if(v==null||v===false||v==='')v={stretch:1,semis:0,tone:20000}[k]??'';return v===true?'on':typeof v==='number'?Math.round(v*100)/100:String(v)};
+const edMoved=(p,q)=>['stretch','semis','tape','reverse','tune_key'].some(k=>edNz(k,p[k])!==edNz(k,q[k]))||Math.abs(Math.log((p.tone||20000)/(q.tone||20000)))>0.05;
 const _edSaveSg=edSave;
 edSave=async function(...a){const x=ED&&ED.sugg;const r=await _edSaveSg.apply(this,a);if(x)sgFb(x,'save');return r};
 

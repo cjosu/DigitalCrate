@@ -60,6 +60,7 @@ function render(){if(!D.ready){$('app').innerHTML='<div class="card">No samples 
   A short sample (3 s or less) you played once and passed over, while starring others in the same session, counts as a weak "not this one": a 1-second clip can't be skipped.<br><br>
   To fill in the gaps, the model also treats random samples you've never heard as weak "probably not" examples (60 per favourite, each worth a tenth of a skip). Most of the library is like that, so the model learns what sets your picks apart.</div></details>
  </section>
+ ${editsHTML(D.edits)}
  <section class="card"><h2>Where it's going wrong</h2>
   ${wrongHTML(E)}
  </section>
@@ -88,6 +89,17 @@ function wrongHTML(E){const miss=E.missed.filter(r=>r.pct<70),bad=E.wrong.filter
  h+=bad.length?`<div class="sub" style="margin:10px 0 2px">✕ samples it still ranks above the middle</div>${bad.map(r=>exRow(r)).join('')}`
   :'<div class="sub" style="margin:6px 0">Everything you marked ✕ ranks below the middle.</div>';
  return h}
+function editsHTML(E){if(!E)return'';const sl=E.slots||{},r=E.ratings||{},m=E.model||{};
+ const shown=Object.values(sl).reduce((a,x)=>a+x.shown,0),nr=Object.values(r).reduce((a,x)=>a+x.up+x.down,0);
+ if(!shown&&!nr)return '';
+ const pc=(a,b)=>b?Math.round(a/b*100)+'%':'—',row=(k,lab)=>{const s=sl[k]||{shown:0,kept:0},q=r[k]||{up:0,down:0};
+  return `<span>${lab}</span><span>${s.shown}</span><span>${pc(s.kept,s.shown)}</span><span>${q.up} 👍 · ${q.down} 👎</span><span>${pc(q.up,q.up+q.down)}</span>`};
+ return `<section class="card"><h2>Edit suggestions (✨ in the editor)</h2>
+ <div style="display:grid;grid-template-columns:auto repeat(4,auto);gap:4px 16px;font-size:13px;align-items:center">
+ <span class="sub"></span><span class="sub">shown</span><span class="sub">used or saved</span><span class="sub">your ratings</span><span class="sub">liked</span>
+ ${row('critic','the model\'s picks')}${row('wildcard','the random wildcard')}${r['your edits']?`<span>your own edits</span><span>—</span><span>—</span><span>${r['your edits'].up} 👍 · ${r['your edits'].down} 👎</span><span>${pc(r['your edits'].up,r['your edits'].up+r['your edits'].down)}</span>`:''}</div>
+ <div class="sub" style="margin-top:8px">If the model's picks are used and liked more often than the wildcard, it's helping. Every 👍/👎 (and why) teaches it which edits you like and how strong.
+ ${m.on?`Its edit model, learned from your ${m.n} ratings, ${m.auc!=null?`predicts a rating it hasn't seen ${Math.round(m.auc*100)}% of the time.`:'is on (its accuracy shows after about 12 ratings).'}`:`Its edit model starts after about 8 ratings with a few of each (${m.n||0} so far).`}</div></section>`}
 function chart(){const H=D.history||[];if(H.length<2)return H.length?'<div class="sub" style="margin-top:10px">The trend appears here after the next change to your ratings.</div>':'';
  // the vertical scale fits the data (not 0-100%), so a change of a point or two is visible; gridlines say where it is
  const keys=['auc','auc_regression','auc_trees'],vals=H.flatMap(h=>keys.map(k=>h[k]).filter(v=>v!=null));

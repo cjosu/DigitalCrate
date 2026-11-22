@@ -154,8 +154,11 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 - **✨ Suggested edits:** in the editor, DigitalCrate renders a dozen edits that suit the sound (gentle lifts, natural
   tuning and a little space for voices; an octave down, darker, washed out or slower for pads and textures) and your
   taste model judges each *result*, with a cost for losing what the sample is. You get its three best, from different
-  kinds of edit, plus a random wildcard; **use** sets the editor to it. It learns which kinds you keep, and keeps
-  score of its picks against the wildcard. Checked first: on 20 samples it ranked sensible edits above deliberately
+  kinds of edit, plus a random wildcard; **use** sets the editor to it. Rate any suggestion, or your own edit, 👍/👎
+  with an optional reason (*too much*, *too subtle*, *sounds processed*, *wrong mood*): it learns which moves you like
+  for each kind of sound, how strong to make them, and which ones sound processed to you; after a few ratings a small
+  edit model learns from how each rated edit changed the sound. The Taste page keeps score of its picks against the
+  wildcard. Checked first: on 20 samples it ranked sensible edits above deliberately
   bad ones 81% of the time. It hears what a result sounds like, not processing artifacts, so every move uses the
   engines you rated best in blind tests.
 - **Variations:** generative reworks chosen by what you've liked, including vocals tuned to their own key.

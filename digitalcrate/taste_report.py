@@ -119,6 +119,14 @@ def measure_soon(sig):
     threading.Thread(target=go, daemon=True).start()
 
 
+def _edits():
+    try:
+        from .suggest import stats
+        return stats()
+    except Exception:
+        return None
+
+
 def explain():
     con = _history(_db())
     L = _library(con)
@@ -130,7 +138,7 @@ def explain():
     res = _FIT.get(None) or {}
     key = res.get("_key")
     if _CACHE.get("key") == key and not _MEASURING.is_set():
-        return _CACHE["value"]
+        return dict(_CACHE["value"], edits=_edits())  # edit ratings change more often than the model: always fresh
 
     # what it learns from
     fav = {r[0] for r in con.execute("SELECT path FROM favorites")}
@@ -215,7 +223,8 @@ def explain():
             by_cat.setdefault(m["category"], []).append(pct[i] * 100)
         if m.get("kind"):
             by_kind.setdefault(m["kind"], []).append(pct[i] * 100)
-    value = dict(ready=True, accuracy=acc, history=hist, signals=dict(kinds, listens=n_listen,
+    edits = _edits()
+    value = dict(ready=True, accuracy=acc, edits=edits, history=hist, signals=dict(kinds, listens=n_listen,
                  labelled=res.get("n_labels"), positive=res.get("n_pos")), learned=learned, examples=examples,
                  by_category=sorted([[c, round(float(np.mean(v))), len(v)] for c, v in by_cat.items()],
                                     key=lambda x: -x[1]),

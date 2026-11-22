@@ -497,6 +497,11 @@ class Handler(SimpleHTTPRequestHandler):
                 from .suggest import suggest
                 return self._json(suggest(path, req.get("project_key") or None, req.get("start"), req.get("end"),
                                           log=not req.get("nolog")))
+            elif self.path == "/api/suggest/rate":
+                from .suggest import rate
+                return self._json(rate(path, int(req.get("rating", 0)), req.get("reason") or None, req.get("params"),
+                                       req.get("move"), req.get("family"), req.get("material"), req.get("arm"),
+                                       req.get("source") or "suggestion"))
             elif self.path == "/api/suggest/feedback":
                 from .suggest import feedback
                 feedback(path, req.get("id"), req.get("move"), req.get("family"), req.get("arm"), req.get("material"),
