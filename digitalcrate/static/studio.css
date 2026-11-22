@@ -44,7 +44,8 @@
 .pad svg{width:100%;height:16px}.pad{height:68px}
 .sk.skmini{padding:6px 16px;max-height:none}.skminibar{display:flex;gap:10px;align-items:center;font-size:13px}
 .dlane .ctl select{padding:1px 4px}.dgrid{grid-column:1/-1;padding:2px 0 4px 42px;display:flex;flex-direction:column;gap:3px}
-.drow{display:grid;grid-template-columns:28px 92px 1fr auto auto;gap:6px;align-items:center}.drow.muted{opacity:.45}
+.drow{display:grid;grid-template-columns:28px 92px 1fr auto auto auto;gap:6px;align-items:center}
+.dvol{display:inline-flex;align-items:center;gap:4px}.dvol input{width:64px}.dvol output{font:10px ui-monospace,Menlo,monospace;color:var(--mute);min-width:44px;text-align:right}.drow.muted{opacity:.45}
 .dlab{font-size:11px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dsteps{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:2px}
 .dstep{height:18px;padding:0;border:1px solid #2a2f37;background:#171a20;border-radius:3px;min-width:0}.dstep.beat{border-color:#3a414c}
@@ -59,3 +60,4 @@
 .dtri{display:inline-block;width:12px;color:var(--mute);font-size:10px}.dedit:hover .dtri,.dedit.on .dtri{color:var(--acc)}
 .dped{grid-column:1/-1;margin:2px 0 6px 34px;padding:6px;border:1px solid #2a2f37;border-radius:8px}.dped canvas{width:100%;height:56px;display:block;cursor:ew-resize;background:#101317;border-radius:4px}
 .dped .ctl{margin-top:6px}.dped input[type=range]{width:90px}.dped output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);margin-left:4px}
+.skbpm{display:inline-flex;gap:3px;align-items:center;font-size:12px;font-weight:400}.skbpm input{width:52px;padding:1px 4px;text-align:center}

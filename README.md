@@ -97,7 +97,7 @@ drum; this compares the recording's character, with what makes a kick a kick tak
 it picks a song's other drums out of all of that kind with AUC 0.83.) Pads start on the hit: most drum hits in a library open with
 20–40 ms before the impact, so each pad's start is moved to it when it loads. Click a pad's name to edit it in place:
 drag its start and end on the waveform, tune it (pitch and length together, like a sampler), shorten its decay, or
-**↗ full editor** for punch, drive and low cut (save as new and the pad switches to your edit). It's one lane, so mute, solo, its fader, bounce, stems
+**↗ full editor** for punch, drive and low cut (save as new and the pad switches to your edit). Each pad has its own volume fader (every pad starts equally loud at 0 dB), and step edits, volumes and pad edits are heard at once while it plays. The sketchpad has its own tempo control (− / +, type it, or tap): a drums-only sketch changes tempo live; sample lanes are re-stretched. It's one lane, so mute, solo, its fader, bounce, stems
 and the Live set treat it like any other.
 
 **Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,

@@ -425,6 +425,7 @@ function drumLaneHTML(l,k){const n=16*l.bars;
  <div class="dgrid" data-dgrid="${k}" style="--n:${n}">${l.pads.map((p,r)=>{const s=S[p.i]||[];return `<div class="drow${p.mute?' muted':''}">
   <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><button class="dlab dedit${p.open?' on':''}" data-dedit="${k}:${r}" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · click to ${p.open?'close':'open'} this pad's editor (start, end, tune, decay)"><span class="dtri">${p.open?'▾':'▸'}</span>${esc(s[F.sub]||'hit')}${p.tune||p.decay||p.end||(p.start>0.003&&!p.auto)?' ✎':''}</button>
   <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}" data-dstep="${k}:${r}:${j}" ${v?`style="opacity:${(0.35+0.65*v).toFixed(2)}"`:''}></button>`).join('')}</div>
+  <span class="dvol" title="this pad's volume against the other pads (every pad starts equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-dpv="${k}:${r}"><output>${dbTxt(p.db||0)}</output></span>
   <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>${p.open?padEditHTML(l,k,p,r):''}`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
 function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading&&!f.missing)return '<div class="sub dfind">listening for hits that match this kit…</div>';if(f.error)return `<div class="sub dfind">${esc(f.error)}</div>`;
  const rows=f.missing.filter(m=>f.all||!m.have);
@@ -500,11 +501,28 @@ $('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dedit
  if(t.dataset.dpend!=null){p.end=null;drawSK();return}
  // the full editor: when you save as new, this pad switches to your edit
  select(p.i,'list');await openEditor(p.i);if(ED){ED.fromPad={lane:SK.lanes[+k],pad:p}};toast('edit it, then save as new: the pad switches to your edit')},true);
+$('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dpv==null)return;const [k,r]=t.dataset.dpv.split(':').map(Number),p=SK.lanes[k].pads[r];
+ p.db=+t.value;t.parentNode.querySelector('output').textContent=dbTxt(p.db)},true);  // heard within a step (drumTick reads it as it schedules)
+$('sk').addEventListener('dblclick',e=>{const t=e.target;if(!t.dataset||t.dataset.dpv==null)return;e.stopPropagation();const [k,r]=t.dataset.dpv.split(':').map(Number);SK.lanes[k].pads[r].db=0;drawSK()},true);
 $('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dptune==null&&t.dataset.dpdec==null)return;const [k,r]=(t.dataset.dptune||t.dataset.dpdec).split(':').map(Number),p=SK.lanes[k].pads[r],o=t.parentNode.querySelector('output');
  if(t.dataset.dptune!=null){p.tune=+t.value;o.textContent=(p.tune>0?'+':'')+p.tune+' st'}else{p.decay=+decayS(+t.value).toFixed(3);o.textContent=p.decay?p.decay.toFixed(2)+' s':'natural'}},true);
 const _drawSKpad=drawSK;drawSK=function(){_drawSKpad();padWaves()};
 const _edSavePad=edSave;edSave=async function(...a){const fp=ED&&ED.fromPad,n0=S.length;const r=await _edSavePad.apply(this,a);
  if(fp&&S.length>n0){const j=S.length-1,p=fp.pad;Object.assign(p,{i:j,path:S[j][F.path],buf:null,start:null,end:null,tune:0,decay:0});await drumLoad(fp.lane);drawSK();toast('the pad now plays your edit')}return r};
+// ---------- tempo in the sketchpad: drums-only sketches change tempo live; sample lanes need re-stretching (a reload)
+function skTempo(b){b=Math.max(40,Math.min(220,Math.round(b*10)/10));if(!b||b===PROJ.bpm)return;
+ if(!SK.playing||SK.lanes.some(l=>l.type!=='drums')){if(SK.playing&&SK.lanes.some(l=>l.type!=='drums'))toast(`re-stretching the lanes to ${b} bpm…`);setProj({bpm:b});drawSK();return}
+ const now=AC.currentTime,pos=(now-SK.start)/barLen();PROJ.bpm=b;try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
+ SK.start=now-pos*barLen();SK.lanes.forEach(l=>{l.nextAbs=null;l.sched=[]});  // same place in the bar, new speed
+ const inp=$('skbpm');if(inp&&document.activeElement!==inp)inp.value=Math.round(b)}
+let TAPS=[];
+$('sk').addEventListener('click',e=>{const t=e.target.closest('[data-skbpm],#sktap');if(!t)return;e.stopPropagation();
+ if(t.id==='sktap'){const now=performance.now();TAPS=TAPS.filter(x=>now-x<2500);TAPS.push(now);
+  if(TAPS.length>=3){const iv=TAPS.slice(1).map((x,k)=>x-TAPS[k]);skTempo(60000/(iv.reduce((a,c)=>a+c,0)/iv.length));const inp=$('skbpm');if(inp)inp.value=Math.round(PROJ.bpm)}
+  t.textContent=TAPS.length<3?`tap ${TAPS.length}/3…`:'tap';clearTimeout(t._r);t._r=setTimeout(()=>{t.textContent='tap'},2600);return}
+ skTempo((PROJ.bpm||120)+(+t.dataset.skbpm)*(e.shiftKey?5:1))},true);
+$('sk').addEventListener('change',e=>{if(e.target.id==='skbpm')skTempo(+e.target.value)},true);
+$('sk').addEventListener('keydown',e=>{if(e.target.id==='skbpm'&&e.key==='Enter')e.target.blur()},true);
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
  stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)
 SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
@@ -574,7 +592,7 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
   if(SK.playing)el.innerHTML=`<div class="skminibar">🎛 <b>sketch playing</b><span class="sub">samples you play are heard over it</span><span id="skpos" class="sub"></span><span style="flex:1"></span><button id="skplay" class="pill">■ stop</button><button id="skshow">▴ show</button></div>`;
   return}
  el.classList.remove('skmini');el.hidden=false;
- el.innerHTML=`<h3><button id="skhide" title="hide the sketchpad (it keeps playing; the 🎛 sketchpad button brings it back)">▾ hide</button> 🎛 Sketchpad${hq('sketch')} <span class="sub">${esc(PROJ.key||'no key')} · ${PROJ.bpm||'—'} bpm — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
+ el.innerHTML=`<h3><button id="skhide" title="hide the sketchpad (it keeps playing; the 🎛 sketchpad button brings it back)">▾ hide</button> 🎛 Sketchpad${hq('sketch')} <span class="skbpm" title="the sketch's tempo (the project tempo): − / + (shift: ±5), type it, or tap the beat"><button class="tbtn" data-skbpm="-1">−</button><input id="skbpm" type="number" min="40" max="220" step="1" value="${Math.round(PROJ.bpm||120)}"><button class="tbtn" data-skbpm="1">+</button> bpm <button class="tbtn" id="sktap">tap</button></span> <span class="sub">${esc(PROJ.key||'no key')} — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
  <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skals" title="a Live set: one audio track per lane, a clip wherever it plays, at the sketch's tempo (muted lanes come in as muted tracks). Opens in Live.">⇩ Live set</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button></h3>
