@@ -83,7 +83,9 @@ category; chips show one category at a time. **⧉** plays a pair together, **�
 ![Sketchpad: playheads, trimming, relative faders, tempo matching](docs/img/sketch.gif)
 
 Layer up to 8 samples, in the project key and tempo. Open a **kit** in it, or add samples with **＋**. **▾ hide**
-tucks it away while it keeps playing; the 🎛 sketchpad button brings it back.
+tucks it away while it keeps playing: a small bar at the bottom says so, with **■ stop** and **▴ show**. Samples you
+play are heard over the sketch (the now-playing bar says *with the sketch*), and Space stops the sample, then the
+sketch. Click a saved sketch's name to open it without playing.
 
 **Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,
 a texture, a vocal chop and a bass from other songs that fit it in key and sound. ★ and ✕ change what they pick,

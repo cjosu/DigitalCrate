@@ -346,7 +346,11 @@ function skHeads(){const now=AC.currentTime,dpr=devicePixelRatio||1;SK.lanes.for
  const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);g.drawImage(c._base,0,0);
  const v=(l.on||[]).filter(v=>now>=v.t0&&now<v.t0+v.dur).pop();if(!v||!SK.playing)return;
  const x=(v.off+(now-v.t0))/l.buf.duration*c.width;g.fillStyle='#fff';g.fillRect(x-dpr,0,2*dpr,c.height);g.fillStyle='rgba(255,255,255,.15)';g.fillRect(x-6*dpr,0,5*dpr,c.height)})}
-function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
+function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
+ if(!SK.open){el.classList.toggle('skmini',SK.playing);el.hidden=!SK.playing;  // hidden but playing: a small bar to stop it or bring it back
+  if(SK.playing)el.innerHTML=`<div class="skminibar">🎛 <b>sketch playing</b><span class="sub">samples you play are heard over it</span><span id="skpos" class="sub"></span><span style="flex:1"></span><button id="skplay" class="pill">■ stop</button><button id="skshow">▴ show</button></div>`;
+  return}
+ el.classList.remove('skmini');el.hidden=false;
  el.innerHTML=`<h3><button id="skhide" title="hide the sketchpad (it keeps playing; the 🎛 sketchpad button brings it back)">▾ hide</button> 🎛 Sketchpad${hq('sketch')} <span class="sub">${esc(PROJ.key||'no key')} · ${PROJ.bpm||'—'} bpm — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
@@ -387,6 +391,7 @@ function drawSK(){const el=$('sk');el.hidden=!SK.open;if(!SK.open)return;
  sk.addEventListener('dblclick',e=>{const c=e.target.closest('[data-skw]');if(!c)return;SK.lanes[+c.dataset.skw].trim=null;drawSK()})})();
 $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skplay'){SK.playing?skStop():skPlay();return}if(t.id==='skhide'){SK.open=false;drawSK();drawProj();return}
+ if(t.id==='skshow'){SK.open=true;drawSK();drawProj();return}
  if(t.id==='skclear'){skStop();SK.lanes=[];SK.name='';drawSK();drawProj();return}
  if(t.dataset.skm!=null){const l=SK.lanes[+t.dataset.skm];l.mute=!l.mute;skGains();drawSK();return}
  if(t.dataset.sks!=null){const l=SK.lanes[+t.dataset.sks];l.solo=!l.solo;skGains();drawSK();return}
@@ -440,12 +445,13 @@ function wavB64(buf){const n=buf.length,ch=2,sr=buf.sampleRate,b=new ArrayBuffer
 async function renderKitExtras(){const L=$('list');
  L.querySelectorAll('[data-kitexp]').forEach(b=>{const k=D.kits.findIndex(x=>x.name===b.dataset.kitexp);b.insertAdjacentHTML('afterend',` <button data-kitrack="${k}" title="export + Ableton Drum Rack">⇩ rack</button> <button data-kitsk="${k}" title="load into the sketchpad">🎛 sketch</button>`)});
  if(!SERVED)return;let sk=[];try{sk=await api('api/sketches')}catch(e){}if(st.tab!=='K'||!sk.length)return;
- L.insertAdjacentHTML('afterbegin',`<div class="kit"><h3><span>Your sketches${hq('kits')}</span></h3>${sk.map(x=>{const s=JSON.parse(x.state);return`<div class="prow"><button class="play" data-skopen="${esc(x.name)}">▶</button><div style="min-width:0"><div class="name">${esc(x.name)}</div><div class="meta">${esc(s.key||'')} · ${s.bpm||'—'} bpm · ${s.lanes.length} lanes · ${esc(x.updated_at?new Date(x.updated_at.replace(' ','T')+'Z').toLocaleString():'')}</div></div><button data-skdel="${esc(x.name)}">✕</button></div>`}).join('')}</div>`);
+ L.insertAdjacentHTML('afterbegin',`<div class="kit"><h3><span>Your sketches${hq('kits')}</span></h3>${sk.map(x=>{const s=JSON.parse(x.state);return`<div class="prow"><button class="play" data-skopen="${esc(x.name)}">▶</button><div style="min-width:0"><div class="name"><a href="#" data-skload="${esc(x.name)}" title="open in the sketchpad without playing">${esc(x.name)}</a></div><div class="meta">${esc(s.key||'')} · ${s.bpm||'—'} bpm · ${s.lanes.length} lanes · ${esc(x.updated_at?new Date(x.updated_at.replace(' ','T')+'Z').toLocaleString():'')}</div></div><button data-skdel="${esc(x.name)}">✕</button></div>`}).join('')}</div>`);
  L.querySelectorAll('[data-skopen]').forEach(b=>b.onclick=()=>{const x=sk.find(z=>z.name===b.dataset.skopen);skOpen(x.name,JSON.parse(x.state))});
+ L.querySelectorAll('[data-skload]').forEach(b=>b.onclick=e=>{e.preventDefault();const x=sk.find(z=>z.name===b.dataset.skload);skOpen(x.name,JSON.parse(x.state),false)});
  L.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=async()=>{await api('api/sketch/delete',{name:b.dataset.skdel});render()})}
-async function skOpen(name,s){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
+async function skOpen(name,s,play=true){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
  SK.name=name;SK.lanes=s.lanes.map(l=>({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.i!=null);
- const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();skPlay()}
+ const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();if(play)skPlay()}
 document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kitrack]');if(kr){e.stopPropagation();const k=D.kits[+kr.dataset.kitrack];kr.textContent='building…';
   try{const r=await api('api/export',{scope:'paths',paths:kitMembers(k).map(i=>S[i][F.path]),name:k.name,rack:true,reveal:true});kr.textContent=`rack ✓ (${r.count})`}catch(err){kr.textContent='error'}return}
  const ks=e.target.closest('[data-kitsk]');if(ks){e.stopPropagation();const k=D.kits[+ks.dataset.kitsk];skStop();SK.lanes=[];SK.name=k.name;

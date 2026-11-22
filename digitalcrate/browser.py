@@ -312,7 +312,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-nope]');if
 let NP=null;
 function setNP(path,id,label,i){NP={path,id,label,i};drawNP()}
 function drawNP(){const el=$('np');if(!NP||!(players.size||(ED&&ED.P))){el.hidden=true;return}el.hidden=false;
- el.innerHTML=`<button class="play playing" id="npstop">■</button><div class="lbl"><span class="sub">now playing</span> · ${esc(NP.label)}</div>
+ el.innerHTML=`<button class="play playing" id="npstop">■</button><div class="lbl"><span class="sub">now playing</span> · ${esc(NP.label)}${window.SK&&SK.playing?' <span class="sub" style="color:var(--acc)">· with the sketch</span>':''}</div>
  ${star(NP.path,NP.id,NP.label)}${nope(NP.path,NP.id)}${xp(NP.path)}${NP.i!=null?`<button id="npshow">show</button>`:''}<span class="sub">F ★ · X ✕</span>`;
  $('npstop').onclick=()=>{stopAll()};if($('npshow'))$('npshow').onclick=()=>select(NP.i,'go')}
 document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||!NP||!players.size)return;
@@ -814,7 +814,8 @@ function playVar(k){const rows=[...document.querySelectorAll('#vars .vrow')];if(
  rows.forEach((r,j)=>{r.style.background=j===k?'#1f2630':'';r.querySelector('.play').classList.toggle('playing',j===k)});rows[k].scrollIntoView({block:'nearest'})}
 document.addEventListener('keydown',e=>{if(e.target.tagName!=='INPUT'&&e.key==='Backspace'&&HIST.length){e.preventDefault();goBack()}});
 document.addEventListener('keydown',e=>{if(e.key!==' '||['INPUT','SELECT','TEXTAREA','BUTTON'].includes(e.target.tagName))return;
- if(players.size||(ED&&ED.P)){e.preventDefault();e.stopImmediatePropagation();stopAll();if(ED)edPaint()}},true);
+ if(players.size||(ED&&ED.P)){e.preventDefault();e.stopImmediatePropagation();stopAll();if(ED)edPaint()}
+ else if(window.SK&&SK.playing&&window.CRATE){e.preventDefault();e.stopImmediatePropagation();CRATE.skStop()}},true);
 document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT')return;if(!document.querySelector('#vars'))return;
  if(e.key==='ArrowRight'){e.preventDefault();playVar(vcur+1)}else if(e.key==='ArrowLeft'){e.preventDefault();playVar(vcur-1)}
  else if(e.key==='0'){playVar(0)}else if(e.key===' '){e.preventDefault();stopAll();document.querySelectorAll('.vrow .play').forEach(b=>b.classList.remove('playing'))}});
