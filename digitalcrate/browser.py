@@ -660,7 +660,8 @@ function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').va
   out.forEach(i=>{const a=S[i][F.artist];if(!by.has(a))by.set(a,[]);by.get(a).push(i)});
   const lists=[...by.values()].sort((x,y)=>(TASTE.score[S[y[0]][F.path]]??S[y[0]][F.q])-(TASTE.score[S[x[0]][F.path]]??S[x[0]][F.q]));
   const rr=[];for(let r=0;rr.length<out.length;r++)lists.forEach(l=>{if(l[r]!=null)rr.push(l[r])});return rr}
- if(k==='you'||k==='vibe'||k==='disc'){const m=TASTE[{you:'score',vibe:'vibe',disc:'discover'}[k]];return byKey(out,i=>m[S[i][F.path]]??-9)}
+ if(k==='you'||k==='vibe'||k==='disc'){if(st.tab!=='F')out=out.filter(i=>!FAV.has(S[i][F.path]));  // recommendations: not what you've already starred
+  const m=TASTE[{you:'score',vibe:'vibe',disc:'discover'}[k]];return byKey(out,i=>m[S[i][F.path]]??-9)}
  const cmp={q:(a,b)=>S[b][F.q]-S[a][F.q],key:(a,b)=>(S[a][F.cam]||'zz').localeCompare(S[b][F.cam]||'zz',undefined,{numeric:true}),
  bpm:(a,b)=>S[a][F.bpm]-S[b][F.bpm],dur:(a,b)=>S[b][F.dur]-S[a][F.dur],ref:(a,b)=>S[b][F.ref]-S[a][F.ref],new:(a,b)=>((D.tracks[S[b][F.tid]]||[0])[0]-(D.tracks[S[a][F.tid]]||[0])[0])||S[b][F.q]-S[a][F.q],var:(a,b)=>((D.variants[b]||[]).length-(D.variants[a]||[]).length)||S[b][F.q]-S[a][F.q],rnd:()=>Math.random()-.5}[k];return out.sort(cmp)}
 function rowHTML(i){const s=S[i],c=col(s[F.cat]);const bpm=s[F.bpm]?`${s[F.bpm]} bpm`:'free';
