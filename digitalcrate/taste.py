@@ -47,6 +47,9 @@ def log_event(path, type_, value=None, sample_id=None, context=None):
 
 # ---------------------------------------------------------------- labels from events
 
+PASSED_OVER = 0.2  # weight of "short, played once, passed over while you starred others" (0.15-0.3 tested best)
+
+
 def item_labels(con, recent_hours=None, durs=None):
     """Aggregate events into (path -> (y, weight)). Explicit signals dominate implicit ones."""
     now = time.time()
@@ -54,6 +57,19 @@ def item_labels(con, recent_hours=None, durs=None):
     fav = {r["path"] for r in con.execute("SELECT path FROM favorites")}
     if durs is None:
         durs = {r["path"]: r["dur"] or 0 for r in con.execute("SELECT path, dur FROM samples")}
+    # short samples you passed over: played once and never again, in a session (events < 10 min apart) where you
+    # starred something else. A 1-second clip can't be skipped, so this is the only "not this one" it can get.
+    # Held-out test (every heard sample's labels hidden in its own fold): AUC 0.765 -> 0.775, better in 13 of 15 folds.
+    session, starred, plays, sess_of, last = 0, {}, {}, {}, None
+    for r in con.execute("SELECT * FROM events ORDER BY ts"):
+        if last is not None and r["ts"] - last > 600:
+            session += 1
+        last = r["ts"]
+        if r["type"] == "star":
+            starred.setdefault(session, set()).add(r["path"])
+        elif r["type"] == "listen":
+            plays[r["path"]] = plays.get(r["path"], 0) + 1
+            sess_of.setdefault(r["path"], set()).add(session)
     for r in con.execute("SELECT * FROM events ORDER BY ts"):
         age_d = (now - r["ts"]) / 86400
         w_time = np.exp(-age_d / 60)  # slow decay: taste drifts over months
@@ -88,6 +104,8 @@ def item_labels(con, recent_hours=None, durs=None):
             net = d["pos"] - d["neg"]
             if abs(net) > 0.05:
                 out[p] = (1 if net > 0 else 0, min(1.0, abs(net)))
+            elif plays.get(p) == 1 and durs.get(p, 9) <= 3 and any(starred.get(s, set()) - {p} for s in sess_of.get(p, ())):
+                out[p] = (0, PASSED_OVER)
     for p in fav:
         out[p] = (1, 1.5)
     return out

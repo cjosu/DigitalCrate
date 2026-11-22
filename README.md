@@ -231,7 +231,8 @@ flowchart LR
 - **Compatibility** (`build.py`, `pairing.py`): harmony (Camelot distance + chroma) × tempo (loops) × role and sound.
   A two-tower model trained on co-occurring stems from your own songs is available as an alternative "vibe" score.
 - **Taste** (`taste.py`): Bayesian logistic regression on CLAP embeddings, blended with nearest-favorite similarity;
-  implicit feedback counts listening time and replays. Beta posteriors per technique steer the variations.
+  implicit feedback counts listening time, replays and quick skips, and a short clip you played once and passed
+  over while starring others counts as a weak *not this one* (a 1-second clip can't be skipped). Beta posteriors per technique steer the variations.
 - **Conforming** (`conform.py`): the smallest pitch shift to the project key; loops, rhythmic phrases and
   tempo-matched clips are stretched with Signalsmith Stretch, other clips Re-Pitched tape-style. Engines were picked by
   blind listening against Rubber Band, WORLD and a neural vocoder.

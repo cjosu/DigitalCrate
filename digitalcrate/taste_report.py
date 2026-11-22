@@ -1,9 +1,11 @@
 """The taste model explained, for the Taste page (/taste): how well it predicts you, what it has learned, what it is
 learning from, where it's unsure, and how all that changes over time.
 
-Accuracy is measured honestly: a fifth of your favourites is hidden, the model is fitted on everything else, and it
-must rank those hidden favourites above the samples you listened to and didn't star (AUC: 0.5 is guessing, 1.0 is
-perfect). Five folds, two shuffles. Two simple rankings are measured the same way for context: sample quality alone,
+Accuracy is measured honestly: every sample you've heard is put in one of five groups; for each group, everything
+you told the model about those samples (stars, ✕, skips, listening) is hidden, the model is fitted on the rest, and it
+must rank the group's favourites above the group's heard-but-not-starred samples (AUC: 0.5 is guessing, 1.0 is
+perfect). Hiding every label of the group, not just the stars, keeps a rule from being graded on samples it labelled
+itself. Five folds, two shuffles. Two simple rankings are measured the same way for context: sample quality alone,
 and random. Each result is kept in `taste_history`, so the page can show the trend as you rate more.
 
 "What it has learned" reads the fitted model:
@@ -54,14 +56,16 @@ def accuracy(con=None, folds=5, seeds=2):
         if r[0] in pos:
             q[pos[r[0]]] = r[1] or 0
     res, base = [], []
+    allh = sorted(heard | set(fav))
+    favs = set(fav)
     for seed in range(seeds):
-        f = np.array(fav); np.random.default_rng(seed).shuffle(f)
+        f = np.array(allh); np.random.default_rng(seed).shuffle(f)
         for k in range(folds):
             hide = set(f[k::folds].tolist())
             lab = {p: v for p, v in labels.items() if p not in hide}
             r = fit(None, labels=lab)
-            cand = [p for p in heard if p in hide or p not in fav]  # hidden favourites vs heard, never starred
-            y = np.array([p in hide for p in cand])
+            cand = sorted(hide)  # this group's favourites vs this group's heard, never starred
+            y = np.array([p in favs for p in cand])
             idx = [pos[p] for p in cand]
             a = _auc(y, np.asarray(r["score"])[idx])
             b = _auc(y, q[idx])
