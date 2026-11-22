@@ -94,7 +94,10 @@ missing (snare, clap, hats, cymbals, shaker, tom, percussion), three hits at a t
 with the pads you have: **↻ more** pages through 30 per kind, ✕ drops one for the next, **≈** steers a kind toward
 one hit's sound, and a tick shows alternatives for the kinds you already have; **🥁 build a kit around this** on any drum hit starts one. ("Goes well with" finds more of the same
 drum; this compares the recording's character, with what makes a kick a kick taken out: on your library's own songs
-it picks a song's other drums out of all of that kind with AUC 0.83.) It's one lane, so mute, solo, its fader, bounce, stems
+it picks a song's other drums out of all of that kind with AUC 0.83.) Pads start on the hit: most drum hits in a library open with
+20–40 ms before the impact, so each pad's start is moved to it when it loads. Click a pad's name to edit it in place:
+drag its start and end on the waveform, tune it (pitch and length together, like a sampler), shorten its decay, or
+**↗ full editor** for punch, drive and low cut (save as new and the pad switches to your edit). It's one lane, so mute, solo, its fader, bounce, stems
 and the Live set treat it like any other.
 
 **Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,

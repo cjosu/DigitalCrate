@@ -55,3 +55,6 @@
 .dfrow{display:grid;grid-template-columns:150px 1fr;gap:6px;align-items:center}.dfpicks{display:flex;flex-wrap:wrap;gap:4px 14px}
 .dfpick{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
 .dfnav{display:inline-flex;gap:4px;align-items:center;margin-left:auto}.dfpick.steer{outline:1px solid var(--acc);border-radius:6px;padding:0 3px}
+.dedit{background:none;border:0;padding:0;text-align:left;cursor:pointer;font-size:11px;color:var(--mute)}.dedit:hover,.dedit.on{color:var(--acc)}.dedit.on{background:none;border:0}
+.dped{grid-column:1/-1;margin:2px 0 6px 34px;padding:6px;border:1px solid #2a2f37;border-radius:8px}.dped canvas{width:100%;height:56px;display:block;cursor:ew-resize;background:#101317;border-radius:4px}
+.dped .ctl{margin-top:6px}.dped input[type=range]{width:90px}.dped output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);margin-left:4px}
