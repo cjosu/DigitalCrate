@@ -744,8 +744,16 @@ $('list').addEventListener('click',async e=>{const stb=e.target.closest('[data-s
  if(t.dataset.kit!=null){playTogether(kitMembers(D.kits[+t.dataset.kit]));return}
  if(t.dataset.id){navigator.clipboard&&navigator.clipboard.writeText(t.dataset.id);t.textContent='copied';setTimeout(()=>t.textContent=t.dataset.id,800);return}
  if(t.dataset.play!=null){toggle(+t.dataset.play,t);return}
+ if(st.sel===+t.dataset.i){deselect();return}  // clicking the selected sample again unselects it
  select(+t.dataset.i,'list')});
 let HIST=[];
+// unselect: the sample panel goes back to how it starts (Esc, the panel's ✕, or clicking the selected row again)
+const DETAIL_EMPTY=$('detail').innerHTML;
+document.addEventListener('click',e=>{if(e.target.closest('#dclose')){e.stopPropagation();deselect()}},true);
+function deselect(){if(st.sel==null)return;if(typeof edStop==='function')edStop();st.sel=null;HIST=[];
+ document.querySelectorAll('.row.sel').forEach(r=>r.classList.remove('sel'));$('detail').innerHTML=DETAIL_EMPTY}
+document.addEventListener('keydown',e=>{if(e.key!=='Escape'||['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;
+ if(($('helppop')&&!$('helppop').hidden)||($('modal')&&!$('modal').hidden))return;deselect()});
 // Goes-well-with: the best partners overall plus the best few of each category. "All" spreads categories out
 // (each repeat of a category is discounted 15% for ordering only); a chip shows one category, best first.
 function goPool(i){return (P[i]||[]).filter(([j])=>!st.excl.has(S[j][F.genre])&&!GONE.has(j))}
@@ -784,7 +792,7 @@ function dealKits(n=24){const sc=TASTE.score,ok=i=>!GONE.has(i)&&!TASTE.disliked
 function select(i,from){edStop&&edStop();if(from==='go'&&st.sel!=null&&st.sel!==i)HIST.push({i:st.sel,scroll:$('detail').scrollTop});else if(from==='list')HIST=[];
  st.sel=i;vcur=0;document.querySelectorAll('.row').forEach(r=>r.classList.toggle('sel',+r.dataset.i===i));const s=S[i];
  const back=HIST.length?`<div style="margin-bottom:10px"><button id="back">← back to ${esc(S[HIST[HIST.length-1].i][F.artist])} — ${esc(S[HIST[HIST.length-1].i][F.title])}</button> <span class="sub">${HIST.length>1?HIST.length+' steps · ':''}Backspace</span></div>`:'';
- $('detail').innerHTML=back+`<span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span><span class="sub">${esc(s[F.cat])} / ${esc(s[F.sub])}</span>
+ $('detail').innerHTML=back+`<button id="dclose" title="unselect (Esc)" style="float:right;padding:1px 7px">✕</button><span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span><span class="sub">${esc(s[F.cat])} / ${esc(s[F.sub])}</span>
  <div class="big">${esc(s[F.artist])} — ${esc(s[F.title])}</div>${wave(s[F.env],368,48,col(s[F.cat]))}
  <div style="margin:10px 0;display:flex;gap:6px;align-items:center">${star(s[F.path],s[F.id],`${s[F.artist]} — ${s[F.title]} · ${s[F.sub]}`)}<button data-play="${i}" class="play" style="width:auto;border-radius:6px;padding:4px 12px">▶ play</button><button id="edopen">✎ edit</button><button data-xp="${esc(s[F.path])}" title="export this clip to Ableton">⇩ export</button>${SERVED?`<button data-del="${i}" title="delete this sample (you can undo)">🗑 delete</button>`:''}
  <span class="sub">to <input id="xpname" value="${esc(xpName())}" style="width:110px;padding:2px 6px" title="export folder name under User Library/Samples/DigitalCrate"></span></div>
