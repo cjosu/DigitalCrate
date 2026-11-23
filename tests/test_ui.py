@@ -85,6 +85,19 @@ print("DRUMS OK")
 '''
 
 
+def _has_live():
+    try:
+        from digitalcrate.ableton import _template
+        _template()
+        return True
+    except Exception:
+        return False
+
+
+# Drum Racks are built from an installed Live's own factory rack: without Live (as on CI) there's nothing to build from
+needs_live = pytest.mark.skipif(not _has_live(), reason="needs Ableton Live installed (its Drum Rack is the template)")
+
+
 def _song(chords, mel_hz, secs=5.0):
     pad = np.concatenate([tone(c, secs) for c in chords], axis=1)
     t = np.arange(pad.shape[1]) / SR
@@ -389,6 +402,7 @@ def test_rows_drag_out_as_files(page):
     assert got["uri"].startswith("file://") and got["uri"].endswith(".wav")
 
 
+@needs_live
 def test_drum_rack_export_starts_on_the_hit(site):
     """⇩ Ableton / Drum Rack: drum one-shots are written starting on the hit, edited pads as edited."""
     import sqlite3
@@ -487,6 +501,7 @@ def test_velocity_flam_and_choke(page):
     assert choked < 0.2 * ringing, (choked, ringing)
 
 
+@needs_live
 def test_drum_midi_and_rack_export(site):
     import gzip
     import sqlite3
@@ -536,3 +551,56 @@ def test_arrangement_sections(page):
     assert a < 1e-6 and b > 0.01, (a, b)
     snap = json.loads(page.evaluate("JSON.stringify(JSON.parse(CRATE.skSnap()))"))
     assert snap["arr"] == "AB" and snap["sec"] == 1 and snap["lanes"][0]["secs"] == "B"
+
+
+def test_fits_my_track(site, page, tmp_path):
+    """🎚 fits my track: a bounce's key and tempo are detected, results carry their reasons, and the track's key and
+    tempo can become the project's. The file is only analysed (nothing is added to the library)."""
+    import sqlite3
+    A, D, E, Fs, Cs = 220.0, 293.66, 329.63, 369.99, 277.18
+    bounce = _song([[A, Cs, E], [D, Fs, A], [E, A * 2 ** (8 / 12), 493.88 / 2], [A, Cs, E]], 440.0)
+    f = tmp_path / "my bounce.wav"
+    sf.write(f, bounce.T, SR)
+    n0 = sqlite3.connect(site["lib"] / "_data" / "samples.sqlite").execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+    page.click("#mybtn")
+    page.fill("#myIn", str(f))
+    page.click("#myGo")
+    page.wait_for_selector("#sbanner #myproj", timeout=120000)
+    label = page.inner_text("#sbanner")
+    assert "fits my bounce.wav" in label and "bpm" in label
+    assert page.locator("#list .row[data-i] .meta span").first.inner_text().count("sounds like") == 1
+    page.click("#myproj")
+    key = page.evaluate("CRATE.PROJ.key")
+    assert key and key in label
+    n1 = sqlite3.connect(site["lib"] / "_data" / "samples.sqlite").execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+    assert n1 == n0
+
+
+def test_why_this(site, page):
+    """💡 why this? explains a sample's rank: where it stands, and the liked samples it sounds closest to."""
+    paths = page.evaluate("[...document.querySelectorAll('#list .row[data-i]')].slice(0,4).map(r=>S[+r.dataset.i][F.path])")
+    for p in paths[:3]:
+        req = urllib.request.Request(site["base"] + "api/fav", method="POST", data=json.dumps(dict(path=p, on=True)).encode())
+        urllib.request.urlopen(req, timeout=30)
+    page.reload()
+    page.wait_for_function("TASTE.loaded", timeout=60000)
+    i = page.evaluate(f"byPath.get({json.dumps(paths[3])})")
+    page.evaluate(f"select({i},'list')")
+    page.click("#whybtn")
+    page.wait_for_function("document.querySelector('#whybox b')", timeout=60000)
+    txt = page.inner_text("#whybox")
+    assert "In your" in txt and "sounds closest to what you liked" in txt
+    page.locator("#whybox [data-go2]").first.click()  # a liked sample opens; the explanation follows it
+    page.wait_for_function(f"st.sel!=={i}")
+    page.wait_for_function("document.querySelector('#whybox b')", timeout=60000)
+
+
+def test_build_a_kit_around_a_hit(page):
+    """🥁 build a kit around this: the hit goes into the drum lane and the finder offers the rest of a kit."""
+    i = idx(page, "s[F.cat]==='Percussion'&&s[F.sub]==='Kick'")
+    page.evaluate(f"select({i},'list')")
+    page.click("#kitaround")
+    page.wait_for_function("SK.lanes[0]&&SK.lanes[0].type==='drums'&&SK.lanes[0].pads.length===1", timeout=30000)
+    page.wait_for_selector(".dfrow [data-dfadd]", timeout=60000)
+    page.locator(".dfrow").filter(has_text="Snare").first.locator("[data-dfadd]").first.click()
+    page.wait_for_function("SK.lanes[0].pads.length===2", timeout=30000)

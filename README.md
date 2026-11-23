@@ -8,7 +8,7 @@
 the *clean* moments (exposed vocals, pads, chords, textures, drum hits), tags each with key, tempo, instrument and
 mood, and gives you a browser-based studio to find, combine and reshape them before they go into a DAW like Ableton Live.
 
-![Browsing: category tabs, "goes well with", the Artists view](docs/img/browse.gif)
+![Browsing: category tabs, ↓ to preview, why the taste model picked a sample, "goes well with", the Artists view](docs/img/browse.gif)
 
 - **Mine** vocals, choirs, pads, chords, melodies, textures and drums from your own music, keeping only clean samples.
 - **Find** sounds by category, artist, album, key, mood, or by *describing* them ("dusty piano chords, melancholy").
@@ -100,6 +100,8 @@ it picks a song's other drums out of all of that kind with AUC 0.83.) Pads start
 drag its start and end on the waveform, tune it (pitch and length together, like a sampler), shorten its decay, or
 **↗ full editor** for punch, drive and low cut (save as new and the pad switches to your edit). Each pad has its own volume fader (every pad starts equally loud at 0 dB), and step edits, volumes and pad edits are heard at once while it plays. The sketchpad has its own tempo control (− / +, type it, or tap): a drums-only sketch changes tempo live; sample lanes are re-stretched. It's one lane, so mute, solo, its fader, bounce, stems
 and the Live set treat it like any other.
+![Building a kit around one kick: the hits that complete it, then velocity, a flam and humanize while it plays](docs/img/drumlane.gif)
+
 **⇩ MIDI + rack** writes a Drum Rack of the pads (as edited, with their choke groups) and a MIDI clip of the pattern
 (velocities, swing, flams): drop the rack on a track in Live, then the clip. **🥁 slice into pads** on a drum loop
 cuts it at its hits into pads, each on the step where it fell, so the loop plays back as before and can be re-sequenced.
@@ -215,6 +217,13 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   where it's wrong, and the samples whose ★ or ✕ would teach it the most.
 - **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards. Choose which types it draws
   from (all by default, or just vocals, say); the choice is remembered.
+- **🎚 Fits my track:** drop in a bounce of something you're making: its key and tempo are detected and the library
+  is ranked by what would fit into it (how far a sample has to move in key, how much a loop has to stretch, and how
+  close its sound is to the track's), each result saying why. One click makes the track's key and tempo the project's.
+  Your file is only analyzed, then deleted: never added, logged or sent anywhere.
+- **💡 Why this?:** on any sample, how the taste model ranked it: your top N%, how much came from the model, from
+  closeness to a sample you liked and from its song, what pulled it up or down (its sound, its type, quality, the
+  song's style), and the liked samples it sounds closest to.
 - **🌌 Galaxy:** every sample on a map by sound; hover to hear, color by taste. The build lays it out; samples
   added since are placed among their nearest neighbors by sound at once.
 
@@ -348,7 +357,7 @@ The setup page saves your folders to `~/.config/digitalcrate/digitalcrate.toml`.
 `DIGITALCRATE_FOUND`, `DIGITALCRATE_ABLETON_SAMPLES`. A `[genres]` table (artist = family) overrides genre tags, which
 are often wrong; run `digitalcrate build` after editing. Thresholds live in `digitalcrate/config.py`, models in
 [`models/README.md`](models/README.md). `tools/gifs.py` and `tools/screenshots.py` regenerate the docs images from the
-running app (private names are scrubbed).
+running app (your own names are scrubbed; `DIGITALCRATE_HIDE="Artist"` leaves an artist out of the GIFs).
 
 ## Tests
 

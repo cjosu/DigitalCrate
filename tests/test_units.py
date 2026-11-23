@@ -216,3 +216,15 @@ def test_suggestions_are_precomputed_and_go_stale_on_a_rating(monkeypatch):
     time.sleep(0.3)
     sg.stale("a.wav")
     assert not sg.suggest_now("a.wav", None, 0, 2, log=False)["precomputed"]
+
+
+def test_fits_my_track_key_and_tempo():
+    import numpy as np
+    from digitalcrate.mytrack import key_fit, tempo_fit
+    # track in C major (pc 0). Samples: C major, A minor (relative), D major (+2 away), F# major, unkeyed
+    fit, shift = key_fit(np.array([0, 9, 2, 6, 0]), np.array([False, True, False, False, False]),
+                         np.array([True, True, True, True, False]), 0, False)
+    assert shift[0] == 0 and shift[1] == 0 and shift[2] == -2 and abs(shift[3]) == 6
+    assert fit[0] > fit[1] > fit[2] > fit[3] and fit[4] == 0.75
+    tf, pct = tempo_fit(np.array([True, True, True, False]), np.array([90.0, 45.0, 100.0, 0.0]), 90.0)
+    assert tf[0] == tf[1] == 1.0 and pct[2] > 10 and tf[2] < 0.2 and tf[3] == 1.0  # half time is on tempo

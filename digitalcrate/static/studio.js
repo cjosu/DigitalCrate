@@ -72,7 +72,7 @@ function linkNextBar(){// AudioContext time of Live's next bar line
 
 // ================= sound search & reference search =================
 let SOUND=null;
-document.getElementById('search').insertAdjacentHTML('afterend',`<button id="sndbtn" class="tbtn" title="search by what it sounds like (CLAP): e.g. “lonely female voice, distant” · add -word to push away">≈ by sound</button><button id="refbtn" class="tbtn" title="find samples that feel like a reference track (never sampled)">🎧 feels like…</button>${hq('sound')}`);
+document.getElementById('search').insertAdjacentHTML('afterend',`<button id="sndbtn" class="tbtn" title="search by what it sounds like (CLAP): e.g. “lonely female voice, distant” · add -word to push away">≈ by sound</button><button id="refbtn" class="tbtn" title="find samples that feel like a reference track (never sampled)">🎧 feels like…</button><button id="mybtn" class="tbtn" title="drop in a bounce of your own track: samples that would fit into it (key, tempo, sound)">🎚 fits my track</button>${hq('sound')}`);
 let soundMode=false;
 $('sndbtn').onclick=()=>{soundMode=!soundMode;$('sndbtn').classList.toggle('on',soundMode);$('search').placeholder=soundMode?'describe a sound, press Enter — e.g. “lonely female voice, distant, rainy night”':'search artist, title, mood, instrument, id…';
  if(!soundMode&&SOUND&&!SOUND.ref){SOUND=null;render()}if(soundMode&&$('search').value.trim())soundSearch($('search').value.trim());$('search').focus()};
@@ -91,7 +91,7 @@ const _filtered=filtered;
 filtered=function(){const blank=soundMode||(SOUND&&SOUND.ref);if(!blank&&(!SOUND||st.tab!=='S'&&st.tab!=='G'))return _filtered();const el=$('search'),v=el.value;if(blank)el.value='';let out;try{out=_filtered()}finally{el.value=v}
  if(!SOUND||st.tab!=='S'&&st.tab!=='G')return out;return out.filter(i=>SOUND.score.has(S[i][F.path])).sort((a,b)=>SOUND.score.get(S[b][F.path])-SOUND.score.get(S[a][F.path]))};
 function drawSBanner(){const b=$('sbanner');if(!SOUND||!(st.tab==='S'||st.tab==='G')){b.hidden=true;return}b.hidden=false;
- b.innerHTML=`≈ <b>${esc(SOUND.label)}</b> — closest first; your other filters still apply &nbsp;<button id="sclear">✕ clear</button>`;$('sclear').onclick=()=>{SOUND=null;if(soundMode)$('sndbtn').click();render()}}
+ b.innerHTML=`≈ <b>${esc(SOUND.label)}</b> — ${SOUND.mine?'best fit first':'closest first'}; your other filters still apply &nbsp;${SOUND.mine?`<button id="myproj" title="conform the sketchpad and exports to your track">use ${esc(SOUND.mine.key)} · ${SOUND.mine.bpm} bpm as the project</button> `:''}<button id="sclear">✕ clear</button>`;$('sclear').onclick=()=>{SOUND=null;if(soundMode)$('sndbtn').click();render()}}
 
 // ================= tabs: crate · galaxy · scout =================
 $('tabS').insertAdjacentHTML('afterend',`<button id="tabC" title="today's crate: 20 picks for you + wildcards">🎲 Crate</button>`);
@@ -107,7 +107,24 @@ render=function(){drawSBanner();if('CGY'.includes(st.tab)&&typeof drawCats==='fu
  if(st.tab==='F'&&FAVVIEW==='cols'&&SERVED){paintWheel();drawBanner();return renderCollections()}
  _render();if(st.tab==='K')renderKitExtras();if(st.tab==='F'&&SERVED)$('list').insertAdjacentHTML('afterbegin',favViewBar());if(st.tab==='S'&&SOUND&&SOUND.at)annotateAt()};
 function annotateAt(){document.querySelectorAll('#list .row[data-i]').forEach(r=>{const p=S[+r.dataset.i][F.path],a=SOUND.at.get(p);const m=r.querySelector('.meta');
- if(a&&m&&!m.dataset.at){m.dataset.at=1;m.insertAdjacentHTML('beforeend',` · <span style="color:var(--acc)">like the reference @ ${a}</span>`)}})}
+ if(a&&m&&!m.dataset.at){m.dataset.at=1;m.insertAdjacentHTML('beforeend',` · <span style="color:var(--acc)">${SOUND.why?esc(a):'like the reference @ '+a}</span>`)}})}
+// ---------- 🎚 fits my track: samples that would fit into your own song (mytrack.py). The file is only analysed.
+$('mybtn').onclick=()=>{if(!SERVED){toast('needs the local server');return}
+ modal(`<h2 style="margin:0">Samples that fit my track</h2><div class="sub">Drop a bounce of something you're making (WAV, AIFF, MP3…), or paste its path. Its key and tempo are detected and the library is ranked by what would fit into it: key (how far a sample has to move), tempo for loops, and sound. The file is only listened to: analysed here and deleted, never added or sent anywhere.</div>
+ <div id="mydrop" class="mydrop">drop the audio file here<br><span class="sub">or</span> <input id="myfile" type="file" accept="audio/*"></div>
+ <input id="myIn" style="width:100%" placeholder="/path/to/my bounce.wav"><div class="edrow"><button id="myGo" class="pill">find</button><button data-close>close</button></div><div id="myMsg" class="sub"></div>`);
+ const go=async body=>{$('myMsg').textContent='listening… (10–40 s: key, tempo, and its sound against every sample)';$('myGo').disabled=true;
+  try{const r=await api('api/mytrack',body);
+   SOUND={mine:r,why:true,label:`fits ${r.name} · ${r.key} (${r.camelot}) · ${r.bpm} bpm${r.tempo_sure?'':' (tempo unsure)'}`,score:new Map(r.results.map((x,k)=>[x.path,r.results.length-k])),at:new Map(r.results.map(x=>[x.path,x.why]))};
+   $('modal').hidden=true;setTab('S');st.shown=200;render()}catch(e){$('myMsg').textContent='error: '+e.message}finally{$('myGo')&&($('myGo').disabled=false)}};
+ const send=f=>{const rd=new FileReader();rd.onload=()=>go({name:f.name,b64:rd.result});$('myMsg').textContent='reading '+f.name+'…';rd.readAsDataURL(f)};
+ const dz=$('mydrop');dz.ondragover=e=>{e.preventDefault();dz.classList.add('on')};dz.ondragleave=()=>dz.classList.remove('on');
+ dz.ondrop=e=>{e.preventDefault();dz.classList.remove('on');const f=e.dataTransfer.files[0];if(f)send(f)};
+ $('myfile').onchange=e=>{const f=e.target.files[0];if(f)send(f)};
+ $('myIn').onkeydown=e=>{if(e.key==='Enter')$('myGo').click()};$('myGo').onclick=()=>{const t=$('myIn').value.trim();if(t)go({file:t})}};
+// the banner offers the track's key and tempo as the project's (so the sketchpad and exports conform to it)
+document.addEventListener('click',e=>{if(!e.target.closest('#myproj')||!SOUND||!SOUND.mine)return;const r=SOUND.mine;
+ PROJ.key=r.key;if(!(PROJ.link&&LINK.peers))PROJ.bpm=r.bpm;try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(err){}drawProj();toast(`project set to ${r.key} · ${PROJ.bpm} bpm`)},true);
 // rows get a ＋ (add to sketchpad)
 const _rowHTML=rowHTML;
 rowHTML=function(i){return _rowHTML(i).replace('<span class="id"',`<button class="xp" data-sk="${i}" title="add to the sketchpad">＋</button><span class="id"`)};
@@ -192,6 +209,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-col]');con
 const _rowHTMLc=rowHTML;rowHTML=function(i){return _rowHTMLc(i).replace('<span class="id"',colBtn(i)+'<span class="id"')};
 const _selectC=select;select=function(i,from){_selectC(i,from);
  if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]==='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('sliceit'))xb.insertAdjacentHTML('afterend',`<button id="sliceit" title="slice this loop at its hits into pads of the sketchpad's drum lane, each on its step, so you can re-sequence it">🥁 slice into pads</button>`)}
+ if(SERVED&&TASTE.loaded){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('whybtn')){xb.parentNode.insertAdjacentHTML('afterend',`<div id="whybox" class="prov" hidden></div>`);
+  xb.insertAdjacentHTML('afterend',`<button id="whybtn" title="why the taste model ranks this where it does">💡 why this?</button>`);if(WHY_OPEN)whyShow(i)}}
  if(SERVED){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('reveal'))xb.insertAdjacentHTML('afterend',`<button id="reveal" title="show the file in Finder, selected: drag it from there into Live (or anywhere)">↗ Finder</button>`)}
  if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('kitaround'))xb.insertAdjacentHTML('afterend',`<button id="kitaround" title="start (or add to) the sketchpad's drum lane with this hit, then find the rest of a kit that sounds like it">🥁 build a kit around this</button>`)}const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
 // the Favorites tab's 📁 view
@@ -308,6 +327,23 @@ async function sliceLoop(i){const s=S[i];let r;try{r=await api('api/slices?path=
   l.pads.push({i,path:s[F.path],label:`slice ${k+1}`,start:t0,end:t1,auto:false,db:0,mute:false,steps})});
  SK.open=true;drawSK();drawProj();await drumLoad(l);drawSK();toast(`${l.pads.length} slices, each on its step · move, retune or drop them`)}
 document.addEventListener('click',e=>{if(!e.target.closest('#sliceit'))return;e.stopPropagation();if(st.sel!=null)sliceLoop(st.sel)},true);
+
+// ---------- 💡 why this? (taste.why): how the taste model got to this sample's rank, in its own numbers
+let WHY_OPEN=false;
+const whyName=p=>{const j=byPath.get(p);return j==null?esc(p.split('/').pop()):`<a href="#" data-go2="${j}">${esc(S[j][F.sub])} · ${esc(S[j][F.artist])} — ${esc(S[j][F.title])}</a>`};
+async function whyShow(i){const box=$('whybox');if(!box)return;box.hidden=false;box.innerHTML='<span class="sub">asking the taste model…</span>';let r;
+ try{r=await api('api/why?path='+encodeURIComponent(S[i][F.path]))}catch(e){box.textContent="couldn't: "+e.message;return}if(st.sel!==i||!$('whybox'))return;
+ if(r.error){box.textContent=r.error;return}
+ const pa=r.parts,pn=v=>`${v>=0?'+':''}${v.toFixed(1)}`;
+ const up=(r.reasons||[]).filter(x=>x.pull>0),down=(r.reasons||[]).filter(x=>x.pull<0);
+ const songTxt=r.song.liked||r.song.passed?`its song: you liked ${r.song.liked} and passed over ${r.song.passed} of its other samples`:"you haven't rated anything else from its song";
+ box.innerHTML=`<b>${r.top<50?`In your top ${r.top<1?r.top.toFixed(1):Math.round(r.top)}%`:`In your bottom ${Math.round(100-r.top)}%`}</b> of ${S.length.toLocaleString()} samples, from ${r.n_labels.toLocaleString()} ratings and listens (${r.n_pos} liked).
+  ${pa?`<div class="whybars">${[['the model',pa.model,'what it has learned from everything you rated: sound, type, quality, style'],['close to a like',pa.close,'how close it is to the single liked sample it most resembles'],['its song',pa.song,'how you rated the other samples cut from the same song']].map(([n,v,t])=>`<div title="${t}"><span>${n}</span><i style="--w:${Math.min(100,Math.abs(v)*16)}%" class="${v<0?'neg':''}"></i><span>${pn(v)}</span></div>`).join('')}</div>`:''}
+  ${up.length?`<div>pulled up by <b>${up.map(x=>esc(x.what)).join(', ')}</b>${down.length?`; down by <b>${down.map(x=>esc(x.what)).join(', ')}</b>`:''}</div>`:''}
+  ${(r.like=(r.like||[]).filter(x=>!GONE.has(byPath.get(x.path))).slice(0,3)).length?`<div>sounds closest to what you liked: ${r.like.map(x=>`${whyName(x.path)} <span class="sub">(${Math.round(x.sim*100)}%)</span>`).join(' · ')}</div>`:''}
+  <div class="sub">${songTxt}</div>`}
+document.addEventListener('click',e=>{if(!e.target.closest('#whybtn'))return;e.stopPropagation();const b=$('whybox');
+ if(b&&!b.hidden){b.hidden=true;WHY_OPEN=false;return}WHY_OPEN=true;if(st.sel!=null)whyShow(st.sel)},true);
 
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;
@@ -492,6 +528,11 @@ async function drumAdd(i,{quiet=false,starter=true}={}){const l=drumLane(true);i
  const kind=drumKind(i),first=!l.pads.some(p=>drumKind(p.i)===kind);  // a starter pattern for the first pad of each kind
  const pad={i,path:S[i][F.path],db:0,mute:false,steps:starter&&first?drumStarter(kind):new Array(DSTEPS).fill(0)};
  l.pads.push(pad);SK.open=true;drawSK();drawProj();await drumLoad(l);drawSK();if(!quiet)toast(`pad ${l.pads.length} in the drum lane (${kind})`)}
+// 🥁 build a kit around this: the hit goes into the drum lane, then the finder looks for the rest of a kit that sounds
+// like it (the hits it's missing, recorded alike)
+document.addEventListener('click',async e=>{if(!e.target.closest('#kitaround'))return;e.stopPropagation();if(st.sel==null)return;
+ await drumAdd(st.sel,{quiet:true});const l=drumLane();if(!l)return;if(!(l.find&&!l.find.error))drumFind(l);
+ setTimeout(()=>$('sk').scrollIntoView({block:'nearest',behavior:'smooth'}),100)},true);
 // offline (bounce, stems): a whole bar at once. Live playback uses drumTick, step by step, so edits are heard at once.
 function drumBar(ctx,dest,l,bar,t,L,arr){const base=(bar%l.bars)*16,st=L/16,solo=l.pads.some(p=>p.solo);
  if(ctx===AC){(l.sched||(l.sched=[])).push({t,bar});if(l.sched.length>8)l.sched.shift()}
@@ -548,7 +589,7 @@ function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading&&!f.missin
    <button class="tbtn" data-dfsteer="${k}|${m.kind}|${esc(p.path)}" title="more like this: re-rank ${esc(m.label.toLowerCase())} toward this one's sound (click again to undo)">≈</button><button class="tbtn" data-dfno="${k}|${m.kind}|${esc(p.path)}" title="not this one: the next slides in">✕</button><button class="tbtn" data-dfadd="${i}" title="add it as a pad (with a starter part)">＋</button></span>`};
  return `<div class="dfind"><div class="sub" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span>${rows.length?'Picked to sound like the same recording (room, tape, brightness):':'Every kind is covered.'}</span>
   <label><input type="checkbox" data-dfall="${k}" ${f.all?'checked':''}> also kinds you have (alternatives)</label>${f.loading?'<span>…</span>':''}</div>
-  ${rows.map(m=>{const vis=m.picks.filter(p=>!f.hidden.has(p.path)),o=Math.min(f.off[m.kind]||0,Math.max(0,vis.length-3)),page=vis.slice(o,o+3);
+  ${rows.map(m=>{const vis=m.picks.filter(p=>!f.hidden.has(p.path)&&!GONE.has(byPath.get(p.path))),o=Math.min(f.off[m.kind]||0,Math.max(0,vis.length-3)),page=vis.slice(o,o+3);
   return `<div class="dfrow"><span class="dlab">${esc(m.label)}${m.have?' <span class="sub">(have)</span>':''}${m.steered?' <span class="sub">· steered</span>':''}</span><div class="dfpicks">${page.map(p=>pick(m,p)).join('')||'<span class="sub">no more</span>'}
    <span class="dfnav">${o>0?`<button class="tbtn" data-dfmore="${k}|${m.kind}|-3" title="back">‹</button>`:''}<span class="sub">${vis.length?`${o+1}–${Math.min(o+3,vis.length)} of ${vis.length}`:''}</span>${o+3<vis.length?`<button class="tbtn" data-dfmore="${k}|${m.kind}|3" title="three more">↻ more</button>`:''}</span></div></div>`}).join('')}</div>`}
 async function drumFind(l,keep){const prev=l.find||{};l.find={...prev,loading:true,missing:keep?prev.missing:null,off:keep?prev.off||{}:{},hidden:prev.hidden||new Set(),steer:prev.steer||{},all:!!prev.all};drawSK();

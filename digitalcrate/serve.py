@@ -388,6 +388,10 @@ class Handler(SimpleHTTPRequestHandler):
             if f.exists():
                 types = {".css": "text/css", ".js": "application/javascript", ".svg": "image/svg+xml", ".png": "image/png"}
                 return self._file(f, types.get(f.suffix, "application/octet-stream"), {"Cache-Control": "no-store"})
+        if self.path.startswith("/api/why?"):
+            from urllib.parse import parse_qs, urlparse
+            from .taste import why
+            return self._json(why(parse_qs(urlparse(self.path).query)["path"][0]))
         if self.path.startswith("/api/taste"):
             from .taste import compact, scores_payload
             recent = 3 if "recent=1" in self.path else None
@@ -572,6 +576,9 @@ class Handler(SimpleHTTPRequestHandler):
                 res = recategorise(req["id"], req["category"], req["subtype"])
                 log_event(res["path"], "recat", None, req["id"], {"category": req["category"], "subtype": req["subtype"]})
                 return self._json(res)
+            elif self.path == "/api/mytrack":
+                from .mytrack import match
+                return self._json(match(req.get("file") or None, req.get("name"), req.get("b64")))
             elif self.path == "/api/refsearch":
                 from .search import reference_search
                 return self._json(reference_search(req["target"]))

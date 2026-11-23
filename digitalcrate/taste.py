@@ -483,3 +483,51 @@ def scores_payload(recent_hours=None):
                 score={p: round(float(s), 4) for p, s in zip(res["paths"], res["score"])},
                 discover={p: round(float(s), 4) for p, s in zip(res["paths"], res["discover"])},
                 disliked=sorted(disliked))
+
+
+def why(path):
+    """"Why this?" for one sample: how it ranks, which parts of the model put it there (the score is 0.7 x the
+    model + 0.3 x closeness to a favourite + 0.3 x its song), the samples you liked that it's closest to, what you
+    did with its song, and what in the regression pushed it up or down (its sound, its type, quality, the song's
+    style...). Every number comes from the same fit that ranks the page."""
+    scores_payload(None)
+    res, con = _FIT.get(None), _db()
+    L = _library(con)
+    if not res or L is None or path not in L["pos"]:
+        return dict(error="no taste model yet, or not a library sample")
+    i = L["pos"][path]
+    sc = np.asarray(res["score"])
+    out = dict(path=path, top=round(float(100 * (sc > sc[i]).mean()), 1), n_labels=res["n_labels"], n_pos=res["n_pos"])
+    labels = item_labels(con, None, L["durs"])
+    pos = [p for p, (y, w) in labels.items() if y == 1 and p in L["pos"] and p != path]
+    if pos:
+        P = np.array([L["pos"][p] for p in pos])
+        s = L["E"][P] @ L["E"][i] / (np.linalg.norm(L["E"][P], axis=1) * np.linalg.norm(L["E"][i]) + 1e-9)
+        out["like"] = [dict(path=pos[k], sim=round(float(s[k]), 2)) for k in np.argsort(-s)[:6]]
+    tid = L["tid"][i]
+    same = [labels[p][0] for p, k in L["pos"].items() if L["tid"][k] == tid and p in labels and p != path]
+    out["song"] = dict(liked=int(sum(same)), passed=int(len(same) - sum(same)))
+    parts = res.get("parts")
+    if parts:
+        model = parts["regression"] + parts["trees"] if parts.get("trees") is not None else parts["regression"]
+        model = (model - model.mean()) / (model.std() + 1e-9)
+        out["parts"] = dict(model=round(float(0.7 * model[i]), 2), close=round(float(0.3 * parts["knn"][i]), 2),
+                            song=round(float(0.3 * parts["song"][i]), 2))
+    if "beta" in res:  # the regression's reasons: each group of features' pull on this sample vs the average one
+        X = L["X"]
+        c = res["beta"] * (X[i] - X.mean(0))
+        n0 = N_PCA
+        groups = [("its sound", slice(0, n0)), ("its type (" + (L["meta"][path].get("category") or "") + ")",
+                                                slice(n0, n0 + len(CATS)))]
+        k0 = n0 + len(CATS)
+        groups.append((f"being a {L['meta'][path].get('kind') or ''}", slice(k0, k0 + len(KINDS))))
+        e0 = k0 + len(KINDS)
+        from .taste_report import ENG
+        groups += [(ENG[j], slice(e0 + j, e0 + j + 1)) for j in range(6)]  # ENG's last four name the extra columns
+        x0 = e0 + 6
+        groups += [("recording quality", slice(x0, x0 + 1)), ("loudness", slice(x0 + 1, x0 + 2)),
+                   ("a clear key", slice(x0 + 2, x0 + 3)), ("a steady tempo", slice(x0 + 3, x0 + 4)),
+                   ("the song's style", slice(x0 + 4, x0 + 4 + N_STYLE))]
+        g = sorted(((n, float(c[s].sum())) for n, s in groups), key=lambda x: -abs(x[1]))
+        out["reasons"] = [dict(what=n, pull=round(v, 2)) for n, v in g[:5] if abs(v) > 0.05]
+    return out
