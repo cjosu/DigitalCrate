@@ -29,6 +29,7 @@ OUT = Path(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].isidentifier() 
 ONLY = [a for a in sys.argv[1:] if a.isidentifier()]
 OUT.mkdir(parents=True, exist_ok=True)
 W, H = 1440, 900
+VERSION = "2"  # in each file name: bump it (and the README / guide links) so nobody sees a cached older GIF
 HIDE = [n.strip() for n in os.environ.get("DIGITALCRATE_HIDE", "").split(",") if n.strip()]
 # your own names (the config's personal reference entries) and DIGITALCRATE_SCRUB; other artists show as they are
 PRIVATE = [n for n in [*C._cfg.get("reference_artists", []), *C._cfg.get("reference_exact", []),
@@ -125,7 +126,7 @@ class Clip:
         video = self.page.video.path()
         self.ctx.close()
         x, y, w, h = [int(v) // 2 * 2 for v in (crop or (0, 0, W, H))]
-        out = OUT / f"{self.name}.gif"
+        out = OUT / f"{self.name}-{VERSION}.gif"
         vf = (f"fps={fps},crop={w}:{h}:{x}:{y},scale={min(width, w)}:-1:flags=lanczos,split[a][b];"
               "[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle")
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{(self.start or 0):.2f}", "-t", f"{end - (self.start or 0):.2f}",
