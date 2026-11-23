@@ -98,15 +98,29 @@ models.
 
 - **By sound:** "dusty piano chords, melancholy, -drums".
 - **🎧 feels like…** a YouTube link or a song; finds samples with the same feel (nothing is sampled from it).
-- **🎚 fits my track:** drop in a bounce of your own song and get samples ranked by key, tempo and sound.
 - **🌌 Galaxy** map of every sample, and search through transcribed lyrics.
+
+### Highlights
+
+- **🔭 Scout finds new music to sample.** It tags your songs with 400 Discogs styles from the audio itself, learns
+  which ones are behind your likes, and searches YouTube for tracks scored on what you want: raw singing, sustained
+  pads, or your styles. It also suggests new artists via ListenBrainz. You preview, then mine what you pick.
+- **A taste model that shows its work.** ★, ✕, replays, skips and listening time train it; **💡 why this?** shows
+  what pushed a sample up or down and which of your favorites it's closest to. The **🧠 Taste page** reports its
+  honest held-out accuracy and lists the samples that would teach it the most.
+- **Kits that sound recorded together.** **🔎 complete the kit** compares how hits were recorded, not
+  what drum they are, so a kick, snare and hat from different songs sit together.
+- **✨ Suggested edits judged by your ears.** A dozen candidate edits (stretch, tape pitch, filters, your own AU/VST3
+  plugins) are rendered and scored by the taste model; you hear the best few, rate them, and it learns how strong you
+  like each move.
+- **🎚 Fits my track.** Drop in a bounce of your own song: samples come back ranked by how far they'd need to be
+  shifted and stretched and how well they match its sound, each saying why. Your file is analyzed and deleted.
+- **Clean sources.** Songs that MusicBrainz lists as sample-based are skipped, so you're never re-sampling a sample.
 
 ### And more
 
-- **✨ Suggested edits** (stretch, pitch, tape, filters, your own AU/VST3 plugins) judged by your taste model.
 - **Collections**, **sets** of favorites that fit together, and a daily **🎲 Crate**.
 - **Mining controls** with a preview: new artists, most promising tracks, or more like your favorites.
-- **🔭 Scout** suggests YouTube finds and new artists in the styles you like.
 - MIDI-controller mapping and nightly backups.
 
 ## How it works
