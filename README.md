@@ -50,40 +50,70 @@ models.
 
 ## Features
 
+### Browse
+
+- Tabs for vocals, pads, chords, melodies, textures, bass and drums, plus an **Artists** view (artist → album → song).
+- **★** keeps a sample, **✕** hides it; both teach the taste model, which ranks everything you haven't heard yet.
+- **Goes well with** lists samples that fit by key, tempo and sound; **⧉** plays a pair together.
+- **💡 why this?** explains any recommendation; **🕘 recent actions** undoes anything.
+- Arrow keys preview as you move; drag any row straight into Live.
+
 ### Sketchpad
 
 ![Sketchpad: trimming, faders, tempo matching](docs/img/sketch-2.gif)
 
-Layer up to 8 samples in the project key and tempo, with an arrangement, undo, and export as a bounce, stems or an
-Ableton Live set.
+- Layer up to 8 samples, all conformed to the project key and tempo.
+- Trim, fade, loop, solo and mix each lane; match a loop's tempo or re-align it to the beat.
+- Lay out sections (`AABA`) and choose which lanes play in each.
+- Export as a bounce, stems, or an Ableton Live set. Full undo; ready-made **kits** to start from.
 
 ### Drum lane
 
 ![Building a kit around one kick, then velocity, a flam and humanize while it plays](docs/img/drumlane-2.gif)
 
-A step sequencer for drum hits with velocity, flams, swing, humanize and choke groups. **🔎 complete the kit** finds
-hits that sound recorded alike; drum loops slice into pads; export a Drum Rack plus MIDI.
+- A 16-step sequencer for mined drum hits: velocity, flams, swing, humanize and choke groups.
+- **🔎 complete the kit** finds hits that sound like they were recorded together; **🥁 build a kit around this**
+  starts from any one hit.
+- **🥁 slice into pads** cuts a drum loop into hits you can re-sequence.
+- Export a Drum Rack plus a MIDI clip of the pattern.
 
 ### Chords
 
 ![Chord suggestions with the keyboard following the progression](docs/img/chords-2.gif)
 
-Progressions that fit any sample, with a bassline, as MIDI or straight into the sketchpad.
+- Progressions that fit any sample's notes, colored by its mood, with a keyboard display.
+- Basslines (roots, root–fifth, walking…) to go with them.
+- Export as MIDI or render straight into the sketchpad.
 
 ### Pads and Drum Racks
 
 ![Slicing a vocal into pads and recording a pattern](docs/img/pads-2.gif)
 
-Slice a sample onto keys like an MPC and record a pattern, or open any song's drums as a playable rack.
+- **🎹 pads** slices a sample onto keys like an MPC; play it and record a quantized pattern.
+- **🥁** next to any song, album or artist opens its drums as a playable rack, exportable to Ableton.
 
 ![Opening a song's Drum Rack and playing its pads](docs/img/drums-2.gif)
 
+### Search
+
+- **By sound:** "dusty piano chords, melancholy, -drums".
+- **🎧 feels like…** a YouTube link or a song; finds samples with the same feel (nothing is sampled from it).
+- **🎚 fits my track:** drop in a bounce of your own song and get samples ranked by key, tempo and sound.
+- **🌌 Galaxy** map of every sample, and search through transcribed lyrics.
+
 ### And more
 
-- **Search by sound** ("dusty piano chords, melancholy"), by a reference track, or by **🎚 what fits your own track**.
-- **✨ Suggested edits** judged by your taste model, and **💡 why this?** on every recommendation.
-- **Collections**, **sets** of favorites that fit together, a daily **🎲 Crate**, a **🌌 galaxy** map, lyrics search,
-  YouTube scouting, keyboard and MIDI-controller control, undo for everything.
+- **✨ Suggested edits** (stretch, pitch, tape, filters, your own AU/VST3 plugins) judged by your taste model.
+- **Collections**, **sets** of favorites that fit together, and a daily **🎲 Crate**.
+- **Mining controls** with a preview: new artists, most promising tracks, or more like your favorites.
+- **🔭 Scout** suggests YouTube finds and new artists in the styles you like.
+- MIDI-controller mapping and nightly backups.
+
+## How it works
+
+Each track is analyzed for tempo, beats and key, split into stems when drums or bass are in the way, and cut into
+phrases, chops, loops and one-shots. Each candidate is scored for how clean and exposed it is, and only the good ones
+are kept. CLAP embeddings power search, the taste model and "goes well with"; everything runs locally.
 
 The **[guide](docs/guide.md)** covers every feature, how it works, the command line and configuration.
 
