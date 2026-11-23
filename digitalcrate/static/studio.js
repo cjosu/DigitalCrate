@@ -101,7 +101,7 @@ function setTab(k){st.tab=k;document.querySelectorAll('.tabs button').forEach(b=
 Object.entries(MYTABS).forEach(([k,id])=>$(id).onclick=()=>setTab(k));
 Object.values(tabs).forEach(id=>$(id).addEventListener('click',()=>Object.values(MYTABS).forEach(m=>$(m).classList.remove('on'))));
 const _render=render;
-render=function(){drawSBanner();if('CGY'.includes(st.tab)&&typeof drawCats==='function')drawCats();if(st.tab==='C'){paintWheel();drawBanner();return renderCrate()}if(st.tab==='G'){paintWheel();drawBanner();return renderGalaxy()}
+render=function(){document.body.classList.toggle('wide',st.tab==='Y');drawSBanner();if('CGY'.includes(st.tab)&&typeof drawCats==='function')drawCats();if(st.tab==='C'){paintWheel();drawBanner();return renderCrate()}if(st.tab==='G'){paintWheel();drawBanner();return renderGalaxy()}
  if(st.tab==='Y'){paintWheel();drawBanner();return renderScout()}
  if(st.tab==='F'&&FAVVIEW==='sets'&&SERVED){paintWheel();drawBanner();return renderSets()}
  if(st.tab==='F'&&FAVVIEW==='cols'&&SERVED){paintWheel();drawBanner();return renderCollections()}
@@ -392,62 +392,82 @@ function galDraw(){const c=$('galc');if(!c)return;const dpr=devicePixelRatio||1,
 setInterval(()=>{if(st.tab==='G'&&players.size)galDraw()},500);
 
 // ---------- YouTube scout
-let ytT=null,ytRes=[],ytQ='',ytAll=false,ytSty='',ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
-const YTM={voice:{label:'🎤 voice',intro:'Search YouTube for raw, private-feeling singing. A minute of each result is listened to and scored for clean, unaccompanied voice (and how close it is to your favourite vocals).',
-  ph:'e.g. acapella cover · singing in my car · choir rehearsal',bars:['voice','band/talk']},
- pads:{label:'🌫 pads & textures',intro:'Search YouTube for ambient material: pads, drones, soundtracks, slow strings. A minute of each result (from the middle of long mixes) is scored for sustained, atmospheric sound with no drums, talking or singing, and for closeness to your favourite pads and textures.',
-  ph:'e.g. ps1 ambient soundtrack · organ drone · 70s synth soundtrack',bars:['ambient','drums/talk/voice']},
- guided:{label:'🧭 your styles',intro:'Search YouTube guided by your styles: the Discogs styles (heard in the audio, out of 400) of the songs you\'ve liked samples from, ranked by how much more they turn up there than in your collection overall. Each result is listened to and scored for how much it sounds like those styles and like the songs you liked, minus talking and crowd noise. The searches below are built from your styles; pick one, or type your own and choose a style to listen for.',
-  ph:'e.g. rare neo soul · modal jazz 1960s',bars:['your styles','talk/noise']}};
+let ytT=null,ytRes=[],ytD={},ytQ='',ytSty='',ytOpen=new Set(),ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
+const YTM={voice:{label:'🎤 voice',ph:'e.g. acapella cover · singing in my car · choir rehearsal',bars:['voice','band/talk']},
+ pads:{label:'🌫 pads & textures',ph:'e.g. ps1 ambient soundtrack · organ drone · 70s synth soundtrack',bars:['ambient','drums/talk/voice']},
+ guided:{label:'🧭 your styles',ph:'e.g. rare neo soul · modal jazz 1960s',bars:['your styles','talk/noise']}};
+const ytTime=s=>Math.floor(s/60)+':'+String(Math.round(s%60)).padStart(2,'0');
+const ytAgo=t=>{if(!t)return'';const d=(Date.now()-new Date(t.replace(' ','T')+'Z'))/864e5;return d<1?'today':d<2?'yesterday':Math.floor(d)+' days ago'};
+async function ytLoad(){try{ytD=await api('api/ytscout')}catch(e){ytD={results:[]}}ytRes=ytD.results||[]}
 async function renderScout(){$('count').textContent='YouTube scout';const L=$('list');
  if(!SERVED){L.innerHTML='<div class="empty">The scout needs the local server.</div>';return}
- let d={presets:{},results:[]};try{d=await api('api/ytscout')}catch(e){}if(st.tab!=='Y')return;ytRes=d.results;const M=YTM[ytMode],pre=(d.presets&&d.presets[ytMode])||[];
- L.innerHTML=`<div style="padding:12px 16px;display:grid;gap:8px"><div class="chips">${Object.entries(YTM).map(([k,m])=>`<button data-ytmode="${k}" class="${k===ytMode?'on':''}">${m.label}</button>`).join('')}</div>
- <div class="sub">${hq('scout')} ${M.intro} Nothing enters the library until you press <b>add source</b>. Repeating a search digs further down YouTube's results instead of returning the same videos.</div>
- <div class="edrow"><input id="ytq" placeholder="${M.ph}" style="flex:1;min-width:200px" value="${esc(ytQ)}"><select id="ytn"><option>10</option><option selected>15</option><option>25</option></select><button id="ytgo" class="pill">scout</button></div>
+ await ytLoad();if(st.tab!=='Y')return;const d=ytD,M=YTM[ytMode],pre=(d.presets&&d.presets[ytMode])||[],lr=d.learned||{};
+ L.innerHTML=`<div class="ytwrap"><div class="ythead">
+ <div class="chips" style="align-items:center"><span class="sub">search for</span>${Object.entries(YTM).map(([k,m])=>`<button data-ytmode="${k}" class="${k===ytMode?'on':''}">${m.label}</button>`).join('')} ${hq('scout')}<span style="flex:1"></span>
+  <label class="sub" title="once a day while the app is open, it runs a few searches by itself: more like your latest add, your best search again, and one you haven't tried"><input type="checkbox" id="ytauto" ${d.auto&&d.auto.enabled?'checked':''}> daily finds</label>
+  <span class="sub" title="✕ and add source teach the ranking: closer to what you added, further from what you dismissed">${lr.added||lr.dismissed?`learned from ${lr.added||0} add${lr.added===1?'':'s'} · ${lr.dismissed||0} ✕`:'✕ and add source teach the ranking'}</span></div>
+ <div class="edrow"><input id="ytq" placeholder="${M.ph}" style="flex:1;min-width:200px" value="${esc(ytQ.startsWith('more like: ')?'':ytQ)}">${ytMode==='guided'?ytStyleSel(d):''}<select id="ytn" title="how many new videos to listen to"><option>10</option><option selected>15</option><option>25</option></select><button id="ytgo" class="pill">scout</button></div>
  ${ytMode==='guided'?ytGuided(d):`<div class="chips">${pre.map(p=>`<button data-ytp="${esc(p)}">${esc(p)}</button>`).join('')}</div>`}<div id="ytjobs"></div>
- <div class="edrow sub"><label><input type="checkbox" id="ytall" ${ytAll||!ytQ?'checked':''}> all searches</label><label><input type="checkbox" id="ytsk"> show dismissed</label><span id="ytcount"></span></div></div><div id="ytlist"></div>`;
- $('ytgo').onclick=()=>ytStart($('ytq').value.trim());$('ytq').onkeydown=e=>{if(e.key==='Enter')$('ytgo').click()};$('ytsk').onchange=ytDraw;if($('ytsty'))$('ytsty').onchange=e=>{ytSty=e.target.value};$('ytall').onchange=e=>{ytAll=e.target.checked;ytDraw()};
+ <div class="edrow sub"><label><input type="checkbox" id="ytsk"> show dismissed & filtered</label><span id="ytcount"></span></div></div><div id="ytlist"></div></div>`;
+ $('ytgo').onclick=()=>ytStart($('ytq').value.trim());$('ytq').onkeydown=e=>{if(e.key==='Enter')$('ytgo').click()};$('ytsk').onchange=ytDraw;if($('ytsty'))$('ytsty').onchange=e=>{ytSty=e.target.value};
+ $('ytauto').onchange=e=>api('api/ytscout/auto',{enabled:e.target.checked}).then(()=>toast(e.target.checked?'daily finds on':'daily finds off')).catch(err=>toast('error: '+err.message));
  ytDraw();ytPoll();if(ytMode==='guided')ytRelated()}
 async function ytRelated(){const el=$('ytrel');if(!el)return;let r=ytRelated.cache;if(!r){try{r=await api('api/related-artists')}catch(e){r={artists:[]}}ytRelated.cache=r}
  const el2=$('ytrel');if(!el2)return;const A=(r.artists||[]).slice(0,18);
- el2.innerHTML=A.length?`artists you don't have, that listeners pair with yours (ListenBrainz) — scout one: <div class="chips" style="margin-top:4px">${A.map(a=>`<button data-ytp="${esc(a.name)}" data-yts="" title="listeners of ${esc(a.because.join(', '))} play them too${a.comment?' · '+esc(a.comment):''}">${esc(a.name)} <span style="opacity:.6">← ${esc(a.because[0])}</span></button>`).join('')}</div>`:'';}
+ el2.innerHTML=A.length?`<div class="chips">${A.map(a=>`<button data-ytp="${esc(a.name)}" data-yts="" title="listeners of ${esc(a.because.join(', '))} play them too${a.comment?' · '+esc(a.comment):''}">${esc(a.name)} <span style="opacity:.6">← ${esc(a.because[0])}</span></button>`).join('')}</div>`:'none found';}
+function ytStyleSel(d){const P=(d.profile&&d.profile.styles)||[];if(!P.length)return'';
+ return `<select id="ytsty" title="what to listen for"><option value="">listen for all your styles</option>${P.map(p=>`<option value="${esc(p.full)}" ${p.full===ytSty?'selected':''}>${esc(p.name)} (${Math.round(p.share*100)}%${p.era?' · '+p.era:''})</option>`).join('')}</select>`}
 function ytGuided(d){const P=(d.profile&&d.profile.styles)||[],G=d.guided||[];
  if(!P.length)return `<div class="sub">${d.profile&&d.profile.ready===false?'Your songs\' styles haven\'t been analysed yet: run <b>Tag styles</b> on the ⚙ Processing page (about an hour for the whole collection).':'Like (★) some samples first: your styles come from the songs behind the samples you like.'}</div>`;
- return `<div class="edrow sub"><span>listen for</span><select id="ytsty"><option value="">all your styles</option>${P.map(p=>`<option value="${esc(p.full)}" ${p.full===ytSty?'selected':''}>${esc(p.name)} (${Math.round(p.share*100)}%${p.era?' · '+p.era:''})</option>`).join('')}</select></div>
- <div class="chips">${G.map(g=>`<button data-ytp="${esc(g.query)}" data-yts="${esc(g.style)}" title="listens for ${esc(g.style.split('---')[1])}">${esc(g.query)}</button>`).join('')}</div>
- <div class="sub" id="ytrel">artists related to yours (ListenBrainz): looking up… (about 20 s the first time)</div>
- <div class="sub" style="line-height:1.9">your styles <span style="opacity:.7">(how much more often than in your whole collection; ✕ if one isn't really yours)</span>: ${P.slice(0,12).map(p=>`<span style="white-space:nowrap;margin-right:10px"><b>${esc(p.name)}</b> ${p.lift}× more<button data-hidesty="${esc(p.full)}" title="not one of my styles: leave it out of the searches" style="border:0;background:none;color:var(--mute);cursor:pointer;padding:0 0 0 5px">✕</button></span>`).join('')}</div>`}
+ return `<div class="chips">${G.map(g=>`<button data-ytp="${esc(g.query)}" data-yts="${esc(g.style)}" title="listens for ${esc(g.style.split('---')[1])}">${esc(g.query)}</button>`).join('')}</div>
+ <details class="sub"><summary>artists related to yours · your styles</summary><div style="display:grid;gap:8px;margin-top:6px">
+ <div>Artists you don't have that listeners pair with yours (ListenBrainz); click one to scout it:<div id="ytrel" style="margin-top:4px">looking up… (about 20 s the first time)</div></div>
+ <div style="line-height:1.9">Your styles, by how much more often they turn up in songs you like than in your whole collection (✕ if one isn't really yours): ${P.slice(0,12).map(p=>`<span style="white-space:nowrap;margin-right:10px"><b>${esc(p.name)}</b> ${p.lift}×<button data-hidesty="${esc(p.full)}" title="not one of my styles: leave it out of the searches" style="border:0;background:none;color:var(--mute);cursor:pointer;padding:0 0 0 5px">✕</button></span>`).join('')}</div></div></details>`}
 document.addEventListener('click',async e=>{const h=e.target.closest('[data-hidesty]');if(!h)return;h.disabled=true;
  try{await api('api/styles/hide',{style:h.dataset.hidesty,hide:true});toast(h.dataset.hidesty.split('---')[1]+' left out of your styles');renderScout()}catch(err){toast('error: '+err.message)}});
-function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk').checked,all=!ytQ||($('ytall')&&$('ytall').checked);
- const inQ=r=>('|'+(r.queries||r.query||'')+'|').includes('|'+ytQ+'|');
- const rows=ytRes.filter(r=>(sk||r.status!=='skipped')&&(all||inQ(r)));
- if($('ytcount'))$('ytcount').textContent=all?`${rows.length} videos from every search`:`${rows.length} video${rows.length===1?'':'s'} for “${ytQ}”`;
- const mx=Math.max(...rows.map(r=>r.score),1e-6);
- el.innerHTML=rows.length?rows.map(r=>{const bl=(YTM[r.mode||'voice']||YTM.voice).bars;return`<div class="yt" style="${r.status==='skipped'?'opacity:.4':''}"><button class="play" data-ytsnip="${esc(r.snippet||'')}" data-ytt="${esc(r.title||'')}">▶</button>
-  <div style="min-width:0"><div class="name">${r.status==='ingested'?'<span class="badge" style="background:var(--acc)">added</span>':''}<a href="${esc(r.url)}" target="_blank" rel="noopener" style="color:inherit">${esc(r.title||r.id)}</a></div>
-  <div class="meta">${r.style?`🧭 ${esc(r.style.split('---')[1])} · `:r.mode==='guided'?'🧭 your styles · ':''}${esc(r.channel||'')} · ${r.views!=null?Number(r.views).toLocaleString()+' views':''} · ${r.duration?Math.floor(r.duration/60)+':'+String(Math.round(r.duration%60)).padStart(2,'0'):''} · best moment @ ${Math.floor(r.best_at/60)}:${String(Math.round(r.best_at%60)).padStart(2,'0')} · “${esc((r.queries||r.query||'').split('|').join('”, “'))}”</div>
-  <div class="bars"><span>${bl[0]}</span><i style="width:${Math.max(2,r.vocal*120)}px"></i><span>${bl[1]}</span><i style="width:${Math.max(2,r.neg*120)}px;background:#d96c6c"></i><span>your taste</span><i style="width:${Math.max(2,(r.taste||0)*120)}px;background:var(--acc)"></i></div></div>
-  <div style="display:flex;gap:6px;align-items:center"><span class="score">${Math.round(r.score/mx*100)}</span>${r.status==='ingested'?'':`<button data-ytadd="${esc(r.url)}" data-ytid="${esc(r.id)}" class="pill">add source →</button>`}<button data-ytskip="${esc(r.id)}" title="dismiss">✕</button></div></div>`}).join('')
-  :`<div class="empty">${ytQ&&!all?`Nothing scored for “${esc(ytQ)}” yet${ytPoll.wasRunning?' — still listening…':'. Try scouting again (it digs deeper each time) or tick “all searches”.'}`:'No candidates yet — pick a preset or type a search.'}</div>`}
-async function ytStart(q){if(!q)return;ytQ=q;ytAll=false;if($('ytall'))$('ytall').checked=false;ytDraw();
- try{await api('api/ytscout',{query:q,n:+$('ytn').value,mode:ytMode,style:ytMode==='guided'?($('ytsty')?$('ytsty').value:ytSty):''});toast('scouting “'+q+'”…');ytPoll()}catch(e){toast('error: '+e.message)}}
+const ytGone=r=>r.status==='skipped'||r.status==='filtered';
+function ytRow(r){const bl=(YTM[r.mode||'voice']||YTM.voice).bars,M=r.moments||[],pk=r.picks||0;
+ return `<div class="yt${ytGone(r)?' dim':''}"><div class="ymoms">${M.map((m,k)=>`<button class="play" data-ytsnip="${esc(m[1]||'')}" data-ytt="${esc(r.title||'')}" data-ytid="${esc(r.id)}" title="${['best','second','third'][k]} moment">▶ ${ytTime(m[0])}</button>`).join('')}</div>
+  <div style="min-width:0"><div class="name">${r.status==='ingested'?'<span class="badge" style="background:var(--acc)">added</span> ':''}${r.status==='filtered'?'<span class="badge">filtered</span> ':''}<a href="${esc(r.url)}&t=${Math.floor(M[0]?M[0][0]:0)}s" target="_blank" rel="noopener" style="color:inherit" title="open on YouTube at the best moment">${esc(r.title||r.id)}</a></div>
+  <div class="meta">${r.style?`🧭 ${esc(r.style.split('---')[1])} · `:''}${esc(r.channel||'')}${r.views!=null?' · '+Number(r.views).toLocaleString()+' views':''}${r.duration?' · '+ytTime(r.duration):''}${r.mine?` · <span style="color:var(--acc)" title="you have music by them">you have ${esc(r.mine)}</span>`:''}</div>
+  <div class="bars"><span>${bl[0]}</span><i style="width:${Math.max(2,r.vocal*120)}px"></i><span>${bl[1]}</span><i style="width:${Math.max(2,r.neg*120)}px;background:#d96c6c"></i><span>your taste</span><i style="width:${Math.max(2,(r.taste||0)*120)}px;background:var(--acc)"></i>${pk?`<span title="like what you added (+) or what you dismissed (−)">your picks ${pk>0?'+':'−'}</span><i style="width:${Math.max(2,Math.min(60,Math.abs(pk)*60))}px;background:${pk>0?'#7fc98f':'#d96c6c'}"></i>`:''}</div></div>
+  <div class="yact"><span class="score" title="rank among your ${YTM[r.mode||'voice'].label} finds (100 = best), including what your adds and ✕ taught it">${r.pct}</span><button data-ytmore="${esc(r.id)}" data-ytt="${esc(r.title||'')}" title="more like this: its channel's other uploads, and a search built from its title">🔭 more</button>${r.status==='ingested'?'':`<button data-ytadd="${esc(r.url)}" data-ytid="${esc(r.id)}" data-ytdur="${r.duration||0}" class="pill" title="download it and mine it into the library">add source →</button>`}<button data-ytskip="${esc(r.id)}" title="not for me (teaches the ranking)">✕</button></div></div>`}
+function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk').checked,vis=r=>sk||!ytGone(r);
+ const inbox=ytRes.filter(r=>r.auto&&!r.seen&&!ytGone(r)&&r.status!=='ingested');
+ const G=new Map();ytRes.filter(vis).forEach(r=>{const q=r.query||'?';if(!G.has(q))G.set(q,{q,mode:r.mode||'voice',style:r.style||'',rows:[],t:''});const g=G.get(q);g.rows.push(r);if((r.created_at||'')>g.t)g.t=r.created_at||''});
+ const groups=[...G.values()].sort((a,b)=>(b.q===ytQ)-(a.q===ytQ)||b.t.localeCompare(a.t));
+ const hid=ytRes.filter(ytGone).length;
+ if($('ytcount'))$('ytcount').textContent=`${ytRes.length-hid} finds from ${G.size} searches${hid&&!sk?` · ${hid} dismissed or filtered (playlists, mixes, music videos)`:''}`;
+ let h='';
+ if(inbox.length)h+=`<div class="ygrp inbox"><div class="yghead"><b>📥 ${inbox.length} new find${inbox.length===1?'':'s'}</b><span class="sub">found by itself (daily finds)</span><span style="flex:1"></span><button data-ytseen>mark all seen</button></div>${inbox.slice(0,12).map(ytRow).join('')}</div>`;
+ h+=groups.map(g=>{const open=ytOpen.has(g.q)||g.q===ytQ,shown=open?g.rows:g.rows.slice(0,4),more=g.q.startsWith('more like: ');
+  return `<div class="ygrp"><div class="yghead"><b>${more?'🔭 ':''}${esc(g.q)}</b><span class="sub">${YTM[g.mode].label} · ${g.rows.length} find${g.rows.length===1?'':'s'} · ${ytAgo(g.t)}</span><span style="flex:1"></span>${more?'':`<button data-ytagain="${esc(g.q)}" data-ytm="${g.mode}" data-yts="${esc(g.style)}" title="search again: listens to the next videos down YouTube's results">dig deeper</button>`}</div>
+  ${shown.map(ytRow).join('')}${g.rows.length>shown.length?`<button class="ymore" data-ytopen="${esc(g.q)}">show all ${g.rows.length}</button>`:''}</div>`}).join('');
+ el.innerHTML=h||`<div class="empty">${ytPoll.wasRunning?'Listening…':'No finds yet: pick a search above, or type your own.'}</div>`}
+async function ytStart(q,mode,style){if(!q)return;if(mode&&mode!==ytMode){ytMode=mode;try{localStorage.setItem('ytMode',ytMode)}catch(e){}}
+ ytQ=q;ytOpen.add(q);
+ try{await api('api/ytscout',{query:q,n:+(($('ytn')||{}).value||15),mode:ytMode,style:ytMode==='guided'?(style!=null?style:($('ytsty')?$('ytsty').value:ytSty)):''});toast('scouting “'+q+'”…');ytDraw();ytPoll()}catch(e){toast('error: '+e.message)}}
 async function ytPoll(){clearTimeout(ytT);if(st.tab!=='Y')return;let js=[];try{js=await api('api/jobs?kind=ytscout')}catch(e){}
  const el=$('ytjobs');if(!el)return;const run=js.filter(j=>j.running);
- el.innerHTML=js.slice(-1).map(j=>{const sm=j.tail.map(t=>t.startsWith('SUMMARY ')?JSON.parse(t.slice(8)):null).filter(Boolean).pop();
-  const txt=sm?`${sm.found} found · ${sm.listened} listened to · ${sm.already} already scouted${sm.too_short?` · ${sm.too_short} too short`:''}${sm.failed?` · ${sm.failed} failed to download`:''}`:j.tail.slice(-2).map(esc).join('\n');
+ el.innerHTML=js.slice(-1).map(j=>{const sms=j.tail.map(t=>t.startsWith('SUMMARY ')?JSON.parse(t.slice(8)):null).filter(Boolean),sm=sms.pop();
+  const txt=sm&&!j.running?`${sm.listened} listened to · ${sm.already} already scouted${sm.filtered?` · ${sm.filtered} skipped (playlists, mixes, music videos)`:''}${sm.too_short?` · ${sm.too_short} too short`:''}${sm.failed?` · ${sm.failed} failed to download`:''}`:j.tail.slice(-2).map(esc).join('\n');
   return `<div class="prov"><b>${esc(j.target)}</b> — ${j.running?'listening…':'done'}<div class="meta" style="white-space:pre-wrap">${txt}</div></div>`}).join('');
- if(run.length||ytPoll.wasRunning){try{const d=await api('api/ytscout');ytRes=d.results;ytDraw()}catch(e){}}
+ if(run.length||ytPoll.wasRunning){await ytLoad();ytDraw()}
  ytPoll.wasRunning=run.length>0;if(run.length)ytT=setTimeout(ytPoll,2500)}
+const ytSeen=ids=>{if(!ids.length)return;api('api/ytscout/seen',{ids}).catch(()=>{});ytRes.forEach(r=>{if(ids.includes(r.id))r.seen=1})};
 document.addEventListener('click',async e=>{const ym=e.target.closest('[data-ytmode]');if(ym){ytMode=ym.dataset.ytmode;try{localStorage.setItem('ytMode',ytMode)}catch(err){}renderScout();return}
  const p=e.target.closest('[data-ytp]');if(p){$('ytq').value=p.dataset.ytp;if(p.dataset.yts!=null&&$('ytsty')){ytSty=p.dataset.yts;$('ytsty').value=ytSty}ytStart(p.dataset.ytp);return}
+ const ag=e.target.closest('[data-ytagain]');if(ag){ytStart(ag.dataset.ytagain,ag.dataset.ytm,ag.dataset.yts);return}
+ const op=e.target.closest('[data-ytopen]');if(op){ytOpen.add(op.dataset.ytopen);ytDraw();return}
+ if(e.target.closest('[data-ytseen]')){ytSeen(ytRes.filter(r=>r.auto&&!r.seen).map(r=>r.id));ytDraw();return}
+ const mo=e.target.closest('[data-ytmore]');if(mo){mo.disabled=true;const t=mo.dataset.ytt||mo.dataset.ytmore;
+  try{await api('api/ytscout/more',{id:mo.dataset.ytmore,title:t});ytQ='more like: '+t.slice(0,60);ytOpen.add(ytQ);ytSeen([mo.dataset.ytmore]);toast('listening for more like “'+t.slice(0,50)+'”…');ytDraw();ytPoll()}catch(err){toast('error: '+err.message)}return}
  const sn=e.target.closest('[data-ytsnip]');if(sn){if(!sn.dataset.ytsnip)return;if(players.has('yt')&&sn.classList.contains('playing')){stopAll();return}stopAll();
   const a=new Audio(url(sn.dataset.ytsnip));a.play();players.set('yt',a);a.onended=()=>{players.delete('yt');sn.classList.remove('playing');drawNP()};document.querySelectorAll('[data-ytsnip]').forEach(b=>b.classList.remove('playing'));sn.classList.add('playing');
-  setNP(sn.dataset.ytsnip,null,'scout preview · '+sn.dataset.ytt,null);return}
- const ad=e.target.closest('[data-ytadd]');if(ad){ad.disabled=true;ad.textContent='adding…';try{await api('api/ingest',{target:ad.dataset.ytadd,drums:false});await api('api/ytscout/mark',{id:ad.dataset.ytid,status:'ingested'});
-  ytRes.forEach(r=>{if(r.id===ad.dataset.ytid)r.status='ingested'});ytDraw();toast('added — downloading & mining in the background (progress under ＋ add source)')}catch(err){toast('error: '+err.message)}return}
- const skp=e.target.closest('[data-ytskip]');if(skp){await api('api/ytscout/mark',{id:skp.dataset.ytskip,status:'skipped'}).catch(()=>{});ytRes.forEach(r=>{if(r.id===skp.dataset.ytskip)r.status='skipped'});ytDraw()}});
+  if(sn.dataset.ytid)ytSeen([sn.dataset.ytid]);setNP(sn.dataset.ytsnip,null,'scout preview · '+sn.dataset.ytt,null);return}
+ const ad=e.target.closest('[data-ytadd]');if(ad){const du=+ad.dataset.ytdur||0;if(du>1800&&!confirm(`This video is ${ytTime(du)} long: adding it downloads and mines all of it. Add it anyway?`))return;ad.disabled=true;ad.textContent='adding…';try{await api('api/ingest',{target:ad.dataset.ytadd,drums:false});await api('api/ytscout/mark',{id:ad.dataset.ytid,status:'ingested'});
+  ytRes.forEach(r=>{if(r.id===ad.dataset.ytid){r.status='ingested';r.seen=1}});ytDraw();toast('added: downloading & mining in the background (progress under ＋ add source). 🔭 more finds others like it.')}catch(err){toast('error: '+err.message)}return}
+ const skp=e.target.closest('[data-ytskip]');if(skp){await api('api/ytscout/mark',{id:skp.dataset.ytskip,status:'skipped'}).catch(()=>{});ytRes.forEach(r=>{if(r.id===skp.dataset.ytskip){r.status='skipped';r.seen=1}});ytDraw()}});
 
 // ================= sketchpad =================
 const SK={lanes:[],playing:false,open:false,voices:[],timer:null,master:null,nextBar:0,start:0,arr:'',sec:4};window.SK=SK;

@@ -455,14 +455,15 @@ class Handler(SimpleHTTPRequestHandler):
                 except Exception as e:
                     return self._json(dict(seeds=[], artists=[], error=str(e)[:200]))
             if u.path == "/api/ytscout":
-                from .ytscout import results, PRESETS
+                from .ytscout import results, PRESETS, auto_state, learned
                 from .related import guided_queries, profile
                 try:
                     prof, gq = profile(), guided_queries()
                 except Exception:  # styles not analysed yet
                     prof, gq = dict(styles=[]), []
                 return self._json(dict(presets=dict(PRESETS, guided=[g["query"] for g in gq]), guided=gq,
-                                       profile=prof, results=results(q.get("q") or None)))
+                                       profile=prof, results=results(q.get("q") or None), auto=auto_state(),
+                                       learned=learned()))
             if u.path == "/api/shootout":
                 from .shootout import manifest, votes, results
                 return self._json(dict(manifest(q.get("round")), votes=votes(), results=results()))
@@ -593,6 +594,15 @@ class Handler(SimpleHTTPRequestHandler):
             elif self.path == "/api/ytscout/mark":
                 from .ytscout import mark
                 mark(req["id"], req["status"])
+            elif self.path == "/api/ytscout/more":
+                return self._json({"job": start_job("ytscout", ["--more", req["id"], "--n", str(int(req.get("n", 15)))],
+                                                    "more like: " + (req.get("title") or req["id"])[:60])})
+            elif self.path == "/api/ytscout/seen":
+                from .ytscout import mark_seen
+                mark_seen(req.get("ids") or [])
+            elif self.path == "/api/ytscout/auto":
+                from .ytscout import set_auto
+                return self._json(set_auto(enabled=bool(req.get("enabled"))))
             elif self.path == "/api/link/tempo":
                 from .link import set_tempo
                 set_tempo(req["bpm"])
@@ -695,6 +705,19 @@ def _warm():
         print("galaxy warm-up failed:", e)
 
 
+def _scout_daily():
+    """The scout's daily inbox: once a day while the app is open, when nothing else is running."""
+    while True:
+        try:
+            from .ytscout import auto_due, set_auto
+            if auto_due() and not any(_alive(j["pid"]) for j in _saved_jobs().values()):
+                set_auto(last=time.time())
+                start_job("ytscout", ["--auto"], "daily finds")
+        except Exception as e:
+            print("daily scout failed:", e)
+        time.sleep(1800)
+
+
 def serve(port=8765, open_browser=True):
     global HTTPD
     from .app import configured
@@ -703,6 +726,8 @@ def serve(port=8765, open_browser=True):
         from .edit import clear_previews
         clear_previews()
         threading.Thread(target=_warm, daemon=True).start()
+        if not os.environ.get("DIGITALCRATE_NO_SCOUT"):
+            threading.Thread(target=_scout_daily, daemon=True).start()
     httpd = HTTPD = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(C.LIB_ROOT)))
     url = f"http://localhost:{port}/"
     print(f"DigitalCrate at {url}  (Ctrl-C to stop)")

@@ -102,9 +102,9 @@ models.
 
 ### Highlights
 
-- **🔭 Scout finds new music to sample.** It tags your songs with 400 Discogs styles from the audio itself, learns
-  which ones are behind your likes, and searches YouTube for tracks scored on what you want: raw singing, sustained
-  pads, or your styles. It also suggests new artists via ListenBrainz. You preview, then mine what you pick.
+- **🔭 Scout finds new music to sample.** It searches YouTube and listens to each result, scoring it for raw
+  singing, sustained pads, or your styles (400 Discogs styles, learned from the songs you like). **🔭 more** digs
+  through a good find's channel, ✕ and adds teach the ranking, and once a day it brings you a few new finds by itself.
 - **A taste model that shows its work.** ★, ✕, replays, skips and listening time train it; **💡 why this?** shows
   what pushed a sample up or down and which of your favorites it's closest to. The **🧠 Taste page** reports its
   honest held-out accuracy and lists the samples that would teach it the most.

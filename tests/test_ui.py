@@ -127,7 +127,7 @@ def site(tmp_path_factory):
         sf.write(d / f"01 {title}.wav", _song(chords, mel).T, SR)
     env = dict(os.environ, DIGITALCRATE_MUSIC=str(music), DIGITALCRATE_LIBRARY=str(lib),
                DIGITALCRATE_FOUND=str(root / "found"), DIGITALCRATE_ABLETON_SAMPLES=str(root / "ableton"),
-               DIGITALCRATE_CONFIG=str(root / "cfg.toml"))
+               DIGITALCRATE_CONFIG=str(root / "cfg.toml"), DIGITALCRATE_NO_SCOUT="1")
     (root / "cfg.toml").write_text(f'music = "{music}"\nlibrary = "{lib}"\n')
     def run(*a):
         r = subprocess.run([sys.executable, *a], env=env, capture_output=True, text=True)
@@ -604,3 +604,37 @@ def test_build_a_kit_around_a_hit(page):
     page.wait_for_selector(".dfrow [data-dfadd]", timeout=60000)
     page.locator(".dfrow").filter(has_text="Snare").first.locator("[data-dfadd]").first.click()
     page.wait_for_function("SK.lanes[0].pads.length===2", timeout=30000)
+
+
+def test_scout_groups_inbox_and_filters(site, page):
+    """🔭 Scout: full width, finds grouped by search, the daily inbox on top, playlists filtered, ✕ remembered."""
+    import sqlite3
+    urllib.request.urlopen(site["base"] + "api/ytscout", timeout=60).read()  # creates the table
+    db = sqlite3.connect(site["lib"] / "_data" / "samples.sqlite")
+    e = lambda k: (np.eye(512)[k] + 0.1).astype(np.float16).tobytes()
+    rows = [("v1", "acapella test", "Singer - Song (Acapella)", 1.5, 1, 0, e(1)),
+            ("v2", "acapella test", "Another (A Cappella)", 1.2, 0, 1, e(2)),
+            ("v3", "acapella test", "2000s hits [playlist]", 1.9, 0, 1, e(3))]
+    for vid, q, t, sc, auto, seen, emb in rows:
+        db.execute("""INSERT OR REPLACE INTO yt_scout(id, query, queries, url, title, channel, duration, views, score,
+                      vocal, neg, taste, best_at, snippet, status, mode, emb, moments, auto, seen)
+                      VALUES (?,?,?,?,?,'ch',200,10,?,0.5,0.1,0.2,30,'x.wav','scored','voice',?,?,?,?)""",
+                   (vid, q, q, f"https://www.youtube.com/watch?v={vid}", t, sc, emb,
+                    json.dumps([[30, "x.wav"], [50, "y.wav"]]), auto, seen))
+    db.commit()
+    page.evaluate("CRATE.setTab('Y')")
+    page.wait_for_selector(".ygrp .yghead", timeout=30000)
+    assert not page.locator("aside").is_visible()
+    assert page.locator(".ygrp.inbox .yt").count() == 1
+    grp = page.locator(".ygrp:not(.inbox)").filter(has_text="acapella test")
+    assert grp.locator(".yt").count() == 2  # the playlist is filtered out
+    assert grp.locator(".yt").first.locator(".ymoms .play").count() == 2
+    assert "dismissed or filtered" in page.inner_text("#ytcount")
+    grp.locator(".yt").filter(has_text="Another").locator("[data-ytskip]").click()
+    page.wait_for_function("document.querySelectorAll('.ygrp:not(.inbox) .yt').length===1")
+    assert db.execute("SELECT status FROM yt_scout WHERE id='v2'").fetchone()[0] == "skipped"
+    assert db.execute("SELECT status FROM yt_scout WHERE id='v3'").fetchone()[0] == "filtered"
+    page.click("[data-ytseen]")
+    page.wait_for_function("!document.querySelector('.ygrp.inbox')")
+    page.evaluate("CRATE.setTab('S')")
+    assert page.locator("aside").is_visible()

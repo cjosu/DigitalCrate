@@ -4,7 +4,7 @@ Everything the [README](../README.md) skips. The small **?** buttons in the app 
 
 - [Browse](#browse) · [Sketchpad](#sketchpad) · [Drum lane](#drum-lane) · [Chords](#chords) · [Pads](#pads) ·
   [Drum Racks from songs](#drum-racks-from-songs) · [Search](#search) · [Editing](#editing) · [Taste](#taste) ·
-  [Organizing](#organizing) · [Mining](#mining-and-sources) · [Export](#export) · [Keyboard and MIDI](#keyboard-and-midi) ·
+  [Scout](#scout) · [Organizing](#organizing) · [Mining](#mining-and-sources) · [Export](#export) · [Keyboard and MIDI](#keyboard-and-midi) ·
   [How it works](#how-it-works) · [Command line](#command-line) · [Library on disk](#the-library-on-disk) ·
   [Configuration](#configuration)
 
@@ -100,7 +100,22 @@ an Ableton Drum Rack (`.adg`).
 - **🧠 Taste page:** honest held-out accuracy over time (regression and trees separately), what it has learned in
   words, where it's wrong, and which samples would teach it most.
 - **Your styles:** songs are tagged with 400 Discogs styles from their audio; the ones behind your likes guide
-  **🔭 Scout** (YouTube search scored for raw singing, pads, or your styles) and suggest new artists via ListenBrainz.
+  **🔭 Scout** and suggest new artists via ListenBrainz.
+
+## Scout
+
+Finds new music to sample on YouTube. Nothing enters the library until you press **add source**.
+
+- **Search for** 🎤 raw singing, 🌫 pads & textures, or 🧭 your styles. It listens to a minute of each result (the
+  middle of long videos) and scores it for that. Playlists, DJ mixes and music videos are skipped.
+- Finds are **grouped by search** and ranked within their kind. **▶** plays the three best moments; the title opens
+  YouTube at the best one.
+- **🔭 more** on a good find listens through its channel and searches built from its title and artist, with titles
+  that promise what you're after ("acapella", "drone") first.
+- **✕** and **add source** teach the ranking: closer to what you added, further from what you dismissed.
+- **dig deeper** repeats a search further down YouTube's results.
+- **Daily finds:** once a day while the app is open, it runs up to three searches by itself (more like your latest
+  add, your best search again, one you haven't tried) and shows the results at the top. Turn it off in the tab.
 
 ## Organizing
 

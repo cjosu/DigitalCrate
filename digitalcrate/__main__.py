@@ -97,7 +97,9 @@ def main():
     ex.add_argument("--key", help="conform to this key (e.g. Fm, 8A)"); ex.add_argument("--bpm", type=float)
     sub.add_parser("reclassify", help="re-apply category rules to existing samples (fast, no audio work)")
     ys = sub.add_parser("ytscout", help="search YouTube, listen to a minute of each result, score for clean singing")
-    ys.add_argument("query"); ys.add_argument("--n", type=int, default=15)
+    ys.add_argument("query", nargs="?"); ys.add_argument("--n", type=int, default=15)
+    ys.add_argument("--more", metavar="VIDEO_ID", help="more like a find: its channel and a search from its title")
+    ys.add_argument("--auto", action="store_true", help="the daily inbox: a few searches picked from what you've added")
     ys.add_argument("--mode", choices=["voice", "pads", "guided"], default="voice",
                     help="score for singing, for pads & textures, or for your styles (guided)")
     ys.add_argument("--style", help="guided: one Discogs style to listen for, e.g. 'Funk / Soul---Neo Soul' (default: your styles)")
@@ -190,8 +192,15 @@ def main():
             [r[0] for r in connect().execute(f"SELECT path FROM samples WHERE id IN ({','.join('?'*len(a.ids))})", a.ids)]
         print(export(paths, a.name or (a.kit if a.kit else None), rack=a.rack, key=a.key, bpm=a.bpm))
     elif a.cmd == "ytscout":
-        from .ytscout import run as yrun
-        yrun(a.query, a.n, a.mode, a.style)
+        from .ytscout import run as yrun, more, auto_run
+        if a.auto:
+            auto_run()
+        elif a.more:
+            more(a.more, a.n)
+        elif a.query:
+            yrun(a.query, a.n, a.mode, a.style)
+        else:
+            raise SystemExit("give a search, --more VIDEO_ID or --auto")
     elif a.cmd == "shootout":
         from .shootout import render, render_tune, results
         if a.tune and not a.results:
