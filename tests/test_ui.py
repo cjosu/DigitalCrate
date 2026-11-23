@@ -614,7 +614,8 @@ def test_scout_groups_inbox_and_filters(site, page):
     e = lambda k: (np.eye(512)[k] + 0.1).astype(np.float16).tobytes()
     rows = [("v1", "acapella test", "Singer - Song (Acapella)", 1.5, 1, 0, e(1)),
             ("v2", "acapella test", "Another (A Cappella)", 1.2, 0, 1, e(2)),
-            ("v3", "acapella test", "2000s hits [playlist]", 1.9, 0, 1, e(3))]
+            ("v3", "acapella test", "2000s hits [playlist]", 1.9, 0, 1, e(3)),
+            ("v4", "acapella test", "Third (Acapella)", 1.0, 0, 1, e(4))]
     for vid, q, t, sc, auto, seen, emb in rows:
         db.execute("""INSERT OR REPLACE INTO yt_scout(id, query, queries, url, title, channel, duration, views, score,
                       vocal, neg, taste, best_at, snippet, status, mode, emb, moments, auto, seen)
@@ -625,6 +626,11 @@ def test_scout_groups_inbox_and_filters(site, page):
     page.evaluate("CRATE.setTab('Y')")
     page.wait_for_selector(".ygrp .yghead", timeout=30000)
     assert not page.locator("aside").is_visible()
+    assert page.locator(".ygrp.inbox .yt").count() == 1
+    page.locator(".ygrp.inbox .ymoms .play").nth(1).click()  # listening doesn't move a find out of the inbox
+    page.wait_for_timeout(600)
+    page.evaluate("CRATE.setTab('Y')")
+    page.wait_for_selector(".ygrp.inbox .yt", timeout=30000)
     assert page.locator(".ygrp.inbox .yt").count() == 1
     grp = page.locator(".ygrp:not(.inbox)").filter(has_text="acapella test")
     assert grp.locator(".yt").count() == 2  # the playlist is filtered out

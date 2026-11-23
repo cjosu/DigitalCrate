@@ -392,13 +392,14 @@ function galDraw(){const c=$('galc');if(!c)return;const dpr=devicePixelRatio||1,
 setInterval(()=>{if(st.tab==='G'&&players.size)galDraw()},500);
 
 // ---------- YouTube scout
-let ytT=null,ytRes=[],ytD={},ytQ='',ytSty='',ytOpen=new Set(),ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
+let ytT=null,ytRes=[],ytD={},ytInbox=null,ytSig='',ytCur='',ytQ='',ytSty='',ytOpen=new Set(),ytMode=(()=>{try{return localStorage.getItem('ytMode')||'voice'}catch(e){return 'voice'}})();
 const YTM={voice:{label:'🎤 voice',ph:'e.g. acapella cover · singing in my car · choir rehearsal',bars:['voice','band/talk']},
  pads:{label:'🌫 pads & textures',ph:'e.g. ps1 ambient soundtrack · organ drone · 70s synth soundtrack',bars:['ambient','drums/talk/voice']},
  guided:{label:'🧭 your styles',ph:'e.g. rare neo soul · modal jazz 1960s',bars:['your styles','talk/noise']}};
 const ytTime=s=>Math.floor(s/60)+':'+String(Math.round(s%60)).padStart(2,'0');
 const ytAgo=t=>{if(!t)return'';const d=(Date.now()-new Date(t.replace(' ','T')+'Z'))/864e5;return d<1?'today':d<2?'yesterday':Math.floor(d)+' days ago'};
-async function ytLoad(){try{ytD=await api('api/ytscout')}catch(e){ytD={results:[]}}ytRes=ytD.results||[]}
+async function ytLoad(){try{ytD=await api('api/ytscout')}catch(e){ytD={results:[]}}ytRes=ytD.results||[];if(!ytInbox)ytInbox=new Set();
+ ytRes.forEach(r=>{if(r.auto&&!r.seen&&!ytGone(r)&&r.status!=='ingested')ytInbox.add(r.id)});const sig=ytRes.map(r=>r.id+r.status).join();const ch=sig!==ytSig;ytSig=sig;return ch}
 async function renderScout(){$('count').textContent='YouTube scout';const L=$('list');
  if(!SERVED){L.innerHTML='<div class="empty">The scout needs the local server.</div>';return}
  await ytLoad();if(st.tab!=='Y')return;const d=ytD,M=YTM[ytMode],pre=(d.presets&&d.presets[ytMode])||[],lr=d.learned||{};
@@ -433,8 +434,8 @@ function ytRow(r){const bl=(YTM[r.mode||'voice']||YTM.voice).bars,M=r.moments||[
   <div class="bars"><span>${bl[0]}</span><i style="width:${Math.max(2,r.vocal*120)}px"></i><span>${bl[1]}</span><i style="width:${Math.max(2,r.neg*120)}px;background:#d96c6c"></i><span>your taste</span><i style="width:${Math.max(2,(r.taste||0)*120)}px;background:var(--acc)"></i>${pk?`<span title="like what you added (+) or what you dismissed (−)">your picks ${pk>0?'+':'−'}</span><i style="width:${Math.max(2,Math.min(60,Math.abs(pk)*60))}px;background:${pk>0?'#7fc98f':'#d96c6c'}"></i>`:''}</div></div>
   <div class="yact"><span class="score" title="rank among your ${YTM[r.mode||'voice'].label} finds (100 = best), including what your adds and ✕ taught it">${r.pct}</span><button data-ytmore="${esc(r.id)}" data-ytt="${esc(r.title||'')}" title="more like this: its channel's other uploads, and a search built from its title">🔭 more</button>${r.status==='ingested'?'':`<button data-ytadd="${esc(r.url)}" data-ytid="${esc(r.id)}" data-ytdur="${r.duration||0}" class="pill" title="download it and mine it into the library">add source →</button>`}<button data-ytskip="${esc(r.id)}" title="not for me (teaches the ranking)">✕</button></div></div>`}
 function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk').checked,vis=r=>sk||!ytGone(r);
- const inbox=ytRes.filter(r=>r.auto&&!r.seen&&!ytGone(r)&&r.status!=='ingested');
- const G=new Map();ytRes.filter(vis).forEach(r=>{const q=r.query||'?';if(!G.has(q))G.set(q,{q,mode:r.mode||'voice',style:r.style||'',rows:[],t:''});const g=G.get(q);g.rows.push(r);if((r.created_at||'')>g.t)g.t=r.created_at||''});
+ const inbox=ytRes.filter(r=>ytInbox&&ytInbox.has(r.id)&&!ytGone(r));
+ const G=new Map();ytRes.filter(vis).filter(r=>!(ytInbox&&ytInbox.has(r.id))).forEach(r=>{const q=r.query||'?';if(!G.has(q))G.set(q,{q,mode:r.mode||'voice',style:r.style||'',rows:[],t:''});const g=G.get(q);g.rows.push(r);if((r.created_at||'')>g.t)g.t=r.created_at||''});
  const groups=[...G.values()].sort((a,b)=>(b.q===ytQ)-(a.q===ytQ)||b.t.localeCompare(a.t));
  const hid=ytRes.filter(ytGone).length;
  if($('ytcount'))$('ytcount').textContent=`${ytRes.length-hid} finds from ${G.size} searches${hid&&!sk?` · ${hid} dismissed or filtered (playlists, mixes, music videos)`:''}`;
@@ -443,7 +444,8 @@ function ytDraw(){const el=$('ytlist');if(!el)return;const sk=$('ytsk')&&$('ytsk
  h+=groups.map(g=>{const open=ytOpen.has(g.q)||g.q===ytQ,shown=open?g.rows:g.rows.slice(0,4),more=g.q.startsWith('more like: ');
   return `<div class="ygrp"><div class="yghead"><b>${more?'🔭 ':''}${esc(g.q)}</b><span class="sub">${YTM[g.mode].label} · ${g.rows.length} find${g.rows.length===1?'':'s'} · ${ytAgo(g.t)}</span><span style="flex:1"></span>${more?'':`<button data-ytagain="${esc(g.q)}" data-ytm="${g.mode}" data-yts="${esc(g.style)}" title="search again: listens to the next videos down YouTube's results">dig deeper</button>`}</div>
   ${shown.map(ytRow).join('')}${g.rows.length>shown.length?`<button class="ymore" data-ytopen="${esc(g.q)}">show all ${g.rows.length}</button>`:''}</div>`}).join('');
- el.innerHTML=h||`<div class="empty">${ytPoll.wasRunning?'Listening…':'No finds yet: pick a search above, or type your own.'}</div>`}
+ el.innerHTML=h||`<div class="empty">${ytPoll.wasRunning?'Listening…':'No finds yet: pick a search above, or type your own.'}</div>`;
+ if(ytCur&&players.has('yt'))el.querySelectorAll('[data-ytsnip]').forEach(b=>{if(b.dataset.ytsnip===ytCur)b.classList.add('playing')})}
 async function ytStart(q,mode,style){if(!q)return;if(mode&&mode!==ytMode){ytMode=mode;try{localStorage.setItem('ytMode',ytMode)}catch(e){}}
  ytQ=q;ytOpen.add(q);
  try{await api('api/ytscout',{query:q,n:+(($('ytn')||{}).value||15),mode:ytMode,style:ytMode==='guided'?(style!=null?style:($('ytsty')?$('ytsty').value:ytSty)):''});toast('scouting “'+q+'”…');ytDraw();ytPoll()}catch(e){toast('error: '+e.message)}}
@@ -452,18 +454,18 @@ async function ytPoll(){clearTimeout(ytT);if(st.tab!=='Y')return;let js=[];try{j
  el.innerHTML=js.slice(-1).map(j=>{const sms=j.tail.map(t=>t.startsWith('SUMMARY ')?JSON.parse(t.slice(8)):null).filter(Boolean),sm=sms.pop();
   const txt=sm&&!j.running?`${sm.listened} listened to · ${sm.already} already scouted${sm.filtered?` · ${sm.filtered} skipped (playlists, mixes, music videos)`:''}${sm.too_short?` · ${sm.too_short} too short`:''}${sm.failed?` · ${sm.failed} failed to download`:''}`:j.tail.slice(-2).map(esc).join('\n');
   return `<div class="prov"><b>${esc(j.target)}</b> — ${j.running?'listening…':'done'}<div class="meta" style="white-space:pre-wrap">${txt}</div></div>`}).join('');
- if(run.length||ytPoll.wasRunning){await ytLoad();ytDraw()}
+ if(run.length||ytPoll.wasRunning){if(await ytLoad())ytDraw()}
  ytPoll.wasRunning=run.length>0;if(run.length)ytT=setTimeout(ytPoll,2500)}
 const ytSeen=ids=>{if(!ids.length)return;api('api/ytscout/seen',{ids}).catch(()=>{});ytRes.forEach(r=>{if(ids.includes(r.id))r.seen=1})};
 document.addEventListener('click',async e=>{const ym=e.target.closest('[data-ytmode]');if(ym){ytMode=ym.dataset.ytmode;try{localStorage.setItem('ytMode',ytMode)}catch(err){}renderScout();return}
  const p=e.target.closest('[data-ytp]');if(p){$('ytq').value=p.dataset.ytp;if(p.dataset.yts!=null&&$('ytsty')){ytSty=p.dataset.yts;$('ytsty').value=ytSty}ytStart(p.dataset.ytp);return}
  const ag=e.target.closest('[data-ytagain]');if(ag){ytStart(ag.dataset.ytagain,ag.dataset.ytm,ag.dataset.yts);return}
  const op=e.target.closest('[data-ytopen]');if(op){ytOpen.add(op.dataset.ytopen);ytDraw();return}
- if(e.target.closest('[data-ytseen]')){ytSeen(ytRes.filter(r=>r.auto&&!r.seen).map(r=>r.id));ytDraw();return}
+ if(e.target.closest('[data-ytseen]')){ytSeen(ytRes.filter(r=>r.auto&&!r.seen).map(r=>r.id).concat([...(ytInbox||[])]));ytInbox=new Set();ytDraw();return}
  const mo=e.target.closest('[data-ytmore]');if(mo){mo.disabled=true;const t=mo.dataset.ytt||mo.dataset.ytmore;
   try{await api('api/ytscout/more',{id:mo.dataset.ytmore,title:t});ytQ='more like: '+t.slice(0,60);ytOpen.add(ytQ);ytSeen([mo.dataset.ytmore]);toast('listening for more like “'+t.slice(0,50)+'”…');ytDraw();ytPoll()}catch(err){toast('error: '+err.message)}return}
  const sn=e.target.closest('[data-ytsnip]');if(sn){if(!sn.dataset.ytsnip)return;if(players.has('yt')&&sn.classList.contains('playing')){stopAll();return}stopAll();
-  const a=new Audio(url(sn.dataset.ytsnip));a.play();players.set('yt',a);a.onended=()=>{players.delete('yt');sn.classList.remove('playing');drawNP()};document.querySelectorAll('[data-ytsnip]').forEach(b=>b.classList.remove('playing'));sn.classList.add('playing');
+  const a=new Audio(url(sn.dataset.ytsnip));a.play().catch(()=>{if(players.get('yt')===a){players.delete('yt');sn.classList.remove('playing');toast('that preview is missing')}});players.set('yt',a);ytCur=sn.dataset.ytsnip;a.onended=()=>{players.delete('yt');ytCur='';document.querySelectorAll('[data-ytsnip].playing').forEach(b=>b.classList.remove('playing'));drawNP()};document.querySelectorAll('[data-ytsnip]').forEach(b=>b.classList.remove('playing'));sn.classList.add('playing');
   if(sn.dataset.ytid)ytSeen([sn.dataset.ytid]);setNP(sn.dataset.ytsnip,null,'scout preview · '+sn.dataset.ytt,null);return}
  const ad=e.target.closest('[data-ytadd]');if(ad){const du=+ad.dataset.ytdur||0;if(du>1800&&!confirm(`This video is ${ytTime(du)} long: adding it downloads and mines all of it. Add it anyway?`))return;ad.disabled=true;ad.textContent='adding…';try{await api('api/ingest',{target:ad.dataset.ytadd,drums:false});await api('api/ytscout/mark',{id:ad.dataset.ytid,status:'ingested'});
   ytRes.forEach(r=>{if(r.id===ad.dataset.ytid){r.status='ingested';r.seen=1}});ytDraw();toast('added: downloading & mining in the background (progress under ＋ add source). 🔭 more finds others like it.')}catch(err){toast('error: '+err.message)}return}
