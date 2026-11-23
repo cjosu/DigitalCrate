@@ -448,6 +448,18 @@ def technique_posteriors(prior):
 _FIT = {}
 
 
+def compact(payload):
+    """The page's copy: scores keyed by sample id in two arrays (a quarter of the size of path-keyed maps)."""
+    if not payload:
+        return payload
+    con = _db()
+    ids = dict(con.execute("SELECT path, id FROM samples"))
+    keys = [p for p in payload["score"] if p in ids]
+    return dict(n_labels=payload["n_labels"], n_pos=payload["n_pos"], disliked=payload["disliked"],
+                ids=[ids[p] for p in keys], score=[round(payload["score"][p], 3) for p in keys],
+                discover=[round(payload["discover"][p], 3) for p in keys])
+
+
 def scores_payload(recent_hours=None):
     """Scores for the browser. The model is refit only when your ratings, listening or the samples change (a
     listen counts, so it stays current); otherwise the last fit is reused and only 'discover' is re-drawn."""

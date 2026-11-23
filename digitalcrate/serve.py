@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 import time
 import webbrowser
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -388,9 +389,10 @@ class Handler(SimpleHTTPRequestHandler):
                 types = {".css": "text/css", ".js": "application/javascript", ".svg": "image/svg+xml", ".png": "image/png"}
                 return self._file(f, types.get(f.suffix, "application/octet-stream"), {"Cache-Control": "no-store"})
         if self.path.startswith("/api/taste"):
-            from .taste import scores_payload
+            from .taste import compact, scores_payload
             recent = 3 if "recent=1" in self.path else None
-            return self._json(scores_payload(recent))
+            p = scores_payload(recent)
+            return self._json(compact(p) if "ids=1" in self.path else p)
         if self.path.startswith("/api/onsets?"):
             from urllib.parse import parse_qs, urlparse
             from .edit import onsets
@@ -514,16 +516,22 @@ class Handler(SimpleHTTPRequestHandler):
             elif self.path.startswith("/api/setup/") or self.path == "/api/quit":
                 return self._setup(req)
             elif self.path == "/api/suggest":
-                from .suggest import suggest
-                return self._json(suggest(path, req.get("project_key") or None, req.get("start"), req.get("end"),
-                                          log=not req.get("nolog")))
+                from .suggest import suggest_now
+                return self._json(suggest_now(path, req.get("project_key") or None, req.get("start"), req.get("end"),
+                                              log=not req.get("nolog")))
+            elif self.path == "/api/suggest/prefetch":
+                from .suggest import prefetch
+                return self._json(prefetch(path, req.get("project_key") or None, req.get("start"), req.get("end")))
             elif self.path == "/api/suggest/rate":
-                from .suggest import rate
+                from .suggest import rate, stale
+                stale(path)
                 return self._json(rate(path, int(req.get("rating", 0)), req.get("reason") or None, req.get("params"),
                                        req.get("move"), req.get("family"), req.get("material"), req.get("arm"),
                                        req.get("source") or "suggestion"))
             elif self.path == "/api/suggest/feedback":
-                from .suggest import feedback
+                from .suggest import feedback, stale
+                if req.get("action") != "play":
+                    stale(path)
                 feedback(path, req.get("id"), req.get("move"), req.get("family"), req.get("arm"), req.get("material"),
                          req.get("action"))
             elif self.path == "/api/reveal":  # show a library file in Finder, selected (to drag it into Live)
@@ -665,6 +673,21 @@ def _restart():
                               "--no-browser"])
 
 
+def _warm():
+    """Fit the taste model while the page loads, so its first request doesn't wait (about 2 s on a big library)."""
+    try:
+        from .taste import scores_payload
+        scores_payload(None)
+        scores_payload(3)
+    except Exception as e:
+        print("taste warm-up failed:", e)
+    try:  # the galaxy map: instant when the last build made it; samples since then are placed in a moment
+        from .search import galaxy
+        galaxy()
+    except Exception as e:
+        print("galaxy warm-up failed:", e)
+
+
 def serve(port=8765, open_browser=True):
     global HTTPD
     from .app import configured
@@ -672,6 +695,7 @@ def serve(port=8765, open_browser=True):
         _db()
         from .edit import clear_previews
         clear_previews()
+        threading.Thread(target=_warm, daemon=True).start()
     httpd = HTTPD = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(C.LIB_ROOT)))
     url = f"http://localhost:{port}/"
     print(f"DigitalCrate at {url}  (Ctrl-C to stop)")

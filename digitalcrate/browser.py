@@ -90,6 +90,17 @@ def write_page(data):
     showing, as a plain script so the page still works when opened straight from disk."""
     import hashlib
     data = dict(data)
+    # smaller page: artist and title come from the track (the page fills them back in), reference names from a table
+    S, tracks = data["samples"], data["tracks"]
+    refs = data.get("refs") or sorted({s[19] for s in S if isinstance(s[19], str)})
+    ri = {r: k for k, r in enumerate(refs)}
+    for s in S:
+        t = tracks.get(s[21]) or tracks.get(str(s[21]))
+        if t and s[9] == t[1] and s[10] == t[2]:
+            s[9] = s[10] = 0
+        if isinstance(s[19], str):
+            s[19] = ri[s[19]]
+    data["refs"] = refs
     parts = data.pop("partners", None)
     if parts is not None:
         js = "window.__PARTNERS=" + json.dumps(parts, separators=(",", ":")) + ";"
@@ -211,6 +222,8 @@ function unpackP(p){if(Array.isArray(p))return p;const b=atob(p.b64),w=p.w,stp=w
   const j=w===2?(b.charCodeAt(o)|b.charCodeAt(o+1)<<8):(b.charCodeAt(o)|b.charCodeAt(o+1)<<8|b.charCodeAt(o+2)<<16|b.charCodeAt(o+3)<<24)>>>0;
   a.push([j,Math.round(b.charCodeAt(o+w)/255*1000)/1000,Math.round(b.charCodeAt(o+w+1)/255*100)/100,Math.round(b.charCodeAt(o+w+2)/255*100)/100])}out[i]=a}return out}
 const S=D.samples, AB=D.abbr;
+// fill in what the build left out to keep the page small (artist 9, title 10 from the track 21; reference name 19)
+S.forEach(s=>{if(s[9]===0){const t=D.tracks[s[21]]||[];s[9]=t[1]||'';s[10]=t[2]||''}if(D.refs&&typeof s[19]==='number')s[19]=D.refs[s[19]]});
 // goes-with picks: in Browser-partners.js, loaded once the list is up (older pages carry them inline)
 const P=D.partners?unpackP(D.partners):new Array(S.length);let P_READY=!!D.partners,P_FAIL=false;
 function loadPartners(){if(P_READY)return;const sc=document.createElement('script');sc.src='Browser-partners.js?v='+(D.partners_v||'');
@@ -270,9 +283,11 @@ const star=(path,id,label)=>`<button class="star${FAV.has(path)?' on':''}" data-
 document.addEventListener('click',e=>{const b=e.target.closest('[data-fav]');if(!b)return;e.stopPropagation();toggleFav(b.dataset.fav,b.dataset.fid,b.dataset.flabel)},true);
 // ---------- taste
 let TASTE={score:{},discover:{},vibe:{},disliked:new Set(),n:0};
-async function loadTaste(){if(!SERVED)return;try{const a=await (await fetch('api/taste')).json();const b=await (await fetch('api/taste?recent=1')).json();
+// scores come keyed by sample id (?ids=1, a quarter of the size); the page keeps them keyed by path
+const byIds=(r,k)=>{const o={};if(!r.ids)return r[k]||{};r.ids.forEach((id,j)=>{const i=BYID.get(id);if(i!=null)o[S[i][F.path]]=r[k][j]});return o};
+async function loadTaste(){if(!SERVED)return;try{const [a,b]=await Promise.all([fetch('api/taste?ids=1').then(r=>r.json()),fetch('api/taste?recent=1&ids=1').then(r=>r.json())]);
  const first=!TASTE.loaded;
- TASTE={loaded:true,score:a.score||{},discover:a.discover||{},vibe:b.score||{},disliked:new Set([...(a.disliked||[]),...TASTE.disliked]),n:a.n_labels||0};
+ TASTE={loaded:true,score:byIds(a,'score'),discover:byIds(a,'discover'),vibe:byIds(b,'score'),disliked:new Set([...(a.disliked||[]),...TASTE.disliked]),n:a.n_labels||0};
  if(first)render();else{$('refresh').hidden=false;const c=$('count');if(c&&!c.textContent.includes('taste'))render.countOnly&&render.countOnly()}}catch(e){}}
 // ---------- deleting samples (served only): files go to _data/trash, undo brings them back
 let GONE=new Set();

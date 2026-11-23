@@ -312,7 +312,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('#sliceit'))return;e.
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;
 async function renderGalaxy(){const L=$('list');$('count').textContent='sample galaxy';
- L.innerHTML=`<div class="galaxy" id="gal"><canvas id="galc"></canvas><div class="gl" id="gll">loading the map (first time ≈30 s)…</div><div class="gtip" id="gtip" hidden></div></div>`;
+ L.innerHTML=`<div class="galaxy" id="gal"><canvas id="galc"></canvas><div class="gl" id="gll">loading the map…</div><div class="gtip" id="gtip" hidden></div></div>`;
  if(!GAL){try{const g=await api('api/galaxy');GAL=g.xy}catch(e){$('gll').textContent='map unavailable: '+e.message;return}}
  if(st.tab!=='G')return;galSetup();galDraw()}
 function galPts(){const keep=new Set(filtered()),out=[];S.forEach((s,i)=>{let p=GAL[s[F.path]];if(!p&&s[F.root]&&BYID.has(s[F.root]))p=GAL[S[BYID.get(s[F.root])][F.path]];if(p)out.push([i,p[0],p[1],keep.has(i)])});return out}
@@ -1073,12 +1073,15 @@ const _openEditorSg=openEditor;
 openEditor=async function(i){await _openEditorSg(i);const box=$('editor');if(!box||box.hidden||!$('edprev')||$('edsg')||!SERVED)return;
  const row=$('edprev').closest('.edrow'),d=document.createElement('div');d.id='edsg';d.style.margin='6px 0';
  d.innerHTML=`<div class="edrow"><button id="sgbtn" title="try a dozen edits that suit this kind of sound and let your taste model pick">✨ suggest edits</button>${hq('suggest')}<span class="sub" id="sgmsg"></span></div><div id="sglist"></div>`;
- row.parentNode.insertBefore(d,row);$('sgbtn').onclick=()=>sgRun(i)};
+ row.parentNode.insertBefore(d,row);$('sgbtn').onclick=()=>sgRun(i);
+ // start working on them now, in the background, so ✨ answers at once
+ for(let t=0;t<40&&!(ED&&ED.sel);t++)await new Promise(r=>setTimeout(r,100));if(ED&&ED.sel&&$('edsg'))api('api/suggest/prefetch',sgBody(i)).catch(()=>{})};
+const sgBody=i=>({path:S[i][F.path],project_key:PROJ.key||'',start:ED&&ED.sel?ED.sel[0]:0,end:ED&&ED.sel?ED.sel[1]:null});
 const SGREASONS=['too much','too subtle','sounds processed','wrong mood'];
 const sgRate=(body)=>api('api/suggest/rate',body).catch(()=>{});
 const sgFb=(x,action)=>SG&&api('api/suggest/feedback',{path:S[SG.i][F.path],id:S[SG.i][F.id],move:x.id,family:x.family,arm:x.arm,material:x.material,action}).catch(()=>{});
 async function sgRun(i){const s=S[i];$('sgbtn').disabled=true;$('sglist').innerHTML='';$('sgmsg').textContent='trying a dozen edits on the selection… (a few seconds)';
- let r;try{r=await api('api/suggest',{path:s[F.path],project_key:PROJ.key||'',start:ED&&ED.sel?ED.sel[0]:0,end:ED&&ED.sel?ED.sel[1]:null})}
+ let r;try{r=await api('api/suggest',sgBody(i))}
  catch(e){$('sgbtn').disabled=false;$('sgmsg').textContent="couldn't: "+e.message;return}
  $('sgbtn').disabled=false;if(r.error){$('sgmsg').textContent=r.error;return}
  SG={i,r,run:Date.now()};const up=r.suggestions.filter(x=>x.arm==='critic'&&x.delta>0).length;

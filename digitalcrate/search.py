@@ -153,14 +153,39 @@ def reference_search(target, k=400):
 
 
 # ---------- galaxy
-def galaxy():
-    """2D layout of every sample (PCA-50 -> t-SNE), cached on disk keyed by the sample set."""
+_G = {}
+
+
+def galaxy(full=False):
+    """2D layout of every sample (PCA-50 -> t-SNE), cached on disk keyed by the sample set. `digitalcrate build`
+    makes it (full=True, about 30 s on 20k samples). In between, samples that arrive (live updates) are placed among
+    their nearest neighbours by sound and deleted ones dropped, instantly; the next build lays it all out again."""
     m = matrix()
     h = hashlib.sha1("".join(m["ids"]).encode()).hexdigest()[:12]
     cache = C.DATA_DIR / "galaxy.json"
-    if cache.exists():
-        g = json.loads(cache.read_text())
-        if g.get("hash") == h:
+    if _G.get("hash") == h and not (full and _G.get("approx")):
+        return _G
+    g = json.loads(cache.read_text()) if cache.exists() else None
+    if g and g.get("hash") == h and not (full and g.get("approx")):
+        _G.clear(); _G.update(g)
+        return g
+    if g and not full and g.get("xy"):
+        old = g["xy"]
+        have = np.array([p in old for p in m["paths"]])
+        if have.sum() >= 0.8 * len(have):  # place the newcomers among their 8 nearest placed neighbours
+            P = np.array([old[p] for p, k in zip(m["paths"], have) if k])
+            Eh, new = m["E"][have], np.where(~have)[0]
+            xy = {p: old[p] for p, k in zip(m["paths"], have) if k}
+            for a in range(0, len(new), 512):
+                idx = new[a:a + 512]
+                sim = m["E"][idx] @ Eh.T
+                nn = np.argsort(-sim, 1)[:, :8]
+                for i, row in zip(idx, nn):
+                    x, y = P[row].mean(0) + np.random.default_rng(i).normal(0, 0.004, 2)
+                    xy[m["paths"][i]] = [round(float(x), 4), round(float(y), 4)]
+            g = dict(hash=h, xy=xy, approx=int(len(new)) + int(g.get("approx", 0)))
+            cache.write_text(json.dumps(g))
+            _G.clear(); _G.update(g)
             return g
     from sklearn.decomposition import PCA
     from sklearn.manifold import TSNE
@@ -170,4 +195,5 @@ def galaxy():
     Y /= Y.max(0) + 1e-9
     g = dict(hash=h, xy={p: [round(float(a), 4), round(float(b), 4)] for p, (a, b) in zip(m["paths"], Y)})
     cache.write_text(json.dumps(g))
+    _G.clear(); _G.update(g)
     return g

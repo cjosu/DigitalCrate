@@ -332,4 +332,10 @@ def build(n_kits=60):
     build_views(d, kits)
     from .browser import write_browser
     write_browser(d, tags, parts, kits)
+    print("laying out the galaxy map…")
+    try:
+        from .search import galaxy
+        galaxy(full=True)
+    except Exception as e:  # the page works without it; the Galaxy tab makes it on first open
+        print("galaxy failed:", e)
     print(f"open {C.LIB_ROOT / 'Browser.html'}")

@@ -190,3 +190,29 @@ def test_drum_hits_are_trimmed_to_the_impact():
     first = int(np.argmax(np.abs(z[0]) >= 0.25 * np.abs(z[0]).max())) / sr
     assert first < 0.004 and z.shape[1] < y.shape[1]
     assert trim_to_hit(z, sr).shape == z.shape  # already on the hit: left alone
+
+
+def test_suggestions_are_precomputed_and_go_stale_on_a_rating(monkeypatch):
+    """The editor's background precompute is used by ✨ (shown only then), the next press is precomputed, and a
+    rating makes a precomputed run stale."""
+    import time
+    from digitalcrate import suggest as sg
+    calls = []
+
+    def fake(rel, pk=None, start=None, end=None, n=3, seed=None, log=True, commit=True):
+        calls.append(rel)
+        time.sleep(0.2)
+        return dict(suggestions=[], _shown=dict(ids={len(calls)}, types=set(), families=set()), _rel=rel, _sid="x")
+    monkeypatch.setattr(sg, "suggest", fake)
+    monkeypatch.setattr(sg, "_PRE", {})
+    monkeypatch.setattr(sg, "_SHOWN", {})
+    sg.prefetch("a.wav", None, 0, 2)
+    assert "a.wav" not in sg._SHOWN  # not shown yet
+    r = sg.suggest_now("a.wav", None, 0, 2, log=False)
+    assert r["precomputed"] and len(calls) == 2 and sg._SHOWN["a.wav"][-1]["ids"] == {1}  # the next is on its way
+    time.sleep(0.3)
+    t = time.time()
+    assert sg.suggest_now("a.wav", None, 0, 2, log=False)["precomputed"] and time.time() - t < 0.1
+    time.sleep(0.3)
+    sg.stale("a.wav")
+    assert not sg.suggest_now("a.wav", None, 0, 2, log=False)["precomputed"]

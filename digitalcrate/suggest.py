@@ -359,7 +359,8 @@ def edit_model(con=None):
 
 # ---------------------------------------------------------------- suggest
 
-def suggest(rel, project_key=None, start=None, end=None, n=3, seed=None, log=True):
+def suggest(rel, project_key=None, start=None, end=None, n=3, seed=None, log=True, commit=True):
+    """commit=False: compute only (a background precompute); commit_shown() records it once it's actually shown."""
     from .edit import render, preview
     con = connect()
     s = con.execute("SELECT * FROM samples WHERE path=?", (rel,)).fetchone()
@@ -450,22 +451,86 @@ def suggest(rel, project_key=None, start=None, end=None, n=3, seed=None, log=Tru
     rest = [r for r in renders.values() if not set(r["family"].split("+")) & used]
     if rest:
         picks.append(dict(random.Random(seed).choice(rest), arm="wildcard"))
-    _SHOWN[rel] = (hist + [dict(ids={r["id"] for r in picks}, types={t for r in picks for t in _types(r["id"])},
-                                families={f for r in picks for f in r["family"].split("+")})])[-2:]
+    shown = dict(ids={r["id"] for r in picks}, types={t for r in picks for t in _types(r["id"])},
+                 families={f for r in picks for f in r["family"].split("+")})
     out = []
     for r in picks:
         params = dict(r["params"], start=a0, end=full_end)
         out.append(dict(id=r["id"], family=r["family"], label=r["label"], arm=r["arm"], params=params,
                         url=preview(rel, params), score=round(r["score"], 2), delta=round(r["delta"], 2),
                         close=round(r["close"], 2), learned=r["learned"], material=material))
+    res = dict(original=round(t0, 2), material=material, suggestions=out, tried=len(renders),
+               learning=dict(ratings=em_info["n"], model_on=bool(em), model_auc=em_info["auc"],
+                             strengths={f: round(v, 2) for f, v in strength.items() if abs(v - 1) > 0.01}),
+               note="judged by your taste model; quality comes from the moves themselves",
+               _shown=shown, _rel=rel, _sid=s["id"])
+    return commit_shown(res, log) if commit else res
+
+
+def commit_shown(res, log=True):
+    """These suggestions were shown: the next run steps aside from them (novelty), and they're logged as shown (the
+    denominator for "did the critic's picks beat the wildcard?")."""
+    res = dict(res)
+    shown, rel, sid = res.pop("_shown", None), res.pop("_rel", None), res.pop("_sid", None)
+    if shown is None:
+        return res
+    _SHOWN[rel] = (_SHOWN.get(rel, []) + [shown])[-2:]
     from .taste import log_event
-    for r in (out if log else []):  # shown (value 0): the denominator for "did the critic's picks beat the wildcard?"
-        log_event(rel, "suggest", 0, s["id"], dict(move=r["id"], family=r["family"], arm=r["arm"], material=material,
-                                                   action="shown"))
-    return dict(original=round(t0, 2), material=material, suggestions=out, tried=len(renders),
-                learning=dict(ratings=em_info["n"], model_on=bool(em), model_auc=em_info["auc"],
-                              strengths={f: round(v, 2) for f, v in strength.items() if abs(v - 1) > 0.01}),
-                note="judged by your taste model; quality comes from the moves themselves")
+    for r in (res["suggestions"] if log else []):
+        log_event(rel, "suggest", 0, sid, dict(move=r["id"], family=r["family"], arm=r["arm"], material=r["material"],
+                                               action="shown"))
+    return res
+
+
+# ---------- precomputing: the editor asks for suggestions in the background as it opens, so ✨ answers at once; the
+# next press is precomputed as soon as one is shown. A rating makes any precomputed run for that sample stale.
+_PRE = {}   # (path, project key, start, end) -> {ev, res, gen}
+_GEN = {}   # path -> bumped by every rating / feedback
+
+
+def _pkey(rel, project_key, start, end):
+    return rel, project_key or None, round(float(start or 0), 2), round(float(end), 2) if end else None
+
+
+def prefetch(rel, project_key=None, start=None, end=None):
+    import threading
+    k = _pkey(rel, project_key, start, end)
+    p = _PRE.get(k)
+    if p and p["gen"] == _GEN.get(rel, 0):
+        return dict(ok=True, ready=p["ev"].is_set())
+    if len(_PRE) > 30:
+        _PRE.clear()
+    p = _PRE[k] = dict(ev=threading.Event(), res=None, gen=_GEN.get(rel, 0))
+
+    def go():
+        try:
+            p["res"] = suggest(rel, project_key, start, end, commit=False)
+        except Exception as e:
+            p["res"] = dict(error=str(e))
+        p["ev"].set()
+    threading.Thread(target=go, daemon=True).start()
+    return dict(ok=True, ready=False)
+
+
+def suggest_now(rel, project_key=None, start=None, end=None, log=True):
+    """✨: the precomputed run if there's a current one (waiting for it if it's still going), else a fresh one; then
+    the next press starts precomputing."""
+    k = _pkey(rel, project_key, start, end)
+    p = _PRE.pop(k, None)
+    res = None
+    if p and p["gen"] == _GEN.get(rel, 0) and p["ev"].wait(120) and p["res"] and "_shown" in p["res"]:
+        res, pre = p["res"], True
+    if res is None:
+        res, pre = suggest(rel, project_key, start, end, commit=False), False
+    out = commit_shown(res, log)
+    if "error" not in out:
+        out["precomputed"] = pre
+        prefetch(rel, project_key, start, end)
+    return out
+
+
+def stale(rel):
+    _GEN[rel] = _GEN.get(rel, 0) + 1
 
 
 def feedback(rel, sample_id, move, family, arm, material, action):

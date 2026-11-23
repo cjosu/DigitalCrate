@@ -215,7 +215,8 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   where it's wrong, and the samples whose ★ or ✕ would teach it the most.
 - **🎲 Crate:** a daily dig of what the taste model thinks you'll like, plus wildcards. Choose which types it draws
   from (all by default, or just vocals, say); the choice is remembered.
-- **🌌 Galaxy:** every sample on a map by sound; hover to hear, color by taste.
+- **🌌 Galaxy:** every sample on a map by sound; hover to hear, color by taste. The build lays it out; samples
+  added since are placed among their nearest neighbors by sound at once.
 
   ![The sample galaxy](docs/img/10-galaxy.png)
 - **🔭 Scout:** searches YouTube and listens to a minute of each result, scoring it for *raw singing*, for
@@ -237,6 +238,8 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   then the pad you want. Uses Web MIDI, so Chrome, Edge or Firefox (not Safari).
 - **Keyboard:** ↓/↑ (J/K) move through the list with a preview (P turns it off), Enter edits, F ★, X ✕, C 📁,
   A adds to the sketchpad, / searches, ? lists every shortcut.
+- **Speed:** the page loads in under half a second on a 20k-sample library; the server fits the taste model and
+  readies the galaxy as it starts, and ✨ suggestions are worked out in the background when the editor opens.
 - **🕘 Recent actions:** every ★, ✕, category move, collection change and delete, each with undo; ⌘Z undoes the last
   (the sketch's own history when the sketchpad is open).
 - **Drag out:** drag any sample row into Live, Finder or anywhere that takes files; **↗ Finder** shows it there.
