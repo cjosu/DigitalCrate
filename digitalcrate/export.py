@@ -25,8 +25,32 @@ def _safe(s):
     return re.sub(r'[/:\\\\*?"<>|]+', "-", s).strip() or "Export"
 
 
-def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=False, chop=False):
+def trim_to_hit(y, sr=C.SR):
+    """A drum hit starting on its impact: most mined hits open with 20-40 ms before it (the same detection as the
+    drum lane: the first sample above a quarter of the peak, backed up to where it rises from quiet), 1 ms fade-in."""
+    import numpy as np
+    m = np.abs(y).max(0)
+    n = min(len(m), sr * 3)
+    pk = float(m[:n].max()) if n else 0
+    if pk <= 0:
+        return y
+    a = int(np.argmax(m[:n] >= 0.25 * pk))
+    b, lim = a, max(0, a - int(0.02 * sr))
+    while b > lim and m[b] > 0.03 * pk:
+        b -= 1
+    s = max(0, b - int(0.001 * sr))
+    if s < int(0.003 * sr):  # already on the hit
+        return y
+    z = y[:, s:].copy()
+    f = min(int(0.001 * sr), z.shape[1])
+    z[:, :f] *= np.linspace(0, 1, f, dtype=z.dtype)
+    return z
+
+
+def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=False, chop=False, pad_edits=None):
     """paths: library-relative file paths (samples, variations or edits).
+    Drum one-shots are written starting on the hit (trim_to_hit), or as edited in the drum lane (pad_edits:
+    {path: {start, end, tune, decay}}), so a Drum Rack in Live plays on the grid like the sketchpad does.
     key/bpm: conform copies to a project key / tempo.  midi: add basic-pitch .mid files next to tonal samples.
     rack: build an Ableton Drum Rack of everything exported.  chop: per sample, slice into syllable chops + a rack."""
     con = connect()
@@ -62,6 +86,17 @@ def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=F
             out = dest / sub / conformed_name(rel, cinfo)
             if not out.exists():
                 shutil.copy2(csrc, out)
+        elif r is not None and r["category"] == "Percussion" and r["kind"] != "loop":
+            import soundfile as sf
+            pe = (pad_edits or {}).get(rel)
+            if pe:  # as the drum lane plays it: start, end, tune (tape, like a sampler), decay
+                from .edit import render
+                y, _ = render(rel, dict(start=pe.get("start") or 0, end=pe.get("end"), semis=pe.get("tune") or 0,
+                                        tape=True, decay=pe.get("decay") or 0, fade_in=1, fade_out=5, normalize=False))
+            else:
+                y, sr0 = sf.read(str(src), dtype="float32", always_2d=True)
+                y = trim_to_hit(y.T, sr0)
+            sf.write(str(out), y.T, C.SR, subtype="PCM_24")
         elif not out.exists():
             shutil.copy2(src, out)
         tag = (r["subtype"] if r else parts[0]) + (f" {r['camelot']}" if r and r["key_from"] != "none" else "")

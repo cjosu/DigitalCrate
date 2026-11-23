@@ -175,7 +175,9 @@ async function colLoad(){if(!SERVED)return;try{COLS=(await api('api/collections'
 const colBtn=(i,big)=>SERVED?`<button class="${big?'':'xp '}${colsOf(S[i][F.path]).length?'on':''}" data-col="${i}" data-colp="${esc(S[i][F.path])}" title="add to a collection (a project you have in mind)">📁${big?' collection':''}</button>`:'';
 async function colToggle(name,i,on){const p=S[i][F.path];
  await api(`api/collections/${on?'add':'remove'}`,{name,path:p,id:S[i][F.id]});COLLAST=name;try{localStorage.setItem('atlasColLast',JSON.stringify(name))}catch(e){}
- await colLoad();toast(on?`added to “${name}”`:`removed from “${name}”`)}
+ await colLoad();
+ if(!window.ACT_QUIET)actPush(`${on?'added':'removed'} ${nameOf(p)} ${on?'to':'from'} “${name}”`,()=>colToggle(name,i,!on),!on);else return;
+ if(on)toast(`added to “${name}”`)}
 function colPop(b){const i=+b.dataset.col,p=S[i][F.path];let pop=$('colpop');if(!pop){pop=document.createElement('div');pop.id='colpop';pop.className='colpop';document.body.appendChild(pop)}
  const names=COLS.map(c=>c.name).sort((a,c)=>(c===COLLAST)-(a===COLLAST)),mine=new Set(colsOf(p));
  pop.innerHTML=`<div class="sub" style="margin-bottom:6px">Collections for this sample</div>${names.map(n=>`<label class="colrow"><input type="checkbox" data-colname="${esc(n)}" ${mine.has(n)?'checked':''}> ${esc(n)} <span class="sub">${COLS.find(c=>c.name===n).n}</span></label>`).join('')||'<div class="sub">none yet</div>'}
@@ -191,11 +193,6 @@ const _rowHTMLc=rowHTML;rowHTML=function(i){return _rowHTMLc(i).replace('<span c
 const _selectC=select;select=function(i,from){_selectC(i,from);
  if(SERVED){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('reveal'))xb.insertAdjacentHTML('afterend',`<button id="reveal" title="show the file in Finder, selected: drag it from there into Live (or anywhere)">↗ Finder</button>`)}
  if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('kitaround'))xb.insertAdjacentHTML('afterend',`<button id="kitaround" title="start (or add to) the sketchpad's drum lane with this hit, then find the rest of a kit that sounds like it">🥁 build a kit around this</button>`)}const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
-// C adds what's playing to the collection you used last (or opens the menu)
-document.addEventListener('click',async e=>{if(!e.target.closest('#kitaround'))return;e.stopPropagation();const i=st.sel;if(i==null)return;
- await drumAdd(i);const l=drumLane();if(l){SK.open=true;drumFind(l)}},true);
-document.addEventListener('keydown',e=>{if(e.key!=='c'&&e.key!=='C')return;if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)||!NP||NP.edit||NP.i==null||!SERVED)return;
- if(!COLLAST||!COLS.some(c=>c.name===COLLAST)){toast('use 📁 once to pick a collection; then C adds to it');return}const on=!colsOf(S[NP.i][F.path]).includes(COLLAST);colToggle(COLLAST,NP.i,on)});
 // the Favorites tab's 📁 view
 let COLSEL=lsj('atlasColSel','');
 async function renderCollections(){const L=$('list');await colLoad();if(st.tab!=='F'||FAVVIEW!=='cols')return;
@@ -246,6 +243,58 @@ document.addEventListener('dragstart',e=>{const row=e.target.closest&&e.target.c
 new MutationObserver(()=>document.querySelectorAll('#list .row[data-i]:not([draggable])').forEach(r=>r.setAttribute('draggable','true'))).observe(document.body,{subtree:true,childList:true});
 document.addEventListener('click',async e=>{const b=e.target.closest('#reveal');if(!b)return;e.stopPropagation();const i=st.sel;if(i==null)return;
  try{await api('api/reveal',{path:S[i][F.path]});toast('shown in Finder: drag it from there into Live')}catch(err){toast("couldn't show it: "+err.message)}},true);
+
+// ---------- recent actions, with undo (★, ✕, moving a sample to another category, collections, deletes)
+// ⌘Z undoes the sketch when the sketchpad is open, otherwise the last action here
+const ACTS=[];window.ACT_QUIET=false;
+function actPush(label,undo,toastIt){ACTS.push({label,undo,t:Date.now(),done:false});if(ACTS.length>50)ACTS.shift();
+ const b=$('actbtn');if(b){b.hidden=false;b.textContent='🕘 '+ACTS.filter(a=>!a.done).length}
+ if(toastIt){const t=$('toast');t.innerHTML=`${esc(label)} <button id="actundo">undo</button>`;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,6000);
+  const a=ACTS[ACTS.length-1];$('actundo').onclick=()=>actUndo(a)}}
+window.actPush=actPush;
+async function actUndo(a){if(!a||a.done)return;a.done=true;window.ACT_QUIET=true;try{await a.undo()}finally{window.ACT_QUIET=false}
+ const b=$('actbtn');if(b)b.textContent='🕘 '+ACTS.filter(x=>!x.done).length;toast('undone: '+a.label);const p=$('actpop');if(p&&!p.hidden)actPop()}
+const nameOf=p=>{const i=byPath.get(p);return i==null?p.split('/').pop():`${S[i][F.artist]} — ${S[i][F.sub]}`};
+function actPop(){let p=$('actpop');if(!p){p=document.createElement('div');p.id='actpop';p.className='colpop';document.body.appendChild(p)}
+ const r=$('actbtn').getBoundingClientRect();p.style.left=(r.left)+'px';p.style.top=(r.bottom+6+scrollY)+'px';p.style.width='330px';p.hidden=false;
+ const list=ACTS.slice().reverse();
+ p.innerHTML=`<div class="sub" style="margin-bottom:6px">Recent actions (newest first)</div>${list.map((a,k)=>`<div class="colrow" style="justify-content:space-between"><span style="${a.done?'opacity:.45;text-decoration:line-through':''}">${esc(a.label)} <span class="sub">${Math.max(1,Math.round((Date.now()-a.t)/60000))} min</span></span>${a.done?'':`<button data-actu="${ACTS.length-1-k}">undo</button>`}</div>`).join('')||'<div class="sub">nothing yet</div>'}`;
+ p.onclick=e=>{const b=e.target.closest('[data-actu]');if(b){e.stopPropagation();actUndo(ACTS[+b.dataset.actu])}}}
+document.addEventListener('click',e=>{if(e.target.closest('#actbtn')){e.stopPropagation();const p=$('actpop');if(p&&!p.hidden){p.hidden=true;return}actPop();return}
+ const p=$('actpop');if(p&&!p.hidden&&!e.target.closest('#actpop'))p.hidden=true},true);
+// ★ and ✕ (the page's own functions, wrapped so every way of starring is recorded)
+const _toggleFavA=toggleFav;toggleFav=async function(path,id,label){const was=FAV.has(path);const r=await _toggleFavA(path,id,label);
+ if(!window.ACT_QUIET)actPush(`${was?'unstarred':'starred'} ${nameOf(path)}`,()=>toggleFav(path,id,label));return r};
+const _toggleDisA=toggleDislike;toggleDislike=function(path,id){const was=TASTE.disliked.has(path);const r=_toggleDisA(path,id);
+ if(!window.ACT_QUIET)actPush(`${was?'un-✕':'✕'} ${nameOf(path)}`,()=>toggleDislike(path,id),!was);return r};
+
+// ---------- the keyboard: ↑/↓ (J/K) move through the list with a preview, Enter edit, F ★, X ✕, C 📁, A sketch, / search, ? help
+let KPREVIEW=lsj('atlasKPreview',true);
+const typing=e=>['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName)||e.target.isContentEditable;
+const padsOpen=()=>$('pads')&&!$('pads').hidden;  // the pads use the letter keys
+const keyTarget=()=>st.sel!=null?st.sel:(NP&&!NP.edit&&NP.i!=null&&players.size?NP.i:null);
+function kMove(d){const rows=[...document.querySelectorAll('#list .row[data-i]')];if(!rows.length)return;
+ let k=rows.findIndex(r=>+r.dataset.i===st.sel);k=k<0?(d>0?0:rows.length-1):Math.max(0,Math.min(rows.length-1,k+d));
+ const i=+rows[k].dataset.i;select(i,'list');rows[k].scrollIntoView({block:'nearest'});if(KPREVIEW)toggle(i,null,{loop:false})}
+function kHelp(){let p=$('khelp');if(p){p.hidden=!p.hidden;return}p=document.createElement('div');p.id='khelp';p.className='colpop';p.style.cssText+=';left:50%;top:80px;transform:translateX(-50%);width:420px;position:fixed';
+ const rows=[['↓ ↑ or J K','next / previous sample (with a preview)'],['P','preview while moving: '+(KPREVIEW?'on':'off')],['Enter','edit the selected sample'],['Space','stop'],['F','★ favourite'],['X','✕ not for me'],['C','📁 add to your last collection'],['A','＋ add to the sketchpad'],['/','search'],['Esc','unselect · close'],['Backspace','back to the previous sample'],['← →','variations (when shown)'],['⌘Z  ⌘⇧Z','undo / redo (the sketch when the sketchpad is open)'],['⌘S','save the sketch'],['?','this list']];
+ p.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>Keyboard</b><button id="khclose">✕</button></div><div style="display:grid;grid-template-columns:110px 1fr;gap:4px 10px">${rows.map(([k,v])=>`<code>${k}</code><span>${v}</span>`).join('')}</div>`;
+ document.body.appendChild(p);$('khclose').onclick=()=>p.hidden=true}
+document.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey||typing(e))return;
+ if(padsOpen()&&/^[a-z0-9]$/i.test(e.key))return;
+ const k=e.key;
+ if(k==='ArrowDown'||k==='j'){e.preventDefault();kMove(1);return}
+ if(k==='ArrowUp'||k==='k'){e.preventDefault();kMove(-1);return}
+ if(k==='?'){e.preventDefault();kHelp();return}
+ if(k==='/'){e.preventDefault();$('search').focus();return}
+ if(k==='p'||k==='P'){KPREVIEW=!KPREVIEW;try{localStorage.setItem('atlasKPreview',JSON.stringify(KPREVIEW))}catch(err){}toast('preview while moving: '+(KPREVIEW?'on':'off'));return}
+ const i=keyTarget();if(i==null)return;const s=S[i];
+ if(k==='Enter'&&st.sel!=null){e.preventDefault();const b=$('edopen');if(b)b.click();return}
+ if(k==='f'||k==='F'){toggleFav(s[F.path],s[F.id],`${s[F.artist]} — ${s[F.title]} · ${s[F.sub]}`);setTimeout(()=>{drawNP();mark()},60);return}
+ if(k==='x'||k==='X'){toggleDislike(s[F.path],s[F.id]);return}
+ if(k==='a'||k==='A'){skAdd(i);return}
+ if(k==='c'||k==='C'){if(!SERVED)return;if(!COLLAST||!COLS.some(c=>c.name===COLLAST)){toast('use 📁 once to pick a collection; then C adds to it');return}
+  colToggle(COLLAST,i,!colsOf(s[F.path]).includes(COLLAST))}});
 
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;
@@ -590,7 +639,8 @@ $('sk').addEventListener('click',e=>{const t=e.target.closest('#skundo,#skredo')
 document.addEventListener('keydown',e=>{if(!(e.metaKey||e.ctrlKey))return;const k=e.key.toLowerCase();
  if(k==='s'&&SK.lanes.length){e.preventDefault();if(e.target.id==='skname')SK.name=e.target.value;SK.open=true;drawSK();$('sksave')&&$('sksave').click();return}  // ⌘S saves, even from the name field
  if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;  // ⌘Z in a text field undoes the typing
- if(k==='z'&&(SK.lanes.length||UNDO.past.length||UNDO.future.length)){e.preventDefault();skUndo(e.shiftKey?1:-1);return}
+ if(k==='z'&&SK.open&&(SK.lanes.length||UNDO.past.length||UNDO.future.length)){e.preventDefault();skUndo(e.shiftKey?1:-1);return}
+ if(k==='z'&&!e.shiftKey){const a=[...ACTS].reverse().find(x=>!x.done);if(a){e.preventDefault();actUndo(a)};return}
  if(k==='y'&&UNDO.future.length){e.preventDefault();skUndo(1);return}
  });
 // your sketch from last time (a refresh, a crash): it comes back, not playing, marked unsaved if it was
@@ -723,7 +773,8 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='sksave'){const name=($('skname').value||'').trim()||`Sketch ${new Date().toLocaleString()}`;SK.name=name;
   await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:skLanesState()}}).then(()=>{SK.saved=skSnap();skDraft();skMarkSave();toast(`“${name}” saved · find it in the Kits tab`)}).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
-  api('api/export',{scope:'paths',paths:SK.lanes.flatMap(l=>l.type==='drums'?l.pads.map(p=>p.path):[l.path]),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
+  api('api/export',{scope:'paths',paths:SK.lanes.flatMap(l=>l.type==='drums'?l.pads.map(p=>p.path):[l.path]),name,
+   pad_edits:Object.fromEntries(SK.lanes.filter(l=>l.type==='drums').flatMap(l=>l.pads.map(p=>[p.path,{start:p.start||0,end:p.end||null,tune:p.tune||0,decay:p.decay||0}]))),key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
  if(t.id==='skstems'){skStems(+$('skbars').value);return}if(t.id==='skals'){skStems(+$('skbars').value,true);return}});
 // aligned stems: render every audible lane alone over the same N bars, so each file starts on bar 1 and they all line up

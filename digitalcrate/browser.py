@@ -175,7 +175,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 </style></head><body>
 <div class="app">
 <aside>
-  <h1 style="display:flex;align-items:center;gap:6px">DigitalCrate<span style="flex:1"></span><a id="setbtn" href="setup" title="your music and library folders" hidden style="font-size:13px;text-decoration:none">⚙</a><button id="quitbtn" title="turn DigitalCrate off (mining runs keep going)" hidden style="font-size:12px;padding:1px 6px">⏻</button></h1><div class="sub" id="count"></div>
+  <h1 style="display:flex;align-items:center;gap:6px">DigitalCrate<span style="flex:1"></span><button id="actbtn" title="recent actions: undo any of them (⌘Z undoes the last)" hidden style="font-size:12px;padding:1px 6px">🕘</button><a id="setbtn" href="setup" title="your music and library folders" hidden style="font-size:13px;text-decoration:none">⚙</a><button id="quitbtn" title="turn DigitalCrate off (mining runs keep going)" hidden style="font-size:12px;padding:1px 6px">⏻</button></h1><div class="sub" id="count"></div>
   <h2>Key <span class="sub" id="keylbl"></span></h2>
   <svg class="wheel" id="wheel" viewBox="-110 -110 220 220" width="220" height="220"></svg>
   <div class="chips" style="margin-top:6px"><button id="nbr" class="on" title="include Camelot neighbours">+ neighbours</button><button id="clrkey">clear</button></div>
@@ -285,8 +285,9 @@ async function delSamples(idx,what){idx=idx.filter(i=>!GONE.has(i));if(!idx.leng
  const y=document.querySelector('main').scrollTop;render();document.querySelector('main').scrollTop=y;
  if(st.sel!=null){if(GONE.has(st.sel)){st.sel=null;$('detail').innerHTML='<div class="empty">Deleted.</div>'}else select(st.sel)}
  const t=$('toast');t.innerHTML=`🗑 deleted ${esc(what)} <button id="undel">undo</button>`;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,10000);
- $('undel').onclick=async()=>{t.textContent='restoring…';try{await fetch('api/trash/restore',{method:'POST',body:JSON.stringify({ids:gone.map(i=>S[i][F.id])})});
-  gone.forEach(i=>GONE.delete(i));await loadFavs();toast(`restored ${gone.length}`)}catch(e){toast('undo failed')}}}
+ let undone=false;const restore=async()=>{if(undone)return;undone=true;t.textContent='restoring…';try{await fetch('api/trash/restore',{method:'POST',body:JSON.stringify({ids:gone.map(i=>S[i][F.id])})});
+  gone.forEach(i=>GONE.delete(i));await loadFavs();toast(`restored ${gone.length}`)}catch(e){toast('undo failed')}};
+ $('undel').onclick=restore;if(window.actPush)actPush(`deleted ${what}`,restore)}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-del],[data-delsong]');if(!b)return;e.stopPropagation();e.preventDefault();
  if(b.dataset.del!=null){const i=+b.dataset.del;delSamples([i],`${S[i][F.sub]} from ${S[i][F.title]}`);return}
  const all=trk(+b.dataset.delsong),keep=all.filter(i=>FAV.has(S[i][F.path])||S[i][F.parent]||(D.variants[i]||[]).some(v=>FAV.has(v[3]))),go=all.filter(i=>!keep.includes(i));
@@ -316,8 +317,7 @@ function drawNP(){const el=$('np');if(!NP||!(players.size||(ED&&ED.P))){el.hidde
  el.innerHTML=`<button class="play playing" id="npstop">■</button><div class="lbl"><span class="sub">now playing</span> · ${esc(NP.label)}${window.SK&&SK.playing?' <span class="sub" style="color:var(--acc)">· with the sketch</span>':''}</div>
  ${NP.edit?'<span class="sub">a preview: use it or save it to keep it</span>':`${star(NP.path,NP.id,NP.label)}${nope(NP.path,NP.id)}${xp(NP.path)}`}${NP.i!=null?`<button id="npshow">show</button>`:''}${NP.edit?'':'<span class="sub">F ★ · X ✕</span>'}`;
  $('npstop').onclick=()=>{stopAll()};if($('npshow'))$('npshow').onclick=()=>select(NP.i,'go')}
-document.addEventListener('keydown',e=>{if(e.target.tagName==='INPUT'||!NP||NP.edit||!players.size)return;
- if(e.key==='f'||e.key==='F'){toggleFav(NP.path,NP.id,NP.label);setTimeout(drawNP,50)}else if(e.key==='x'||e.key==='X'){toggleDislike(NP.path,NP.id)}});
+// F / X / C (and the rest of the keyboard) live in studio.js: they act on the selected sample, else the playing one
 const lbl=i=>`${S[i][F.artist]} — ${S[i][F.title]} · ${S[i][F.sub]}${S[i][F.cam]?' · '+S[i][F.cam]:''}`;
 // ---------- provenance
 function provHTML(i){const s=S[i];let h='';
@@ -849,12 +849,14 @@ $('detail').addEventListener('change',e=>{if(e.target.id==='xpname'){setXpName(e
  if(e.target.id==='rcat'){const c=e.target.value;
   $('rsub').innerHTML=D.subtypes[c].map(x=>`<option ${x===S[st.sel][F.sub]?'selected':''}>${esc(x)}</option>`).join('');$('rsave').hidden=false}
  else if(e.target.id==='rsub')$('rsave').hidden=false});
-async function recat(i){const cat=$('rcat').value,sub=$('rsub').value;if(!SERVED){alert('needs the local server');return}
- $('rsave').textContent='saving…';const r=await (await fetch('api/recat',{method:'POST',body:JSON.stringify({id:S[i][F.id],category:cat,subtype:sub})})).json();
- if(r.error){$('rsave').textContent='error';return}const old=S[i][F.path];
+async function recat(i,cat,sub){cat=cat||$('rcat').value;sub=sub||$('rsub').value;if(!SERVED){alert('needs the local server');return}
+ const was=[S[i][F.cat],S[i][F.sub]];if($('rsave'))$('rsave').textContent='saving…';
+ const r=await (await fetch('api/recat',{method:'POST',body:JSON.stringify({id:S[i][F.id],category:cat,subtype:sub})})).json();
+ if(r.error){if($('rsave'))$('rsave').textContent='error';return}const old=S[i][F.path];
+ if(window.actPush&&!window.ACT_QUIET)actPush(`moved ${S[i][F.artist]} — ${was[1]} to ${cat} / ${sub}`,()=>recat(i,was[0],was[1]),true);
  S[i][F.cat]=r.category;S[i][F.sub]=r.subtype;S[i][F.path]=r.path;byPath.delete(old);byPath.set(r.path,i);OVR.add(S[i][F.id]);
  if(FAV.has(old)){const f=FAV.get(old);FAV.delete(old);f.path=r.path;FAV.set(r.path,f)}
- const row=document.querySelector(`.row[data-i="${i}"]`);if(row)row.outerHTML=rowHTML(i);const sc=$('detail').scrollTop;select(i,'back');$('detail').scrollTop=sc}
+ const row=document.querySelector(`.row[data-i="${i}"]`);if(row)row.outerHTML=rowHTML(i);if(st.sel===i){const sc=$('detail').scrollTop;select(i,'back');$('detail').scrollTop=sc}}
 $('detail').addEventListener('click',e=>{if(e.target.id==='back'){goBack();return}
  const s2=e.target.closest('[data-showt2]');if(s2){e.preventDefault();showTracks([s2.dataset.showt2],{label:`${S[st.sel][F.artist]} — ${S[st.sel][F.title]}`});return}
  const aa=e.target.closest('[data-aall2]');if(aa){e.preventDefault();const a=artistBy(aa.dataset.aall2);showTracks(a.tracks,{label:a.name});return}

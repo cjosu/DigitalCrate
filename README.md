@@ -228,7 +228,13 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
   with its controls; variations sometimes use Supermassive for their space.
 - **🎹 MIDI controller:** play/stop, next, previous, ★ and ✕ from pads or keys, plus the chop pads. Press *learn* and
   then the pad you want. Uses Web MIDI, so Chrome, Edge or Firefox (not Safari).
-- **Export:** to `Ableton User Library/Samples/DigitalCrate/…` with an `_info.csv`; optionally key/tempo-conformed
+- **Keyboard:** ↓/↑ (J/K) move through the list with a preview (P turns it off), Enter edits, F ★, X ✕, C 📁,
+  A adds to the sketchpad, / searches, ? lists every shortcut.
+- **🕘 Recent actions:** every ★, ✕, category move, collection change and delete, each with undo; ⌘Z undoes the last
+  (the sketch's own history when the sketchpad is open).
+- **Drag out:** drag any sample row into Live, Finder or anywhere that takes files; **↗ Finder** shows it there.
+- **Export:** to `Ableton User Library/Samples/DigitalCrate/…` Drum one-shots are
+  written starting on the hit (most mined hits open with 20–40 ms before it), or as you edited them in the drum lane. with an `_info.csv`; optionally key/tempo-conformed
   copies, MIDI next to tonal samples, and a Drum Rack. Also from the CLI:
   `digitalcrate export --favorites --rack --key Fm --bpm 124`.
 

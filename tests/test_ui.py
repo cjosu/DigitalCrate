@@ -375,3 +375,84 @@ def test_rows_drag_out_as_files(page):
         return {promise:dt.getData('DownloadURL'),uri:dt.getData('text/uri-list')}})()""")
     assert got["promise"].startswith("audio/wav:") and "/" in got["promise"]
     assert got["uri"].startswith("file://") and got["uri"].endswith(".wav")
+
+
+def test_drum_rack_export_starts_on_the_hit(site):
+    """⇩ Ableton / Drum Rack: drum one-shots are written starting on the hit, edited pads as edited."""
+    import sqlite3
+    db = sqlite3.connect(site["lib"] / "_data" / "samples.sqlite")
+    paths = [r[0] for r in db.execute("SELECT path FROM samples WHERE category='Percussion' LIMIT 3")]
+    body = dict(scope="paths", paths=paths, name="UI rack", rack=True, reveal=False,
+                pad_edits={paths[0]: dict(start=0.0, end=0.2, tune=-2, decay=0.1)})
+    req = urllib.request.Request(site["base"] + "api/export", method="POST", data=json.dumps(body).encode())
+    r = json.load(urllib.request.urlopen(req, timeout=120))
+    dest = site["root"] / "ableton" / "UI rack"
+    assert r["count"] == 3 and (dest / "UI rack.adg").exists()
+    wavs = {p.name: sf.read(str(p), always_2d=True)[0] for p in dest.rglob("*.wav")}
+    for name, y in wavs.items():
+        m = np.abs(y).max(1)
+        first = int(np.argmax(m >= 0.25 * m.max())) / SR
+        if paths[0].endswith(name):  # the edited pad keeps its start at 0 (as the drum lane played it) and is short
+            assert len(y) / SR < 0.25
+        else:
+            assert first < 0.005, (name, first)  # the 25 ms before the hit is gone
+
+
+def test_recent_actions_undo(page):
+    """★, ✕ and collection changes land in 🕘 recent actions; ⌘Z (sketchpad closed) and the list undo them."""
+    path = page.evaluate("S[+document.querySelector('#list .row[data-i]').dataset.i][F.path]")
+    page.locator("#list .row [data-fav]").first.click()
+    page.wait_for_timeout(300)
+    assert page.evaluate(f"FAV.has({json.dumps(path)})")
+    page.keyboard.press("Meta+z")
+    page.wait_for_timeout(500)
+    assert not page.evaluate(f"FAV.has({json.dumps(path)})")
+    page.locator("#list .row [data-nope]").first.click()
+    assert page.evaluate(f"TASTE.disliked.has({json.dumps(path)})")
+    page.click("#actbtn")
+    page.locator("#actpop [data-actu]").first.click()
+    page.wait_for_timeout(300)
+    assert not page.evaluate(f"TASTE.disliked.has({json.dumps(path)})")
+
+
+def test_recategorize_and_undo_moves_the_file_back(site, page):
+    i = page.evaluate("+document.querySelector('#list .row[data-i]').dataset.i")
+    cat0, path0 = page.evaluate(f"[S[{i}][F.cat],S[{i}][F.path]]")
+    page.evaluate(f"select({i},'list')")
+    target = "Textures & Field" if cat0 != "Textures & Field" else "Pads & Atmospheres"
+    page.select_option("#rcat", target)
+    page.dispatch_event("#rcat", "change")
+    page.click("#rsave")
+    page.wait_for_function(f"S[{i}][F.cat]==={json.dumps(target)}", timeout=20000)
+    moved = page.evaluate(f"S[{i}][F.path]")
+    assert moved != path0 and (site["lib"] / moved).exists() and not (site["lib"] / path0).exists()
+    page.keyboard.press("Escape")
+    page.keyboard.press("Meta+z")
+    page.wait_for_function(f"S[{i}][F.cat]==={json.dumps(cat0)}", timeout=20000)
+    back = page.evaluate(f"S[{i}][F.path]")
+    assert (site["lib"] / back).exists() and not (site["lib"] / moved).exists()
+
+
+def test_keyboard_browsing(page):
+    page.mouse.click(700, 5)  # focus the page, not a field
+    page.keyboard.press("ArrowDown")
+    first = page.evaluate("st.sel")
+    assert first is not None and page.evaluate(f"players.has({first})")  # moving previews
+    page.keyboard.press("j")
+    second = page.evaluate("st.sel")
+    assert second != first
+    page.keyboard.press("k")
+    assert page.evaluate("st.sel") == first
+    path = page.evaluate(f"S[{first}][F.path]")
+    page.keyboard.press("f")
+    page.wait_for_timeout(300)
+    assert page.evaluate(f"FAV.has({json.dumps(path)})")
+    page.keyboard.press("f")  # and off again
+    page.keyboard.press("x")
+    assert page.evaluate(f"TASTE.disliked.has({json.dumps(path)})")
+    page.keyboard.press("x")
+    page.keyboard.press("Shift+?")
+    assert page.is_visible("#khelp")
+    page.keyboard.press("Shift+?")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#edprev", timeout=20000)

@@ -176,3 +176,17 @@ def test_setup_saves_folders(tmp_path, monkeypatch):
         app.save_config(tmp_path / "nope", tmp_path / "Lib")
     with pytest.raises(ValueError):
         app.save_config(music, music / "Lib")
+
+
+def test_drum_hits_are_trimmed_to_the_impact():
+    """Exported drum one-shots start on the hit (most mined hits open with 20-40 ms before it)."""
+    import numpy as np
+    from digitalcrate.export import trim_to_hit
+    sr = 44100
+    t = np.arange(int(0.3 * sr)) / sr
+    hit = np.sin(2 * np.pi * 80 * t) * np.exp(-t * 20)
+    y = np.stack([np.r_[np.zeros(int(0.03 * sr)), hit]] * 2).astype(np.float32)  # 30 ms before the impact
+    z = trim_to_hit(y, sr)
+    first = int(np.argmax(np.abs(z[0]) >= 0.25 * np.abs(z[0]).max())) / sr
+    assert first < 0.004 and z.shape[1] < y.shape[1]
+    assert trim_to_hit(z, sr).shape == z.shape  # already on the hit: left alone

@@ -634,7 +634,8 @@ class Handler(SimpleHTTPRequestHandler):
                     else [unquote(p) for p in req.get("paths", [])]
                 return self._json(export(paths, req.get("name"), reveal=req.get("reveal", True), rack=bool(req.get("rack")),
                                          key=req.get("key") or None, bpm=float(req["bpm"]) if req.get("bpm") else None,
-                                         midi=bool(req.get("midi")), chop=bool(req.get("chop"))))
+                                         midi=bool(req.get("midi")), chop=bool(req.get("chop")),
+                                         pad_edits=req.get("pad_edits") or None))
             elif self.path == "/api/event":
                 log_event(path, req["type"], req.get("value"), req.get("id"), req.get("context"))
             else:
