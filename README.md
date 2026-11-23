@@ -112,6 +112,9 @@ and **↻ new kits** deals a fresh set.
 - **Per lane:** trim to any part of the clip, on/off, solo, fades, repeat every N bars, keep its own key, and a fader
   that's relative (every lane starts equally loud at 0 dB). Loops lock to the bar; other clips repeat on their own
   length so nothing leaves a gap.
+- **Undo and saving:** **↶ ↷** (⌘Z / ⌘⇧Z) step back and forward through every change, a cleared or replaced sketch
+  included; **save •** turns amber when the sketch has changes you haven't saved (⌘S saves); and your sketch is kept
+  in the browser, so a refresh or a crash doesn't lose it.
 - **Out:** save the sketch, bounce it to a new sample, **⇩ stems** (one WAV per lane, all the same length from
   bar 1), or **⇩ Live set**: an Ableton set with one audio track per lane and a clip wherever that lane plays, at the
   sketch's tempo, with muted lanes kept as muted tracks. It's built from your installed Live's own empty template.

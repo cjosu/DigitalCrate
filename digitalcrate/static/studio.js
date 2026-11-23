@@ -164,7 +164,7 @@ async function renderSets(){const L=$('list');$('count').textContent='your favou
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-setplay],[data-setsk],[data-setexp]');if(!b||!SETS)return;e.stopPropagation();
  const k=+(b.dataset.setplay??b.dataset.setsk??b.dataset.setexp),s=SETS.sets[k],m=s.members.map(p=>byPath.get(p)).filter(i=>i!=null&&!GONE.has(i));
  if(b.dataset.setplay!=null){playTogether(m);return}
- if(b.dataset.setsk!=null){skStop();SK.lanes=[];SK.drums=null;SK.name=`Set ${k+1} · ${s.name}`;for(const i of m)await skAdd(i);skPlay();return}
+ if(b.dataset.setsk!=null){if(SK.lanes.length)setTimeout(()=>toast('the sketch was replaced · ⌘Z brings it back'),400);skStop();SK.lanes=[];SK.drums=null;SK.name=`Set ${k+1} · ${s.name}`;for(const i of m)await skAdd(i);skPlay();return}
  b.textContent='exporting…';try{const r=await api('api/export',{scope:'paths',paths:m.map(i=>S[i][F.path]),name:`Set ${k+1} ${s.name}`.replace(/[^\w #·-]/g,'')});b.textContent=`exported ${r.count} ✓`}catch(err){b.textContent='error'}},true);
 
 // ---------- 📁 collections: samples saved with a project in mind (collections_.py)
@@ -209,7 +209,7 @@ document.addEventListener('click',async e=>{const t=e.target.closest('[data-cols
  if(t.dataset.colsel!=null){COLSEL=t.dataset.colsel;try{localStorage.setItem('atlasColSel',JSON.stringify(COLSEL))}catch(err){}renderCollections();return}
  const c=COLS.find(x=>x.name===COLSEL);if(!c)return;const ids=c.paths.map(p=>byPath.get(p)).filter(i=>i!=null&&!GONE.has(i));
  if(t.dataset.colplay!=null){playTogether(ids);return}
- if(t.dataset.colsk!=null){skStop();SK.lanes=[];SK.name=c.name;for(const i of ids)await skAdd(i);skPlay();return}
+ if(t.dataset.colsk!=null){if(SK.lanes.length)setTimeout(()=>toast('the sketch was replaced · ⌘Z brings it back'),400);skStop();SK.lanes=[];SK.name=c.name;for(const i of ids)await skAdd(i);skPlay();return}
  if(t.dataset.colexp!=null){t.textContent='exporting…';try{const r=await api('api/export',{scope:'paths',paths:ids.map(i=>S[i][F.path]),name:c.name});t.textContent=`exported ${r.count} ✓`}catch(err){t.textContent='error'}return}
  if(t.dataset.colsets!=null){const box=$('colsets');box.innerHTML='<div class="sub">grouping…</div>';const r=await api('api/sets?collection='+encodeURIComponent(c.name));
   box.innerHTML=r.sets.length?r.sets.map((s,k)=>`<div class="sub" style="margin:6px 0 2px">🧩 set ${k+1} · ${esc(s.name)} · every pair fits ≥ ${Math.round(s.weakest*100)}% · ${s.members.length} samples</div>`).join('')+'<div class="sub" style="margin-bottom:8px">(the full sets view with play and sketch buttons is in 🧩 sets for favourites)</div>':`<div class="sub">${r.note||'no sets that fit tightly yet: add a few more samples'}</div>`;return}
@@ -523,6 +523,52 @@ $('sk').addEventListener('click',e=>{const t=e.target.closest('[data-skbpm],#skt
  skTempo((PROJ.bpm||120)+(+t.dataset.skbpm)*(e.shiftKey?5:1))},true);
 $('sk').addEventListener('change',e=>{if(e.target.id==='skbpm')skTempo(+e.target.value)},true);
 $('sk').addEventListener('keydown',e=>{if(e.target.id==='skbpm'&&e.key==='Enter')e.target.blur()},true);
+// ---------- sketch state: one definition, used by save, bounce provenance, undo/redo, "unsaved" and the draft
+function skLanesState(){return SK.lanes.map(l=>l.type==='drums'?{type:'drums',bars:l.bars,swing:l.swing,db:l.db||0,mute:!!l.mute,solo:!!l.solo,
+  pads:l.pads.map(p=>({path:p.path,db:p.db||0,mute:!!p.mute,steps:p.steps.slice(),start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto}))}
+ :({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:!!l.mute,solo:!!l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}
+const skSnap=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:SK.name||'',lanes:skLanesState()});
+const EMPTY_SNAP=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:'',lanes:[]});
+SK.saved=null;
+const skDirty=()=>SK.lanes.length>0&&skSnap()!==SK.saved;
+// put a remembered state back, reusing audio already loaded (only what changed is fetched again)
+async function skRestore(st){const was=SK.playing;if(was)skStop();
+ const keyChanged=(st.key||null)!==(PROJ.key||null)||(st.bpm||null)!==(PROJ.bpm||null);
+ if(keyChanged){Object.assign(PROJ,{key:st.key,bpm:st.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
+ const old=new Map();SK.lanes.forEach(l=>{if(l.type==='drums')l.pads.forEach(p=>{if(p.buf)old.set('d|'+p.path,p)});else if(l.buf)old.set(`${l.path}|${l.nat?1:0}|${l.src||''}`,l)});
+ SK.name=st.name||'';
+ SK.lanes=st.lanes.map(l=>{if(l.type==='drums'){return {...l,state:'loading',buf:null,pads:l.pads.map(p=>{const o=old.get('d|'+p.path);return {...p,steps:p.steps.slice(),i:byPath.get(p.path),buf:o?o.buf:null,norm:o?o.norm:null}}).filter(p=>p.i!=null)}}
+  const o=keyChanged?null:old.get(`${l.path}|${l.nat?1:0}|${l.src||''}`);return {...l,i:byPath.get(l.path),buf:o?o.buf:null,norm:o?o.norm:null,pulse:o?o.pulse:null,ons:o?o.ons:null,state:o?'ok':'loading'}})
+  .filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
+ drawSK();drawProj();await Promise.all(SK.lanes.filter(l=>l.type==='drums'||l.state!=='ok').map(skLoad));drawSK();if(was&&SK.lanes.length)skPlay()}
+// undo / redo: a change is recorded once the sketch has been still for a moment, so a fader drag is one step
+const UNDO={past:[],future:[],cur:null,seen:null,still:0,hold:false};
+// the draft: a refresh or crash keeps your sketch (written whenever the sketch settles, undo and redo included)
+const skDraft=()=>{try{localStorage.setItem('atlasSketchDraft',JSON.stringify({snap:UNDO.cur,saved:SK.saved}))}catch(e){}};
+function undoTick(){if(UNDO.hold)return;const s=skSnap();
+ if(UNDO.cur===null){UNDO.cur=s;UNDO.seen=s;return}
+ if(s!==UNDO.seen){UNDO.seen=s;UNDO.still=0}else if(s!==UNDO.cur&&++UNDO.still>=1){UNDO.past.push(UNDO.cur);if(UNDO.past.length>100)UNDO.past.shift();UNDO.future=[];UNDO.cur=s;skDraft()}
+ skMarkSave()}
+async function skUndo(dir){const from=dir<0?UNDO.past:UNDO.future,to=dir<0?UNDO.future:UNDO.past;undoTick();
+ if(UNDO.seen!==UNDO.cur){to.push(UNDO.cur);UNDO.cur=UNDO.seen}  // an unrecorded change in flight counts as a step
+ if(!from.length){toast(dir<0?'nothing to undo':'nothing to redo');return}
+ to.push(UNDO.cur);const s=from.pop();UNDO.cur=UNDO.seen=s;UNDO.hold=true;try{await skRestore(JSON.parse(s))}finally{UNDO.cur=UNDO.seen=skSnap();UNDO.hold=false}
+ skDraft();SK.open=true;drawSK();toast(dir<0?`undone · ${UNDO.past.length} more to undo`:`redone`)}
+function skMarkSave(){const b=$('sksave');if(!b)return;const d=skDirty();b.classList.toggle('dirty',d);b.textContent=d?'save •':'save';b.title=d?'unsaved changes: save to keep this version (⌘S)':'saved (⌘S)';
+ const u=$('skundo'),r=$('skredo');if(u)u.disabled=!UNDO.past.length&&UNDO.seen===UNDO.cur;if(r)r.disabled=!UNDO.future.length}
+setInterval(undoTick,300);
+$('sk').addEventListener('click',e=>{const t=e.target.closest('#skundo,#skredo');if(!t)return;e.stopPropagation();skUndo(t.id==='skundo'?-1:1)},true);
+document.addEventListener('keydown',e=>{if(!(e.metaKey||e.ctrlKey))return;const k=e.key.toLowerCase();
+ if(k==='s'&&SK.lanes.length){e.preventDefault();if(e.target.id==='skname')SK.name=e.target.value;SK.open=true;drawSK();$('sksave')&&$('sksave').click();return}  // ⌘S saves, even from the name field
+ if(['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName))return;  // ⌘Z in a text field undoes the typing
+ if(k==='z'&&(SK.lanes.length||UNDO.past.length||UNDO.future.length)){e.preventDefault();skUndo(e.shiftKey?1:-1);return}
+ if(k==='y'&&UNDO.future.length){e.preventDefault();skUndo(1);return}
+ });
+// your sketch from last time (a refresh, a crash): it comes back, not playing, marked unsaved if it was
+setTimeout(async()=>{let d=null;try{d=JSON.parse(localStorage.getItem('atlasSketchDraft')||'null')}catch(e){}
+ if(!d||!d.snap||SK.lanes.length)return;const st=JSON.parse(d.snap);if(!st.lanes||!st.lanes.length)return;
+ UNDO.hold=true;try{await skRestore(st);SK.saved=d.saved||null}finally{UNDO.cur=UNDO.seen=skSnap();UNDO.hold=false}
+ drawSK();toast(`your sketch from last time is back (${SK.lanes.length} lane${SK.lanes.length>1?'s':''}) · 🎛 sketchpad`)},1500);
 function skPlay(){if(SK.playing||!SK.lanes.length)return;AC.resume();
  stopAll();padsStopLoop();  // a sketch takes over from whatever was playing (clips over a running sketch still work)
 SK.master=AC.createGain();SK.master.gain.value=0.9;SK.master.connect(AC.destination);
@@ -594,7 +640,8 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
  el.classList.remove('skmini');el.hidden=false;
  el.innerHTML=`<h3><button id="skhide" title="hide the sketchpad (it keeps playing; the 🎛 sketchpad button brings it back)">▾ hide</button> 🎛 Sketchpad${hq('sketch')} <span class="skbpm" title="the sketch's tempo (the project tempo): − / + (shift: ±5), type it, or tap the beat"><button class="tbtn" data-skbpm="-1">−</button><input id="skbpm" type="number" min="40" max="220" step="1" value="${Math.round(PROJ.bpm||120)}"><button class="tbtn" data-skbpm="1">+</button> bpm <button class="tbtn" id="sktap">tap</button></span> <span class="sub">${esc(PROJ.key||'no key')} — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
- <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave">save</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
+ <button class="tbtn" id="skundo" title="undo (⌘Z)">↶</button><button class="tbtn" id="skredo" title="redo (⌘⇧Z)">↷</button>
+ <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave" class="${skDirty()?'dirty':''}" title="${skDirty()?'unsaved changes: save to keep this version (⌘S)':'saved (⌘S)'}">${skDirty()?'save •':'save'}</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
  <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skals" title="a Live set: one audio track per lane, a clip wherever it plays, at the sketch's tempo (muted lanes come in as muted tracks). Opens in Live.">⇩ Live set</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button></h3>
  ${SK.lanes.map((l,k)=>{if(l.type==='drums')return drumLaneHTML(l,k);const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
   const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,
@@ -633,7 +680,7 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
 $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skplay'){SK.playing?skStop():skPlay();return}if(t.id==='skhide'){SK.open=false;drawSK();drawProj();return}
  if(t.id==='skshow'){SK.open=true;drawSK();drawProj();return}
- if(t.id==='skclear'){skStop();SK.lanes=[];SK.name='';drawSK();drawProj();return}
+ if(t.id==='skclear'){skStop();SK.lanes=[];SK.name='';drawSK();drawProj();toast('cleared · ⌘Z brings it back');return}
  if(t.dataset.skm!=null){const l=SK.lanes[+t.dataset.skm];l.mute=!l.mute;skGains();drawSK();return}
  if(t.dataset.sks!=null){const l=SK.lanes[+t.dataset.sks];l.solo=!l.solo;skGains();drawSK();return}
  if(t.dataset.skfit!=null){const l=SK.lanes[+t.dataset.skfit],pu=skPulse(l);if(!pu)return;l.src=pu.bpm;l.nudge=0;toast('stretching…');drawSK();await skLoad(l);const r=skAlign(l);drawSK();toast(`tempo-matched (${pu.bpm} → ${PROJ.bpm} bpm) · ${r}`);return}
@@ -645,7 +692,7 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.dataset.skx!=null){SK.lanes.splice(+t.dataset.skx,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
  if(t.dataset.go!=null){select(+t.dataset.go,'list');return}
  if(t.id==='sksave'){const name=($('skname').value||'').trim()||`Sketch ${new Date().toLocaleString()}`;SK.name=name;
-  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>l.type==='drums'?{type:'drums',bars:l.bars,swing:l.swing,db:l.db||0,mute:l.mute,solo:l.solo,pads:l.pads.map(p=>({path:p.path,db:p.db||0,mute:!!p.mute,steps:p.steps,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto}))}:({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,solo:l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}}).then(()=>toast('sketch saved — find it in the Kits tab')).catch(err=>toast('error: '+err.message));return}
+  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:skLanesState()}}).then(()=>{SK.saved=skSnap();skDraft();skMarkSave();toast(`“${name}” saved · find it in the Kits tab`)}).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
   api('api/export',{scope:'paths',paths:SK.lanes.flatMap(l=>l.type==='drums'?l.pads.map(p=>p.path):[l.path]),name,key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skbounce'){skBounce(+$('skbars').value);return}
@@ -666,13 +713,14 @@ $('sk').addEventListener('input',e=>{const t=e.target;
   const o=t.parentNode.querySelector('output');if(o)o.textContent=t.value+' ms';const k=SK.lanes.indexOf(l);skWave(document.querySelector(`[data-skw="${k}"]`),l.buf,l.trim);return}if(t.dataset.skv!=null){const l=SK.lanes[+t.dataset.skv];l.db=+t.value;skGains();const o=t.parentNode.querySelector('output');if(o)o.textContent=dbTxt(l.db)}});
 $('sk').addEventListener('dblclick',e=>{const t=e.target;if(t.dataset&&t.dataset.skv!=null){const l=SK.lanes[+t.dataset.skv];l.db=0;skGains();drawSK()}});
 $('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.skon!=null){const l=SK.lanes[+t.dataset.skon];l.mute=!t.checked;skGains();drawSK();return}if(t.dataset.ske!=null){SK.lanes[+t.dataset.ske].every=+t.value;drawSK();return}if(t.dataset.sko!=null){SK.lanes[+t.dataset.sko].offset=+t.value;drawSK();return}if(t.id==='skname')SK.name=t.value});
+$('sk').addEventListener('input',e=>{if(e.target.id==='skname')SK.name=e.target.value},true);
 async function skBounce(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
  const L=barLen(),sr=44100,len=bars*L,tail=SK.lanes.some(l=>l.every)?Math.min(4,Math.max(...SK.lanes.map(l=>l.buf.duration))):0;
  const ctx=new OfflineAudioContext(2,Math.ceil((len)*sr),sr),solo=SK.lanes.some(l=>l.solo);
  SK.lanes.forEach(l=>{if(l.mute||(solo&&!l.solo))return;const g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null)});
  toast('bouncing…');const buf=await ctx.startRendering();const first=SK.lanes.find(l=>l.path)||{path:(SK.lanes[0].pads[0]||{}).path};
  try{const r=await api('api/bounce',{parent:first.path,wav:wavB64(buf),kind:'loop',bpm:PROJ.bpm,bars,key:PROJ.key,prefix:'Sketch',name:($('skname').value||'').trim(),
-   tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:SK.lanes.map(l=>l.type==='drums'?{type:'drums',bars:l.bars,swing:l.swing,db:l.db||0,mute:l.mute,solo:l.solo,pads:l.pads.map(p=>({path:p.path,db:p.db||0,mute:!!p.mute,steps:p.steps,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto}))}:({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:l.mute,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null}))}});
+   tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:skLanesState()}});
   const j=addRow(first.i,r.row);toast('bounced → new sample (★ favourited)');select(j,'go')}catch(e){toast('bounce failed: '+e.message)}}
 function addRow(i,n){const row=S[i].slice();Object.assign(row,{[F.id]:n.id,[F.path]:n.path,[F.cat]:n.category,[F.sub]:n.subtype,[F.kind]:n.kind,[F.cam]:n.cam,[F.key]:n.key,[F.bpm]:n.bpm,[F.dur]:n.dur,
  [F.env]:n.env,[F.note]:n.note,[F.bars]:n.bars,[F.start]:n.start,[F.parent]:n.parent,[F.root]:n.root,[F.ops]:n.ops});
@@ -691,11 +739,12 @@ async function renderKitExtras(){const L=$('list');
  L.querySelectorAll('[data-skload]').forEach(b=>b.onclick=e=>{e.preventDefault();const x=sk.find(z=>z.name===b.dataset.skload);skOpen(x.name,JSON.parse(x.state),false)});
  L.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=async()=>{await api('api/sketch/delete',{name:b.dataset.skdel});render()})}
 async function skOpen(name,s,play=true){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
- SK.name=name;SK.lanes=s.lanes.map(l=>l.type==='drums'?{...l,state:'loading',buf:null,pads:l.pads.map(p=>({...p,i:byPath.get(p.path),buf:null})).filter(p=>p.i!=null)}:({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
+ UNDO.hold=true;SK.name=name;SK.lanes=s.lanes.map(l=>l.type==='drums'?{...l,state:'loading',buf:null,pads:l.pads.map(p=>({...p,i:byPath.get(p.path),buf:null})).filter(p=>p.i!=null)}:({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
+ SK.saved=skSnap();UNDO.hold=false;
  const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();if(play)skPlay()}
 document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kitrack]');if(kr){e.stopPropagation();const k=D.kits[+kr.dataset.kitrack];kr.textContent='building…';
   try{const r=await api('api/export',{scope:'paths',paths:kitMembers(k).map(i=>S[i][F.path]),name:k.name,rack:true,reveal:true});kr.textContent=`rack ✓ (${r.count})`}catch(err){kr.textContent='error'}return}
- const ks=e.target.closest('[data-kitsk]');if(ks){e.stopPropagation();const k=D.kits[+ks.dataset.kitsk];skStop();SK.lanes=[];SK.name=k.name;
+ const ks=e.target.closest('[data-kitsk]');if(ks){e.stopPropagation();const k=D.kits[+ks.dataset.kitsk];if(SK.lanes.length)setTimeout(()=>toast('the sketch was replaced · ⌘Z brings it back'),400);skStop();SK.lanes=[];SK.name=k.name;
   // a kit was built around one key and tempo (they're in its name): use those, not whatever the project was last set to
   const m=k.name.match(/_(\d{1,2}[AB])-[^_]*_(\d+)bpm/);if(m){PROJ.key=keyFromCam(m[1].replace(/^0/,''));if(!(PROJ.link&&LINK.peers))PROJ.bpm=+m[2];
    try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(err){}drawProj();toast(`sketch set to ${PROJ.key} · ${PROJ.bpm} bpm, from the kit`)}
