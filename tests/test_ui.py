@@ -68,6 +68,18 @@ for kind in ["Kick", "Snare", "Hat Closed", "Rim & Clap", "Tom", "Shaker & Tamb"
             (sid, tid, "drums", "mix", "Percussion", kind, "oneshot", 1.0 + k, 0.6, 0, "C", "major", "8B", 0, "none",
              json.dumps([0.0] * 12), 3000, 0.3, 0.8, 0.8, e.astype(np.float16).tobytes(), "{}", moods, "drums", rel,
              json.dumps(env)))
+# a one-bar drum loop at 120 bpm: kick 0/8, snare 4/12, hats on the off-8ths (for slicing into pads)
+st = int(SR * 60 / 120 / 4); loop = np.zeros((2, 16 * st), np.float32)
+for s, kind in [(0, "Kick"), (4, "Snare"), (8, "Kick"), (12, "Snare"), (2, "Hat Closed"), (6, "Hat Closed"), (10, "Hat Closed"), (14, "Hat Closed")]:
+    h = hit(kind, 0)[:, int(0.025 * SR):][:, :st * 2]; loop[:, s * st:s * st + h.shape[1]] += h[:, :16 * st - s * st]
+rel = "Percussion/Full Kit/FullKit_drmloop.wav"; (C.LIB_ROOT / rel).parent.mkdir(parents=True, exist_ok=True); sf.write(C.LIB_ROOT / rel, loop.T, SR)
+e = cl.embed_audio([resample_poly(loop.mean(0), 48000, SR).astype(np.float32)])[0]
+moods = json.dumps(dict(zip(MOOD_PROMPTS, np.round((T @ e) / (np.linalg.norm(T, axis=1) * np.linalg.norm(e) + 1e-9), 4).tolist())))
+con.execute("""INSERT INTO samples (id, track_id, source, rendered_from, category, subtype, kind, start, dur, bpm, bars,
+    key, scale, camelot, key_strength, key_from, chroma, centroid, flatness, pratio, quality, clap, type_probs,
+    mood_sims, instrument, path, env) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    ("drmloop", tid, "drums", "mix", "Percussion", "Full Kit", "loop", 10.0, 2.0, 120, 1, "C", "major", "8B", 0, "none",
+     json.dumps([0.0] * 12), 3000, 0.3, 0.8, 0.8, e.astype(np.float16).tobytes(), "{}", moods, "drums", rel, json.dumps([50] * 64)))
 con.commit()
 print("DRUMS OK")
 '''
@@ -456,3 +468,71 @@ def test_keyboard_browsing(page):
     page.keyboard.press("Shift+?")
     page.keyboard.press("Enter")
     page.wait_for_selector("#edprev", timeout=20000)
+
+
+def test_velocity_flam_and_choke(page):
+    _drums(page, ("Tom", "Hat Closed"))
+    page.evaluate("SK.lanes[0].pads.forEach(p=>p.steps.fill(0));SK.lanes[0].pads[0].steps[0]=1;CRATE.drawSK()")
+    step = "[data-dstep='0:0:0']"
+    page.dispatch_event(step, "wheel", {"deltaY": 120})
+    assert abs(page.evaluate("SK.lanes[0].pads[0].steps[0]") - 0.9) < 1e-6  # scroll down: 10% softer
+    page.click("[data-dstep='0:1:2']", modifiers=["Alt"])
+    assert page.evaluate("SK.lanes[0].pads[1].flams[2]") == 1 and page.evaluate("SK.lanes[0].pads[1].steps[2]") > 0
+    # choke: the tom rings from step 0; the hat on step 2 in the same group cuts it off
+    level = """(async(choke)=>{const l=SK.lanes[0];l.pads.forEach(p=>{p.choke=choke;p.flams=[]});l.pads[1].steps.fill(0);l.pads[1].steps[2]=1;l._choke=null;
+        const L=CRATE.barLen(),ctx=new OfflineAudioContext(1,Math.ceil(L*44100),44100);CRATE.skBar(ctx,ctx.destination,l,0,0,L,null);
+        const d=(await ctx.startRendering()).getChannelData(0),a=Math.floor(L/16*4*44100),b=Math.floor(L/16*8*44100);let s=0;for(let k=a;k<b;k++)s+=d[k]*d[k];return s})"""
+    ringing = page.evaluate(level + "(0)")
+    choked = page.evaluate(level + "(1)")
+    assert choked < 0.2 * ringing, (choked, ringing)
+
+
+def test_drum_midi_and_rack_export(site):
+    import gzip
+    import sqlite3
+    import pretty_midi
+    db = sqlite3.connect(site["lib"] / "_data" / "samples.sqlite")
+    paths = [r[0] for r in db.execute("SELECT path FROM samples WHERE category='Percussion' AND subtype IN ('Kick','Snare','Hat Closed') LIMIT 3")]
+    steps = lambda *on: [1 if j in on else 0 for j in range(16)]
+    pads = [dict(path=paths[0], steps=steps(0, 8), choke=0), dict(path=paths[1], steps=steps(4, 12), flams=steps(12)),
+            dict(path=paths[2], steps=steps(*range(0, 16, 2)), choke=1)]
+    body = dict(name="UI drums", bpm=100, bars=1, swing=0.2, pads=pads, reveal=False)
+    req = urllib.request.Request(site["base"] + "api/drums/export", method="POST", data=json.dumps(body).encode())
+    r = json.load(urllib.request.urlopen(req, timeout=120))
+    dest = site["root"] / "ableton" / "UI drums"
+    pm = pretty_midi.PrettyMIDI(str(dest / r["midi"]))
+    notes = pm.instruments[0].notes
+    assert len(notes) == 2 + 3 + 8  # kick 2, snare 2 + a flam, hats 8
+    assert {n.pitch for n in notes} == {36, 37, 38}
+    adg = gzip.open(dest / "UI drums.adg").read().decode()
+    assert '<ChokeGroup Value="1"' in adg
+
+
+def test_slice_a_drum_loop_into_pads(page):
+    i = idx(page, "s[F.id]==='drmloop'")
+    page.evaluate(f"select({i},'list')")
+    page.click("#sliceit")
+    page.wait_for_function("SK.lanes[0]&&SK.lanes[0].type==='drums'&&SK.lanes[0].pads.length>=6&&SK.lanes[0].pads.every(p=>p.buf)", timeout=30000)
+    on = page.evaluate("SK.lanes[0].pads.map(p=>p.steps.findIndex(v=>v>0))")
+    assert set(on) <= set(range(16)) and {0, 2, 4, 6, 8, 10, 12, 14} <= set(on), on  # each hit on its own step
+    assert page.evaluate("SK.lanes[0].pads.every(p=>p.label&&p.end>p.start)")
+
+
+def test_arrangement_sections(page):
+    """AB × 1 bar: a lane ticked only for B is silent in bar 1 and plays in bar 2; the bounce offers the whole song."""
+    _drums(page, ("Kick",))
+    page.evaluate("SK.lanes[0].pads[0].steps.fill(0);SK.lanes[0].pads[0].steps[0]=1;CRATE.drawSK()")
+    page.fill("#skarr", "ab")
+    page.dispatch_event("#skarr", "change")
+    page.select_option("#sksec", "1")
+    assert page.evaluate("SK.arr") == "AB"
+    page.click("[data-sksec='0:A']")  # untick A: the drums play in B only
+    assert page.evaluate("SK.lanes[0].secs") == "B"
+    assert page.input_value("#skbars") == "2"
+    energy = """(async()=>{const l=SK.lanes[0],L=CRATE.barLen(),ctx=new OfflineAudioContext(1,Math.ceil(2*L*44100),44100);
+        for(let b=0;b<2;b++)CRATE.skBar(ctx,ctx.destination,l,b,b*L,L,null);const d=(await ctx.startRendering()).getChannelData(0),h=Math.floor(L*44100);
+        let a=0,b=0;for(let k=0;k<h;k++){a+=d[k]*d[k];b+=d[h+k]*d[h+k]}return [a,b]})()"""
+    a, b = page.evaluate(energy)
+    assert a < 1e-6 and b > 0.01, (a, b)
+    snap = json.loads(page.evaluate("JSON.stringify(JSON.parse(CRATE.skSnap()))"))
+    assert snap["arr"] == "AB" and snap["sec"] == 1 and snap["lanes"][0]["secs"] == "B"

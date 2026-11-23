@@ -88,7 +88,8 @@ play are heard over the sketch (the now-playing bar says *with the sketch*), and
 sketch. Click a saved sketch's name to open it without playing.
 
 **Drum lane:** drum one-shots you add (＋, a kit, or **🎛 to the sketchpad** on a song's drum rack) become pads in one
-drum lane, a step sequencer: 16 steps a bar, 1 or 2 bars, click a step for on → soft → off, swing, per-pad mute, and
+drum lane, a step sequencer: 16 steps a bar, 1 or 2 bars, click a step for on → soft → off (scroll over it for its
+exact velocity, ⌥-click for a flam), swing, humanize, choke groups (closed hat cuts off open hat), per-pad mute, and
 a ✨ starter pattern from the pad types (kick, snare, hats…). **🔎 complete the kit** lists the kinds the kit is
 missing (snare, clap, hats, cymbals, shaker, tom, percussion), three hits at a time that sound like they were recorded
 with the pads you have: **↻ more** pages through 30 per kind, ✕ drops one for the next, **≈** steers a kind toward
@@ -99,6 +100,12 @@ it picks a song's other drums out of all of that kind with AUC 0.83.) Pads start
 drag its start and end on the waveform, tune it (pitch and length together, like a sampler), shorten its decay, or
 **↗ full editor** for punch, drive and low cut (save as new and the pad switches to your edit). Each pad has its own volume fader (every pad starts equally loud at 0 dB), and step edits, volumes and pad edits are heard at once while it plays. The sketchpad has its own tempo control (− / +, type it, or tap): a drums-only sketch changes tempo live; sample lanes are re-stretched. It's one lane, so mute, solo, its fader, bounce, stems
 and the Live set treat it like any other.
+**⇩ MIDI + rack** writes a Drum Rack of the pads (as edited, with their choke groups) and a MIDI clip of the pattern
+(velocities, swing, flams): drop the rack on a track in Live, then the clip. **🥁 slice into pads** on a drum loop
+cuts it at its hits into pads, each on the step where it fell, so the loop plays back as before and can be re-sequenced.
+
+**Arrangement:** type sections into the sketchpad (`AABA`) and how many bars each lasts, then tick the letters on each
+lane for the sections it plays in (all by default). Playback, bounce (*song* length), stems and the Live set follow it.
 
 **Kits** are dealt for you: each starts from a vocal the taste model rates highly and adds a pad, chords or a melody,
 a texture, a vocal chop and a bass from other songs that fit it in key and sound. ★ and ✕ change what they pick,
@@ -233,9 +240,9 @@ Both use CLAP, so they match timbre, space and mood, not key or tempo.
 - **🕘 Recent actions:** every ★, ✕, category move, collection change and delete, each with undo; ⌘Z undoes the last
   (the sketch's own history when the sketchpad is open).
 - **Drag out:** drag any sample row into Live, Finder or anywhere that takes files; **↗ Finder** shows it there.
-- **Export:** to `Ableton User Library/Samples/DigitalCrate/…` Drum one-shots are
-  written starting on the hit (most mined hits open with 20–40 ms before it), or as you edited them in the drum lane. with an `_info.csv`; optionally key/tempo-conformed
-  copies, MIDI next to tonal samples, and a Drum Rack. Also from the CLI:
+- **Export:** to `Ableton User Library/Samples/DigitalCrate/…` with an `_info.csv`; optionally key/tempo-conformed
+  copies, MIDI next to tonal samples, and a Drum Rack. Drum one-shots are written starting on the hit (most mined hits
+  open with 20–40 ms before it), or as you edited them in the drum lane. Also from the CLI:
   `digitalcrate export --favorites --rack --key Fm --bpm 124`.
 
 ## How it works

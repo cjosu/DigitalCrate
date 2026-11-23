@@ -191,6 +191,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-col]');con
 // rows and the sample panel get 📁
 const _rowHTMLc=rowHTML;rowHTML=function(i){return _rowHTMLc(i).replace('<span class="id"',colBtn(i)+'<span class="id"')};
 const _selectC=select;select=function(i,from){_selectC(i,from);
+ if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]==='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('sliceit'))xb.insertAdjacentHTML('afterend',`<button id="sliceit" title="slice this loop at its hits into pads of the sketchpad's drum lane, each on its step, so you can re-sequence it">🥁 slice into pads</button>`)}
  if(SERVED){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('reveal'))xb.insertAdjacentHTML('afterend',`<button id="reveal" title="show the file in Finder, selected: drag it from there into Live (or anywhere)">↗ Finder</button>`)}
  if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('kitaround'))xb.insertAdjacentHTML('afterend',`<button id="kitaround" title="start (or add to) the sketchpad's drum lane with this hit, then find the rest of a kit that sounds like it">🥁 build a kit around this</button>`)}const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
 // the Favorites tab's 📁 view
@@ -295,6 +296,18 @@ document.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey||typin
  if(k==='a'||k==='A'){skAdd(i);return}
  if(k==='c'||k==='C'){if(!SERVED)return;if(!COLLAST||!COLS.some(c=>c.name===COLLAST)){toast('use 📁 once to pick a collection; then C adds to it');return}
   colToggle(COLLAST,i,!colsOf(s[F.path]).includes(COLLAST))}});
+
+// ---------- slice a drum loop into pads: one pad per hit, on the step where it falls in the original (so it plays the
+// loop back, now re-sequenceable and at the sketch's tempo without stretching)
+async function sliceLoop(i){const s=S[i];let r;try{r=await api('api/slices?path='+encodeURIComponent(s[F.path])+'&n=16')}catch(e){toast("couldn't slice it: "+e.message);return}
+ const bpm=s[F.bpm]||PROJ.bpm||120,st=60/bpm/4,bars=Math.max(1,Math.min(2,s[F.bars]||Math.round(s[F.dur]/(st*16))||1));
+ if(!PROJ.bpm){PROJ.bpm=bpm;try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
+ const old=drumLane();if(old&&old.pads.length){SK.lanes.splice(SK.lanes.indexOf(old),1);setTimeout(()=>toast('the drum lane was replaced · ⌘Z brings it back'),500)}
+ const l=drumLane(true);if(!l){toast('the sketchpad holds 8 lanes');return}l.bars=bars;
+ r.slices.forEach(([t0,t1],k)=>{const idx=Math.round(t0/st);if(idx>=16*bars||l.pads.length>=16)return;const steps=new Array(DSTEPS).fill(0);steps[idx]=1;
+  l.pads.push({i,path:s[F.path],label:`slice ${k+1}`,start:t0,end:t1,auto:false,db:0,mute:false,steps})});
+ SK.open=true;drawSK();drawProj();await drumLoad(l);drawSK();toast(`${l.pads.length} slices, each on its step · move, retune or drop them`)}
+document.addEventListener('click',e=>{if(!e.target.closest('#sliceit'))return;e.stopPropagation();if(st.sel!=null)sliceLoop(st.sel)},true);
 
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;
@@ -401,7 +414,14 @@ document.addEventListener('click',async e=>{const ym=e.target.closest('[data-ytm
  const skp=e.target.closest('[data-ytskip]');if(skp){await api('api/ytscout/mark',{id:skp.dataset.ytskip,status:'skipped'}).catch(()=>{});ytRes.forEach(r=>{if(r.id===skp.dataset.ytskip)r.status='skipped'});ytDraw()}});
 
 // ================= sketchpad =================
-const SK={lanes:[],playing:false,open:false,voices:[],timer:null,master:null,nextBar:0,start:0};window.SK=SK;
+const SK={lanes:[],playing:false,open:false,voices:[],timer:null,master:null,nextBar:0,start:0,arr:'',sec:4};window.SK=SK;
+// ---------- arrangement: sections like "AABA", each SK.sec bars; every lane plays in the sections ticked on it (all by
+// default). Empty = the sketch loops as one section. Playback, bounce, stems and the Live set all go through skBar.
+const secAt=bar=>SK.arr?SK.arr[Math.floor(bar/SK.sec)%SK.arr.length]:'';
+const laneOn=(l,bar)=>!SK.arr||!l.secs||l.secs.includes(secAt(bar));
+const secLetters=()=>[...new Set(SK.arr.split(''))].sort();
+const songBars=()=>SK.arr?SK.arr.length*SK.sec:0;
+function secChips(l,k){if(!SK.arr)return'';return`<span class="secs" title="the sections this lane plays in">${secLetters().map(c=>`<button class="tbtn sec${!l.secs||l.secs.includes(c)?' on':''}" data-sksec="${k}:${c}">${c}</button>`).join('')}</span>`}
 const np=$('np'),dock=document.createElement('div');dock.className='dock';np.parentNode.insertBefore(dock,np);
 dock.insertAdjacentHTML('beforeend','<div class="sk" id="sk" hidden></div>');dock.appendChild(np);
 $('skbtn').onclick=()=>{SK.open=!SK.open;drawSK();drawProj()};
@@ -447,7 +467,7 @@ function skVoice(ctx,dest,l,t,dur,arr,xf=0){const s=ctx.createBufferSource();s.b
  const fi=Math.min(Math.max(0.004,(l.fin||0)/1000),dur/2),fo=Math.min(Math.max(0.004,xf,(l.fout||0)/1000),dur/2);
  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(1,t+fi);g.gain.setValueAtTime(1,Math.max(t+fi,t+dur-fo));g.gain.linearRampToValueAtTime(0,t+dur);s.start(t,off,dur);
  if(ctx===AC){(l.on||(l.on=[])).push({t0:t,off,dur});if(l.on.length>8)l.on.shift()}  /* remembered for the playhead */if(arr){arr.push(s);s.onended=()=>{const k=arr.indexOf(s);if(k>=0)arr.splice(k,1)}}}
-function skBar(ctx,dest,l,bar,t,L,arr){if(l.type==='drums'){drumBar(ctx,dest,l,bar,t,L,arr);return}if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
+function skBar(ctx,dest,l,bar,t,L,arr){if(!laneOn(l,bar))return;if(l.type==='drums'){drumBar(ctx,dest,l,bar,t,L,arr);return}if(!l.buf)return;const R=skRegion(l)[1];if(l.every===0){const n=Math.max(1,Math.round(R/L));if(bar%n)return;skVoice(ctx,dest,l,t,Math.min(R,n*L),arr)}
  else{if(bar%l.every)return;const cut=R>l.every*L;skVoice(ctx,dest,l,t+l.offset*L/4,cut?l.every*L+0.15:R,arr,cut?0.15:0)}}  // a longer clip fades out under the next pass
 // ---------- the drum lane: drum one-shots as pads in a step sequencer (16 steps a bar, 1 or 2 bars, velocity, swing)
 // It's one lane, so mute / solo / its fader and every export (bounce, stems, Live set) treat it like any other.
@@ -460,7 +480,9 @@ function drumStarter(kind){const s=new Array(DSTEPS).fill(0),on=(ks,v=1)=>ks.for
  else if(kind==='shaker'){for(let k=0;k<DSTEPS;k++)s[k]=k%2?0.3:0.5}else if(kind==='tom')on([14],0.7);else on([6],0.6);return s}
 function drumLane(make){let l=SK.lanes.find(x=>x.type==='drums');if(l||!make)return l;if(SK.lanes.length>=8)return null;
  l={type:'drums',pads:[],bars:1,swing:0,db:-4,mute:false,solo:false,state:'ok',buf:null};SK.lanes.push(l);return l}
-async function drumPadLoad(p){if(p.buf)return;try{p.buf=await AC.decodeAudioData(await (await fetch(url(p.path))).arrayBuffer());p.norm=skNorm(p.buf);
+const PADBUF=new Map();  // path -> decoding promise: the slices of one loop share it
+async function drumPadLoad(p){if(p.buf)return;try{if(!PADBUF.has(p.path))PADBUF.set(p.path,fetch(url(p.path)).then(r=>r.arrayBuffer()).then(b=>AC.decodeAudioData(b)));
+ p.buf=await PADBUF.get(p.path);p.norm=skNorm(p.buf);
  if(p.start==null){p.start=padAttack(p.buf);p.auto=p.start>0.003}}catch(e){p.err=true}}  // pads start on the hit, not on silence before it
 async function drumLoad(l){l.state='loading';await Promise.all(l.pads.map(drumPadLoad));
  l.buf=l.pads.map(p=>p.buf).filter(Boolean).sort((a,b)=>b.duration-a.duration)[0]||AC.createBuffer(1,1,44100);l.state='ok'}  // buf: so "is it loaded" checks pass
@@ -473,15 +495,25 @@ async function drumAdd(i,{quiet=false,starter=true}={}){const l=drumLane(true);i
 // offline (bounce, stems): a whole bar at once. Live playback uses drumTick, step by step, so edits are heard at once.
 function drumBar(ctx,dest,l,bar,t,L,arr){const base=(bar%l.bars)*16,st=L/16,solo=l.pads.some(p=>p.solo);
  if(ctx===AC){(l.sched||(l.sched=[])).push({t,bar});if(l.sched.length>8)l.sched.shift()}
- l.pads.forEach(p=>{if(!p.buf||p.mute||(solo&&!p.solo))return;for(let s=0;s<16;s++){const v=p.steps[base+s];if(!v)continue;
-  drumHit(ctx,dest,p,t+s*st+(s%2?l.swing*st:0),v,arr)}})}
+ for(let s=0;s<16;s++)l.pads.forEach(p=>{if(!p.buf||p.mute||(solo&&!p.solo))return;drumStep(ctx,dest,l,p,base+s,t+s*st+(s%2?l.swing*st:0),arr)})}
+// one step of one pad: velocity, humanize (timing ±12 ms, velocity ±15% at 100%), a flam (a soft grace hit 20 ms
+// before), and choke groups (a hit cuts off whatever else in its group is still ringing: closed hat chokes open hat)
+function drumStep(ctx,dest,l,p,idx,t,arr){let v=p.steps[idx];if(!v)return null;const h=l.human||0;
+ if(h){t+=(Math.random()*2-1)*0.012*h;v=Math.max(0.05,Math.min(1,v*(1+(Math.random()*2-1)*0.15*h)))}
+ if(p.flams&&p.flams[idx])drumHit(ctx,dest,p,t-0.02,v*0.45,arr);
+ const src=drumHit(ctx,dest,p,t,v,arr);
+ if(src&&p.choke){const m=(l._choke||(l._choke=new WeakMap())),g=m.get(ctx)||{};m.set(ctx,g);const prev=g[p.choke];
+  if(prev&&prev!==src&&prev._t<=t){try{prev._g.gain.cancelScheduledValues(t);prev._g.gain.setTargetAtTime(0,Math.max(t,ctx.currentTime),0.004);prev.stop(t+0.06)}catch(e){}}
+  g[p.choke]=src}
+ return src}
 function drumTick(l){const L=barLen(),st=L/16,solo=l.pads.some(p=>p.solo);if(l.nextAbs==null)l.nextAbs=Math.max(0,Math.ceil((AC.currentTime-SK.start)/st));
  l.live=l.live||new Map();
  const look=document.hidden?1.5:0.12;  // background tabs tick about once a second: look further ahead there
  while(SK.start+l.nextAbs*st<AC.currentTime+look){const abs=l.nextAbs++,bar=Math.floor(abs/16),s=abs%16,base=(bar%l.bars)*16;
   if(s===0){(l.sched||(l.sched=[])).push({t:SK.start+bar*L,bar});if(l.sched.length>8)l.sched.shift()}
   const t=SK.start+abs*st+(s%2?l.swing*st:0);
-  l.pads.forEach((p,r)=>{const v=p.steps[base+s];if(!v||!p.buf||p.mute||(solo&&!p.solo))return;const src=drumHit(AC,l.g,p,t,v,SK.voices);if(src)l.live.set(r+':'+(base+s),{src,t})})}
+  if(!laneOn(l,bar))continue;
+  l.pads.forEach((p,r)=>{if(!p.steps[base+s]||!p.buf||p.mute||(solo&&!p.solo))return;const src=drumStep(AC,l.g,l,p,base+s,t,SK.voices);if(src)l.live.set(r+':'+(base+s),{src,t})})}
  if(l.live.size>256)[...l.live.keys()].slice(0,128).forEach(k=>l.live.delete(k))}
 function drumHit(ctx,dest,p,t,v,arr){if(!p.buf)return null;
   const tt=Math.max(t,ctx.currentTime),src=ctx.createBufferSource(),g=ctx.createGain();src.buffer=p.buf;
@@ -489,20 +521,24 @@ function drumHit(ctx,dest,p,t,v,arr){if(!p.buf)return null;
   src.playbackRate.value=rate;src.connect(g);g.connect(dest);g.gain.setValueAtTime(amp,tt);
   if(p.decay){g.gain.setTargetAtTime(0,tt+0.005,p.decay/4.6);src.start(tt,a,Math.min(len,p.decay*1.5))}  // -40 dB at `decay`
   else{g.gain.setValueAtTime(amp,tt+Math.max(0,len-0.004));g.gain.linearRampToValueAtTime(0,tt+len);src.start(tt,a,len)}
+  src._g=g;src._t=tt;  // for choke groups
   if(arr){arr.push(src);src.onended=()=>{const k=arr.indexOf(src);if(k>=0)arr.splice(k,1)}}return src}
 function drumLaneHTML(l,k){const n=16*l.bars;
  return `<div class="lane dlane${l.mute?' muted':''}" data-ln="${k}">
  <label class="onoff" title="turn the drum lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label>
- <div class="lname"><div class="name"><span class="badge" style="background:${col('Percussion')}">${AB.Percussion}</span>Drums · ${l.pads.length} pad${l.pads.length===1?'':'s'}</div><div class="meta">click a step: on → soft → off</div></div>
+ <div class="lname"><div class="name">${secChips(l,k)}<span class="badge" style="background:${col('Percussion')}">${AB.Percussion}</span>Drums · ${l.pads.length} pad${l.pads.length===1?'':'s'}</div><div class="meta" title="click: on → soft → off · scroll over a step: its velocity · ⌥-click: a flam">click · scroll = velocity · ⌥ = flam</div></div>
  <div class="ctl"><select data-dbars="${k}" title="pattern length"><option value="1">1 bar</option><option value="2" ${l.bars===2?'selected':''}>2 bars</option></select>
   <label title="delays every other 16th: 0 = straight">swing <input type="range" min="0" max="0.6" step="0.05" value="${l.swing}" data-dswing="${k}" style="width:70px"></label>
+  <label title="loosens timing (up to ±12 ms) and velocity (up to ±15%), so it isn't machine-tight">humanize <input type="range" min="0" max="1" step="0.05" value="${l.human||0}" data-dhuman="${k}" style="width:60px"></label>
+  <button class="tbtn" data-dmidi="${k}" title="a Drum Rack of these pads (trimmed and edited as here, choke groups included) and a MIDI clip of the pattern, for Live">⇩ MIDI + rack</button>
   <button class="tbtn" data-dstart="${k}" title="a starter pattern from the pad types (kick, snare, hats…)">✨ starter</button><button class="tbtn" data-dclear="${k}">clear</button>
   <button class="tbtn${l.find?' on':''}" data-dfind="${k}" title="hits for the kinds this kit is missing, that sound like they were recorded with the pads you have">🔎 complete the kit</button></div>
  <div class="fader" title="drum lane volume · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
  <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn" data-skx="${k}" title="remove the drum lane">✕</button>
  <div class="dgrid" data-dgrid="${k}" style="--n:${n}">${l.pads.map((p,r)=>{const s=S[p.i]||[];return `<div class="drow${p.mute?' muted':''}">
-  <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><button class="dlab dedit${p.open?' on':''}" data-dedit="${k}:${r}" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · click to ${p.open?'close':'open'} this pad's editor (start, end, tune, decay)"><span class="dtri">${p.open?'▾':'▸'}</span>${esc(s[F.sub]||'hit')}${p.tune||p.decay||p.end||(p.start>0.003&&!p.auto)?' ✎':''}</button>
-  <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}" data-dstep="${k}:${r}:${j}" ${v?`style="opacity:${(0.35+0.65*v).toFixed(2)}"`:''}></button>`).join('')}</div>
+  <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><button class="dlab dedit${p.open?' on':''}" data-dedit="${k}:${r}" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · click to ${p.open?'close':'open'} this pad's editor (start, end, tune, decay)"><span class="dtri">${p.open?'▾':'▸'}</span>${esc(p.label||s[F.sub]||'hit')}${p.tune||p.decay||p.end||(p.start>0.003&&!p.auto)?' ✎':''}</button>
+  <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}${p.flams&&p.flams[j]?' flam':''}" data-dstep="${k}:${r}:${j}" ${v?`style="--v:${Math.round(v*100)}%"`:''} title="${v?`velocity ${Math.round(v*100)}%${p.flams&&p.flams[j]?' · flam':''}`:'off'}"></button>`).join('')}</div>
+  <select class="dchoke" data-dchoke="${k}:${r}" title="choke group: a hit cuts off the others in its group that are still ringing (closed hat chokes open hat)"><option value="0">—</option>${[1,2,3].map(g=>`<option value="${g}" ${p.choke===g?'selected':''}>choke ${g}</option>`).join('')}</select>
   <span class="dvol" title="this pad's volume against the other pads (every pad starts equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-dpv="${k}:${r}"><output>${dbTxt(p.db||0)}</output></span>
   <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>${p.open?padEditHTML(l,k,p,r):''}`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
 function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading&&!f.missing)return '<div class="sub dfind">listening for hits that match this kit…</div>';if(f.error)return `<div class="sub dfind">${esc(f.error)}</div>`;
@@ -529,8 +565,10 @@ $('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep
  if(t.dataset.dfind!=null){const l=SK.lanes[+t.dataset.dfind];if(l.find&&!l.find.loading){l.find=null;drawSK();return}drumFind(l);return}
  if(t.dataset.dfplay!=null){stopAll();const a=new Audio(url(t.dataset.dfplay));a.play();players.set('df',a);a.onended=()=>players.delete('df');return}
  if(t.dataset.dfadd!=null){const l=drumLane();await drumAdd(+t.dataset.dfadd);if(l&&l.find)drumFind(l,true);return}
- if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];p.steps[j]=!v?1:v>0.7?0.55:0;
-  t.classList.toggle('on',!!p.steps[j]);t.style.opacity=p.steps[j]?(0.35+0.65*p.steps[j]).toFixed(2):'';
+ if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];
+  if(e.altKey){p.flams=p.flams||new Array(DSTEPS).fill(0);p.flams[j]=p.flams[j]?0:1;if(!v)p.steps[j]=1;drawSK();return}
+  p.steps[j]=!v?1:v>0.7?0.55:0;
+  t.classList.toggle('on',!!p.steps[j]);t.style.setProperty('--v',Math.round(p.steps[j]*100)+'%');
   const q=SK.lanes[k].live&&SK.lanes[k].live.get(r+':'+j);if(q&&!p.steps[j]&&q.t>AC.currentTime){try{q.src.stop()}catch(err){}}return}
  if(t.dataset.dpad){const [k,r]=t.dataset.dpad.split(':').map(Number),p=SK.lanes[k].pads[r];if(!p.buf)return;AC.resume();
   const one={...SK.lanes[k],pads:[{...p,steps:[1],mute:false,solo:false}],bars:1,swing:0};drumBar(AC,AC.destination,one,0,AC.currentTime+0.01,barLen(),null);return}
@@ -546,6 +584,24 @@ document.addEventListener('click',async e=>{if(!e.target.closest('#racksk'))retu
  RACK.ids.forEach(i=>{const k=drumKind(i);(per[k]||(per[k]=[])).push(i)});order.forEach(k=>(per[k]||[]).slice(0,2).forEach(i=>ids.length<12&&ids.push(i)));const l=drumLane(true);if(!l){toast('the sketchpad holds 8 lanes');return}
  for(const i of ids)await drumAdd(i,{quiet:true});toast(`${ids.length} pads in the drum lane · press ▶ in the sketchpad`)},true);
 $('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.dfall!=null){const l=SK.lanes[+t.dataset.dfall];l.find.all=t.checked;drawSK()}},true);
+$('sk').addEventListener('change',e=>{const t=e.target;
+ if(t.id==='skarr'){SK.arr=t.value.toUpperCase().replace(/[^A-H]/g,'').slice(0,16);
+  SK.lanes.forEach(l=>{if(l.secs){l.secs=l.secs.split('').filter(c=>SK.arr.includes(c)).join('');if(!l.secs)l.secs=null}});drawSK()}
+ else if(t.id==='sksec'){SK.sec=+t.value;drawSK()}},true);
+$('sk').addEventListener('keydown',e=>{if(e.target.id==='skarr'&&e.key==='Enter')e.target.blur()},true);
+$('sk').addEventListener('click',e=>{const b=e.target.closest('[data-sksec]');if(!b)return;e.stopPropagation();const [k,c]=b.dataset.sksec.split(':'),l=SK.lanes[+k];
+ const cur=l.secs==null?secLetters().join(''):l.secs,next=cur.includes(c)?cur.replace(c,''):cur+c;
+ l.secs=next.length===secLetters().length?null:[...next].sort().join('');drawSK()},true);
+$('sk').addEventListener('wheel',e=>{const t=e.target.closest&&e.target.closest('[data-dstep]');if(!t)return;e.preventDefault();
+ const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r];let v=p.steps[j]||0;v=Math.round(Math.max(0,Math.min(1,v+(e.deltaY<0?0.1:-0.1)))*10)/10;
+ p.steps[j]=v;t.classList.toggle('on',!!v);t.style.setProperty('--v',Math.round(v*100)+'%');t.title=v?`velocity ${Math.round(v*100)}%`:'off'},{passive:false});
+$('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.dchoke!=null){const [k,r]=t.dataset.dchoke.split(':').map(Number);SK.lanes[k].pads[r].choke=+t.value||0}},true);
+$('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dhuman!=null)SK.lanes[+t.dataset.dhuman].human=+t.value},true);
+$('sk').addEventListener('click',async e=>{const b=e.target.closest('[data-dmidi]');if(!b)return;e.stopPropagation();const l=SK.lanes[+b.dataset.dmidi];
+ const name=(($('skname').value||'').trim()||SK.name||'Drums '+new Date().toISOString().slice(0,10))+' drums';b.textContent='exporting…';
+ try{const r=await api('api/drums/export',{name,bpm:PROJ.bpm||120,bars:l.bars,swing:l.swing,
+   pads:l.pads.map(p=>({path:p.path,label:p.label||(S[p.i]||[])[F.sub]||'',steps:p.steps.slice(0,16*l.bars),flams:(p.flams||[]).slice(0,16*l.bars),choke:p.choke||0,mute:!!p.mute,start:p.start||0,end:p.end||null,tune:p.tune||0,decay:p.decay||0}))});
+  b.textContent='⇩ MIDI + rack';toast(`rack + MIDI clip → ${r.dest.split('/').slice(-2).join('/')} · drop the rack on a track, then the clip`)}catch(err){b.textContent='⇩ MIDI + rack';toast('export failed: '+err.message)}},true);
 $('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dswing!=null)SK.lanes[+t.dataset.dswing].swing=+t.value},true);
 // ---------- editing pads inside the drum lane: start on the hit, end, tune, decay (all live, no rendering)
 // where the hit really starts: the first sample above a quarter of the peak, backed up to where it rises from quiet
@@ -602,11 +658,11 @@ $('sk').addEventListener('click',e=>{const t=e.target.closest('[data-skbpm],#skt
 $('sk').addEventListener('change',e=>{if(e.target.id==='skbpm')skTempo(+e.target.value)},true);
 $('sk').addEventListener('keydown',e=>{if(e.target.id==='skbpm'&&e.key==='Enter')e.target.blur()},true);
 // ---------- sketch state: one definition, used by save, bounce provenance, undo/redo, "unsaved" and the draft
-function skLanesState(){return SK.lanes.map(l=>l.type==='drums'?{type:'drums',bars:l.bars,swing:l.swing,db:l.db||0,mute:!!l.mute,solo:!!l.solo,
-  pads:l.pads.map(p=>({path:p.path,db:p.db||0,mute:!!p.mute,steps:p.steps.slice(),start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto}))}
- :({path:l.path,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:!!l.mute,solo:!!l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}
-const skSnap=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:SK.name||'',lanes:skLanesState()});
-const EMPTY_SNAP=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:'',lanes:[]});
+function skLanesState(){return SK.lanes.map(l=>l.type==='drums'?{type:'drums',secs:l.secs||null,bars:l.bars,swing:l.swing,db:l.db||0,mute:!!l.mute,solo:!!l.solo,
+  human:l.human||0,pads:l.pads.map(p=>({path:p.path,label:p.label||null,db:p.db||0,mute:!!p.mute,steps:p.steps.slice(),flams:(p.flams||[]).slice(),choke:p.choke||0,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto}))}
+ :({path:l.path,secs:l.secs||null,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:!!l.mute,solo:!!l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat}))}
+const skSnap=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:SK.name||'',arr:SK.arr||'',sec:SK.sec||4,lanes:skLanesState()});
+const EMPTY_SNAP=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:'',arr:'',sec:4,lanes:[]});
 SK.saved=null;
 const skDirty=()=>SK.lanes.length>0&&skSnap()!==SK.saved;
 // put a remembered state back, reusing audio already loaded (only what changed is fetched again)
@@ -614,7 +670,7 @@ async function skRestore(st){const was=SK.playing;if(was)skStop();
  const keyChanged=(st.key||null)!==(PROJ.key||null)||(st.bpm||null)!==(PROJ.bpm||null);
  if(keyChanged){Object.assign(PROJ,{key:st.key,bpm:st.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj()}
  const old=new Map();SK.lanes.forEach(l=>{if(l.type==='drums')l.pads.forEach(p=>{if(p.buf)old.set('d|'+p.path,p)});else if(l.buf)old.set(`${l.path}|${l.nat?1:0}|${l.src||''}`,l)});
- SK.name=st.name||'';
+ SK.name=st.name||'';SK.arr=st.arr||'';SK.sec=st.sec||4;
  SK.lanes=st.lanes.map(l=>{if(l.type==='drums'){return {...l,state:'loading',buf:null,pads:l.pads.map(p=>{const o=old.get('d|'+p.path);return {...p,steps:p.steps.slice(),i:byPath.get(p.path),buf:o?o.buf:null,norm:o?o.norm:null}}).filter(p=>p.i!=null)}}
   const o=keyChanged?null:old.get(`${l.path}|${l.nat?1:0}|${l.src||''}`);return {...l,i:byPath.get(l.path),buf:o?o.buf:null,norm:o?o.norm:null,pulse:o?o.pulse:null,ons:o?o.ons:null,state:o?'ok':'loading'}})
   .filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
@@ -659,7 +715,7 @@ function skTick(){if(!SK.playing)return;const L=barLen(),ahead=1.2+Math.max(0,..
  SK.timer=setTimeout(skTick,25)}
 function skStop(){SK.playing=false;clearTimeout(SK.timer);const now=AC.currentTime;if(SK.master){SK.master.gain.setTargetAtTime(0,now,0.015);const m=SK.master;setTimeout(()=>{try{m.disconnect()}catch(e){}},150)}
  SK.voices.forEach(s=>{try{s.stop(now+0.08)}catch(e){}});SK.voices=[];SK.lanes.forEach(l=>l.on=[]);drawSK()}
-function skAnim(){skHeads();drumHeads();if(!SK.playing)return;const el=$('skpos');if(el){const L=barLen(),t=AC.currentTime-SK.start;el.textContent=t<0?'waiting for the bar…':`bar ${Math.floor(t/L)+1} · beat ${Math.floor(t%L/(L/4))+1}`}requestAnimationFrame(skAnim)}
+function skAnim(){skHeads();drumHeads();if(!SK.playing)return;const el=$('skpos');if(el){const L=barLen(),t=AC.currentTime-SK.start;const b=Math.floor(t/L);el.textContent=t<0?'waiting for the bar…':`${SK.arr?`section ${secAt(b)} · `:''}bar ${(SK.arr?b%songBars():b)+1} · beat ${Math.floor(t%L/(L/4))+1}`}requestAnimationFrame(skAnim)}
 function skWave(c,buf,trim){if(!c||!buf)return;const dpr=devicePixelRatio||1,W=c.clientWidth*dpr,H=30*dpr;c.width=W;c.height=H;const g=c.getContext('2d'),d=buf.getChannelData(0),st2=Math.max(1,Math.floor(d.length/W));
  const [ta,tb]=trim||[0,1],xa=ta*W,xb=tb*W;
  for(let x=0;x<W;x++){let m=0;for(let k=x*st2;k<Math.min(d.length,(x+1)*st2);k+=4)m=Math.max(m,Math.abs(d[k]));g.fillStyle=x>=xa&&x<=xb?'#8cc0da':'#3a4048';g.fillRect(x,H/2-m*H/2,1,Math.max(1,m*H))}
@@ -719,8 +775,9 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
  el.classList.remove('skmini');el.hidden=false;
  el.innerHTML=`<h3><button id="skhide" title="hide the sketchpad (it keeps playing; the 🎛 sketchpad button brings it back)">▾ hide</button> 🎛 Sketchpad${hq('sketch')} <span class="skbpm" title="the sketch's tempo (the project tempo): − / + (shift: ±5), type it, or tap the beat"><button class="tbtn" data-skbpm="-1">−</button><input id="skbpm" type="number" min="40" max="220" step="1" value="${Math.round(PROJ.bpm||120)}"><button class="tbtn" data-skbpm="1">+</button> bpm <button class="tbtn" id="sktap">tap</button></span> <span class="sub">${esc(PROJ.key||'no key')} — every lane conformed to the project${PROJ.link&&LINK.peers?' · starts on Live\'s next bar':''}</span>
  <button id="skplay" class="${SK.playing?'pill':''}">${SK.playing?'■ stop':'▶ play'}</button><span id="skpos" class="sub"></span><span style="flex:1"></span>
+ <span class="skarr" title="arrangement: sections in order (e.g. AABA), each the length chosen; tick the letters on each lane for the sections it plays in. Empty = loop everything"><input id="skarr" placeholder="arrange: AABA" maxlength="16" value="${esc(SK.arr||'')}" style="width:96px"> × <select id="sksec">${[1,2,4,8].map(n=>`<option value="${n}" ${SK.sec===n?'selected':''}>${n} bar${n>1?'s':''}</option>`).join('')}</select></span>
  <button class="tbtn" id="skundo" title="undo (⌘Z)">↶</button><button class="tbtn" id="skredo" title="redo (⌘⇧Z)">↷</button>
- <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave" class="${skDirty()?'dirty':''}" title="${skDirty()?'unsaved changes: save to keep this version (⌘S)':'saved (⌘S)'}">${skDirty()?'save •':'save'}</button><select id="skbars" title="bounce length"><option value="4">4 bars</option><option value="8" selected>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
+ <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave" class="${skDirty()?'dirty':''}" title="${skDirty()?'unsaved changes: save to keep this version (⌘S)':'saved (⌘S)'}">${skDirty()?'save •':'save'}</button><select id="skbars" title="bounce / stems / Live set length">${songBars()?`<option value="${songBars()}" selected>song · ${songBars()} bars</option>`:''}<option value="4">4 bars</option><option value="8" ${songBars()?'':'selected'}>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
  <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skals" title="a Live set: one audio track per lane, a clip wherever it plays, at the sketch's tempo (muted lanes come in as muted tracks). Opens in Live.">⇩ Live set</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button></h3>
  ${SK.lanes.map((l,k)=>{if(l.type==='drums')return drumLaneHTML(l,k);const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
   const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,
@@ -728,7 +785,7 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
   const fit=!loop&&l.state==='ok'&&pu&&!l.src;
   return`<div class="lane${l.mute?' muted':''}" data-ln="${k}">
   <label class="onoff" title="turn this lane on or off"><input type="checkbox" data-skon="${k}" ${l.mute?'':'checked'}><span></span></label>
-  <div class="lname" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · ${esc(s[F.sub]||'')} ${s[F.cam]||''}"><div class="name"><span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span>${esc(s[F.artist]||'')}</div><div class="meta">${esc(s[F.title]||'')} · ${tags}</div></div>
+  <div class="lname" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · ${esc(s[F.sub]||'')} ${s[F.cam]||''}"><div class="name">${secChips(l,k)}<span class="badge" style="background:${col(s[F.cat])}">${AB[s[F.cat]]}</span>${esc(s[F.artist]||'')}</div><div class="meta">${esc(s[F.title]||'')} · ${tags}</div></div>
   <div class="lwave"><div class="lbtns">${fit?`<button class="tbtn realign fitb" data-skfit="${k}" title="the clip has a steady pulse of about ${pu.bpm} bpm: stretch it onto ${PROJ.bpm} bpm so every attack stays on the grid">⟷ match tempo</button>`:''}${l.src?`<button class="tbtn realign fitb" data-skunfit="${k}" title="back to the clip's own tempo">⟷ undo match</button>`:''}${l.trim||l.nudge?`<button class="tbtn realign" data-skalign="${k}" title="put the first strong attack of the selection on the beat (clears any nudge)">↺ re-align</button>`:''}</div>${l.state==='ok'?`<canvas data-skw="${k}"></canvas>`:`<span class="sub">${l.state==='loading'?'conforming…':'failed to load'}</span>`}</div>
   <div class="fader" title="volume relative to the other lanes (all start equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${l.db||0}" data-skv="${k}"><output>${dbTxt(l.db||0)}</output></div>
   <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn${l.more?' on':''}" data-skmore="${k}" title="timing, key, fades, open, remove">⋯</button>
@@ -771,7 +828,7 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.dataset.skx!=null){SK.lanes.splice(+t.dataset.skx,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
  if(t.dataset.go!=null){select(+t.dataset.go,'list');return}
  if(t.id==='sksave'){const name=($('skname').value||'').trim()||`Sketch ${new Date().toLocaleString()}`;SK.name=name;
-  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,lanes:skLanesState()}}).then(()=>{SK.saved=skSnap();skDraft();skMarkSave();toast(`“${name}” saved · find it in the Kits tab`)}).catch(err=>toast('error: '+err.message));return}
+  await api('api/sketch/save',{name,state:{key:PROJ.key,bpm:PROJ.bpm,arr:SK.arr||'',sec:SK.sec||4,lanes:skLanesState()}}).then(()=>{SK.saved=skSnap();skDraft();skMarkSave();toast(`“${name}” saved · find it in the Kits tab`)}).catch(err=>toast('error: '+err.message));return}
  if(t.id==='skexp'){const name=($('skname').value||'').trim()||'Sketch '+new Date().toISOString().slice(0,10);toast('exporting conformed copies + Drum Rack…');
   api('api/export',{scope:'paths',paths:SK.lanes.flatMap(l=>l.type==='drums'?l.pads.map(p=>p.path):[l.path]),name,
    pad_edits:Object.fromEntries(SK.lanes.filter(l=>l.type==='drums').flatMap(l=>l.pads.map(p=>[p.path,{start:p.start||0,end:p.end||null,tune:p.tune||0,decay:p.decay||0}]))),key:PROJ.key,bpm:PROJ.bpm,rack:true,reveal:true}).then(r=>toast(`exported ${r.count} files + rack → ${name}`)).catch(err=>toast('error: '+err.message));return}
@@ -819,7 +876,7 @@ async function renderKitExtras(){const L=$('list');
  L.querySelectorAll('[data-skload]').forEach(b=>b.onclick=e=>{e.preventDefault();const x=sk.find(z=>z.name===b.dataset.skload);skOpen(x.name,JSON.parse(x.state),false)});
  L.querySelectorAll('[data-skdel]').forEach(b=>b.onclick=async()=>{await api('api/sketch/delete',{name:b.dataset.skdel});render()})}
 async function skOpen(name,s,play=true){skStop();Object.assign(PROJ,{key:s.key,bpm:s.bpm});try{localStorage.setItem('atlasProj',JSON.stringify(PROJ))}catch(e){}drawProj();
- UNDO.hold=true;SK.name=name;SK.lanes=s.lanes.map(l=>l.type==='drums'?{...l,state:'loading',buf:null,pads:l.pads.map(p=>({...p,i:byPath.get(p.path),buf:null})).filter(p=>p.i!=null)}:({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
+ UNDO.hold=true;SK.name=name;SK.arr=s.arr||'';SK.sec=s.sec||4;SK.lanes=s.lanes.map(l=>l.type==='drums'?{...l,state:'loading',buf:null,pads:l.pads.map(p=>({...p,i:byPath.get(p.path),buf:null})).filter(p=>p.i!=null)}:({...l,i:byPath.get(l.path),buf:null,state:'loading'})).filter(l=>l.type==='drums'?l.pads.length:l.i!=null);
  SK.saved=skSnap();UNDO.hold=false;
  const miss=s.lanes.length-SK.lanes.length;if(miss)toast(`${miss} lane${miss>1?'s are':' is'} newer than this page: run "digitalcrate build" and reload to hear the whole sketch`);SK.open=true;drawSK();drawProj();await Promise.all(SK.lanes.map(skLoad));drawSK();if(play)skPlay()}
 document.addEventListener('click',async e=>{const kr=e.target.closest('[data-kitrack]');if(kr){e.stopPropagation();const k=D.kits[+kr.dataset.kitrack];kr.textContent='building…';
@@ -1144,7 +1201,7 @@ $('expbtn').onclick=()=>{if(!SERVED){toast('needs the local server');return}
 // ================= stop everything =================
 $('stop').onclick=()=>{stopAll();skStop();padsStopLoop()};
 
-window.CRATE={setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd};  // hooks for tools/screenshots.py and the console
+window.CRATE={setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd,sliceLoop,skSnap};  // hooks for tools/screenshots.py and the console
 drawProj();if(PROJ.link)linkPoll();render();
 })();
 

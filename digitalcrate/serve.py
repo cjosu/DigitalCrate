@@ -362,6 +362,11 @@ class Handler(SimpleHTTPRequestHandler):
             from .live import new_rows
             q = parse_qs(urlparse(self.path).query)
             return self._json(new_rows(int((q.get("since") or ["0"])[0])))
+        if self.path.startswith("/api/slices?"):
+            from urllib.parse import parse_qs, urlparse
+            from .ableton import segments
+            q = parse_qs(urlparse(self.path).query)
+            return self._json({"slices": segments(unquote(q["path"][0]), int((q.get("n") or ["16"])[0]), 0.05)})
         if self.path == "/api/libroot":
             return self._json({"root": str(C.LIB_ROOT)})
         if self.path == "/api/collections":
@@ -528,6 +533,10 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json({"error": "not a library file"}, 400)
                 subprocess.Popen(["open", "-R", str(f)])
                 return self._json({"ok": True})
+            elif self.path == "/api/drums/export":
+                from .drumexport import drum_export
+                return self._json(drum_export(req.get("name") or "Drums", float(req.get("bpm") or 120), int(req.get("bars") or 1),
+                                              float(req.get("swing") or 0), req.get("pads") or [], reveal=req.get("reveal", True)))
             elif self.path == "/api/drumkit":
                 from .drumkit import complete
                 return self._json(complete(req.get("paths") or [], int(req.get("per", 30)), req.get("kinds"),

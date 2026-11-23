@@ -44,7 +44,7 @@ def _esc(s):
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def _pad(tpl, k, path, label):
+def _pad(tpl, k, path, label, choke=0):
     info = sf.info(str(path))
     b = re.sub(r'<DrumBranchPreset Id="\d+">', f'<DrumBranchPreset Id="{k}">', tpl, count=1)
     b = re.sub(r'(<DrumBranchPreset Id="\d+">\s*<Name Value=")[^"]*', lambda m: m.group(1) + _esc(label), b, count=1)
@@ -64,7 +64,7 @@ def _pad(tpl, k, path, label):
         b = _set(b, tag, v)
     b = re.sub(r'(<BrowserContentPath Value=")[^"]*', r"\1", b)
     b = re.sub(r'(<ReceivingNote Value=")\d+', lambda m: m.group(1) + str(128 - (BASE_NOTE + k)), b)
-    b = re.sub(r'(<ChokeGroup Value=")\d+', r"\g<1>0", b)
+    b = re.sub(r'(<ChokeGroup Value=")\d+', lambda m: m.group(1) + str(int(choke or 0)), b)  # 0 = none
     return b
 
 
@@ -74,7 +74,7 @@ def drum_rack(pads, name, out):
     spans = [m.span() for m in re.finditer(r"<DrumBranchPreset Id=\"\d+\">.*?</DrumBranchPreset>", x, re.S)]
     first, last = spans[0][0], spans[-1][1]
     tpl = x[spans[0][0]:spans[0][1]]
-    body = "\n".join(_pad(tpl, k, Path(p), lbl) for k, (p, lbl) in enumerate(pads[:128]))
+    body = "\n".join(_pad(tpl, k, Path(pd[0]), pd[1], pd[2] if len(pd) > 2 else 0) for k, pd in enumerate(pads[:128]))
     x = x[:first] + body + x[last:]
     # rack names: every UserName that carried the factory kit's name
     kit = re.search(r'<UserName Value="([^"]+)"', x)
@@ -87,11 +87,15 @@ def drum_rack(pads, name, out):
     return out
 
 
-def chops(rel, n=16, min_len=0.08):
-    """Slice a sample at onsets (syllables / notes) into at most n chops, merging the shortest neighbours."""
-    import librosa
+def segments(rel, n=16, min_len=0.08):
+    """Where a sample would be sliced (chops / drum-lane slices): [(start s, end s)], at most n."""
     from .edit import _load
     y = _load(rel)
+    return [(a / C.SR, e / C.SR) for a, e in _segs(y, n, min_len)]
+
+
+def _segs(y, n, min_len):
+    import librosa
     sr = C.SR
     on = librosa.onset.onset_detect(y=y.mean(0), sr=sr, hop_length=256, backtrack=True, units="samples").tolist()
     b = sorted(set([0] + [o for o in on if o > 0] + [y.shape[1]]))
@@ -102,6 +106,15 @@ def chops(rel, n=16, min_len=0.08):
         j = k - 1 if k == len(segs) - 1 or (k > 0 and segs[k - 1][1] - segs[k - 1][0] < segs[k + 1][1] - segs[k + 1][0]) else k + 1
         a, c = min(k, j), max(k, j)
         segs[a:c + 1] = [[segs[a][0], segs[c][1]]]
+    return segs
+
+
+def chops(rel, n=16, min_len=0.08):
+    """Slice a sample at onsets (syllables / notes) into at most n chops, merging the shortest neighbours."""
+    from .edit import _load
+    y = _load(rel)
+    sr = C.SR
+    segs = _segs(y, n, min_len)
     out = []
     for a, e in segs:
         z = y[:, a:e].copy()

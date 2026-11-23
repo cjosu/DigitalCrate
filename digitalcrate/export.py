@@ -47,7 +47,8 @@ def trim_to_hit(y, sr=C.SR):
     return z
 
 
-def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=False, chop=False, pad_edits=None):
+def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=False, chop=False, pad_edits=None,
+           chokes=None):
     """paths: library-relative file paths (samples, variations or edits).
     Drum one-shots are written starting on the hit (trim_to_hit), or as edited in the drum lane (pad_edits:
     {path: {start, end, tune, decay}}), so a Drum Rack in Live plays on the grid like the sketchpad does.
@@ -100,7 +101,7 @@ def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=F
         elif not out.exists():
             shutil.copy2(src, out)
         tag = (r["subtype"] if r else parts[0]) + (f" {r['camelot']}" if r and r["key_from"] != "none" else "")
-        pads.append((out, f"{len(pads) + 1:02d} {tag}"))
+        pads.append((out, f"{len(pads) + 1:02d} {tag}", int((chokes or {}).get(rel, 0))))
         if midi and r is not None and r["category"] != "Percussion" and r["key_from"] != "none" and not cinfo:
             try:
                 from .midi import transcribe
