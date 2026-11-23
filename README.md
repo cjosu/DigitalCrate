@@ -123,7 +123,7 @@ models.
 - **Mining controls** with a preview: new artists, most promising tracks, or more like your favorites.
 - MIDI-controller mapping and nightly backups.
 
-## How it works
+## Pipeline
 
 Each track is analyzed for tempo, beats and key, split into stems when drums or bass are in the way, and cut into
 phrases, chops, loops and one-shots. Each candidate is scored for how clean and exposed it is, and only the good ones
@@ -162,5 +162,3 @@ Built on [Demucs](https://github.com/facebookresearch/demucs),
 
 **License:** [AGPL-3.0](LICENSE) (Essentia is AGPL-3.0).
 
-**On sampling:** this tool helps you find material; it doesn't clear it. Releasing music with a sample is your call,
-and often a conversation with the rights holder.
