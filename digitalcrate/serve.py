@@ -357,6 +357,13 @@ class Handler(SimpleHTTPRequestHandler):
             from .sets import sets
             q = parse_qs(urlparse(self.path).query)
             return self._json(sets(collection=(q.get("collection") or [None])[0]))
+        if self.path.startswith("/api/live/new"):
+            from urllib.parse import parse_qs, urlparse
+            from .live import new_rows
+            q = parse_qs(urlparse(self.path).query)
+            return self._json(new_rows(int((q.get("since") or ["0"])[0])))
+        if self.path == "/api/libroot":
+            return self._json({"root": str(C.LIB_ROOT)})
         if self.path == "/api/collections":
             from .collections_ import listing
             return self._json(listing())
@@ -514,6 +521,13 @@ class Handler(SimpleHTTPRequestHandler):
                 from .suggest import feedback
                 feedback(path, req.get("id"), req.get("move"), req.get("family"), req.get("arm"), req.get("material"),
                          req.get("action"))
+            elif self.path == "/api/reveal":  # show a library file in Finder, selected (to drag it into Live)
+                import subprocess
+                f = (C.LIB_ROOT / path).resolve()
+                if C.LIB_ROOT.resolve() not in f.parents or not f.exists():
+                    return self._json({"error": "not a library file"}, 400)
+                subprocess.Popen(["open", "-R", str(f)])
+                return self._json({"ok": True})
             elif self.path == "/api/drumkit":
                 from .drumkit import complete
                 return self._json(complete(req.get("paths") or [], int(req.get("per", 30)), req.get("kinds"),

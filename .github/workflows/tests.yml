@@ -25,3 +25,31 @@ jobs:
           uv pip install --python .venv/bin/python pytest
       - name: Tests
         run: .venv/bin/python -m pytest -q
+
+  ui:
+    # the app in a real browser, on a throwaway library mined from synthetic songs (tests/test_ui.py)
+    if: ${{ !github.event.repository.private }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: System tools
+        run: brew install ffmpeg rubberband
+      - uses: astral-sh/setup-uv@v5
+      - name: Models cache (separation, CLAP; about 1.6 GB)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/torch
+            models
+          key: models-${{ runner.os }}-${{ hashFiles('requirements.lock') }}
+      - name: Install
+        run: |
+          uv venv --python 3.11 .venv
+          uv pip install --python .venv/bin/python --no-deps -r requirements.lock
+          uv pip install --python .venv/bin/python --no-deps -e .
+          uv pip install --python .venv/bin/python pytest playwright==1.55.0
+          .venv/bin/python -m playwright install chromium
+      - name: Browser tests
+        run: .venv/bin/python -m pytest -q --ui tests/test_ui.py

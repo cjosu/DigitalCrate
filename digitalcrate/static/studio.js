@@ -189,6 +189,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-col]');con
 // rows and the sample panel get 📁
 const _rowHTMLc=rowHTML;rowHTML=function(i){return _rowHTMLc(i).replace('<span class="id"',colBtn(i)+'<span class="id"')};
 const _selectC=select;select=function(i,from){_selectC(i,from);
+ if(SERVED){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('reveal'))xb.insertAdjacentHTML('afterend',`<button id="reveal" title="show the file in Finder, selected: drag it from there into Live (or anywhere)">↗ Finder</button>`)}
  if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('kitaround'))xb.insertAdjacentHTML('afterend',`<button id="kitaround" title="start (or add to) the sketchpad's drum lane with this hit, then find the rest of a kit that sounds like it">🥁 build a kit around this</button>`)}const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
 // C adds what's playing to the collection you used last (or opens the menu)
 document.addEventListener('click',async e=>{if(!e.target.closest('#kitaround'))return;e.stopPropagation();const i=st.sel;if(i==null)return;
@@ -217,6 +218,34 @@ document.addEventListener('click',async e=>{const t=e.target.closest('[data-cols
  if(t.dataset.coldel!=null){if(t.dataset.armed!=='1'){t.dataset.armed='1';t.textContent='delete? (samples stay)';setTimeout(()=>{t.dataset.armed='';t.textContent='delete'},3000);return}
   await api('api/collections/delete',{name:c.name});COLSEL='';renderCollections()}},true);
 colLoad();
+
+// ---------- new samples appear while you work (live.py): no `digitalcrate build`, no reload
+let LIVE_SINCE=BORN.reduce((a,b)=>Math.max(a,b||0),0);
+async function liveCheck(force){if(!SERVED||(document.hidden&&!force))return 0;let r;try{r=await api('api/live/new?since='+LIVE_SINCE)}catch(e){return 0}
+ const add=r.samples.map((row,k)=>({row,parts:r.partners[k]||[],b:r.born[k]})).filter(x=>!BYID.has(x.row[F.id]));if(!add.length)return 0;
+ add.forEach(x=>{const e=x.row[F.env];if(typeof e==='string'){const b=atob(e),v=new Array(b.length);for(let k=0;k<b.length;k++)v[k]=b.charCodeAt(k);x.row[F.env]=v}});  // waveforms come packed, like in the page file
+ Object.assign(D.tracks,r.tracks);
+ add.forEach(x=>{const j=S.push(x.row)-1;x.j=j;BYID.set(x.row[F.id],j);byPath.set(x.row[F.path],j);if(!BYTRACK.has(x.row[F.tid]))BYTRACK.set(x.row[F.tid],[]);BYTRACK.get(x.row[F.tid]).push(j);BORN[j]=x.b});
+ add.forEach(x=>{P[x.j]=x.parts.map(([id,sc,h,v])=>[BYID.get(id),sc,h,v]).filter(q=>q[0]!=null)});  // second pass: partners may be other new ones
+ LIVE_SINCE=Math.max(LIVE_SINCE,...add.map(x=>x.b));
+ toast(`${add.length} new sample${add.length>1?'s':''} from your mining run · in the list now`);
+ if(typeof loadTaste==='function')loadTaste();
+ if(['S','C','R','F'].includes(st.tab)){const m=document.querySelector('main'),y=m?m.scrollTop:0;render();if(m)m.scrollTop=y}
+ return add.length}
+window.liveCheck=liveCheck;setInterval(liveCheck,60000);setTimeout(liveCheck,8000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)liveCheck()});
+
+// ---------- drag samples out (into Live, Finder, anywhere that takes files) and ↗ show in Finder
+let LIBROOT=null;if(SERVED)api('api/libroot').then(r=>LIBROOT=r.root).catch(()=>{});
+document.addEventListener('dragstart',e=>{const row=e.target.closest&&e.target.closest('.row[data-i]');if(!row||!SERVED)return;const s=S[+row.dataset.i],p=s[F.path],name=p.split('/').pop();
+ const dt=e.dataTransfer;dt.effectAllowed='copy';
+ dt.setData('DownloadURL',`audio/wav:${name}:${location.origin}/${p.split('/').map(encodeURIComponent).join('/')}`);  // a file promise: Finder, the desktop, most apps
+ if(LIBROOT){const abs=LIBROOT+'/'+p;dt.setData('text/uri-list','file://'+abs.split('/').map(encodeURIComponent).join('/'));dt.setData('text/plain',abs)}  // the real file, for apps that take a path
+ toast('drop it in Live, Finder or anywhere that takes audio files · if Live won’t take it, ↗ Finder in the sample panel')});
+// rows are draggable (but not their buttons, sliders or text you select)
+new MutationObserver(()=>document.querySelectorAll('#list .row[data-i]:not([draggable])').forEach(r=>r.setAttribute('draggable','true'))).observe(document.body,{subtree:true,childList:true});
+document.addEventListener('click',async e=>{const b=e.target.closest('#reveal');if(!b)return;e.stopPropagation();const i=st.sel;if(i==null)return;
+ try{await api('api/reveal',{path:S[i][F.path]});toast('shown in Finder: drag it from there into Live')}catch(err){toast("couldn't show it: "+err.message)}},true);
 
 // ---------- galaxy
 let GAL=null,GV={x:0,y:0,z:1},GH=null,GTASTE=false,GHOVER=true;

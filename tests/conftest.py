@@ -6,19 +6,22 @@ SR = 44100
 
 def pytest_addoption(parser):
     parser.addoption("--slow", action="store_true", help="also run the end-to-end pipeline test (loads models)")
+    parser.addoption("--ui", action="store_true", help="also run the browser tests (Playwright; builds a throwaway library)")
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("--slow"):
-        return
-    skip = pytest.mark.skip(reason="end-to-end: run with --slow")
-    for it in items:
-        if "slow" in it.keywords:
-            it.add_marker(skip)
+    for opt, mark in (("--slow", "slow"), ("--ui", "ui")):
+        if config.getoption(opt):
+            continue
+        skip = pytest.mark.skip(reason=f"run with {opt}")
+        for it in items:
+            if mark in it.keywords:
+                it.add_marker(skip)
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "slow: end-to-end test that loads the separation and CLAP models")
+    config.addinivalue_line("markers", "ui: browser test (Playwright) on a throwaway library")
 
 
 def tone(freqs, secs=4.0, sr=SR):

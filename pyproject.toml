@@ -27,7 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 # only the stretch / tuning shootout's extra candidates need these
 shootout = ["pyworld==0.3.5", "praat-parselmouth==0.4.7"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "playwright==1.55.0"]  # playwright: pytest --ui (then: playwright install chromium)
 
 [project.scripts]
 digitalcrate = "digitalcrate.__main__:main"

@@ -337,9 +337,11 @@ running app (private names are scrubbed).
 ## Tests
 
 ```bash
-uv pip install --python .venv/bin/python -e ".[dev]"   # once: adds pytest
+uv pip install --python .venv/bin/python -e ".[dev]"   # once: adds pytest and Playwright
 pytest           # engines, genre mapping, keys, chord theory and voicings, stems alignment (seconds)
 pytest --slow    # end to end on a synthetic track in a throwaway library: scan → process → build → serve
+pytest --ui      # the app in a real browser (Playwright) on a throwaway library: playback, sketchpad, drum lane,
+                 # undo, collections, delete, editor, live updates… (once: playwright install chromium)
 ```
 
 ## Limitations
