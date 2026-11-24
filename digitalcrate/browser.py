@@ -408,7 +408,7 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  box.innerHTML=`<canvas id="edc" style="width:100%;height:120px;background:#101317;border-radius:6px;cursor:crosshair"></canvas>
  <div class="sub" id="edsel">drag to select · double-click selects one syllable/note · loading…</div>
  <div class="edrow"><button id="edplay">▶ selection</button><label class="sub"><input type="checkbox" id="edloop" checked> loop</label>
- <label class="sub"><input type="checkbox" id="edsnap" checked> snap to syllables</label><label class="sub" id="edbarsl" title="while you drag, the selection's length sticks at 1, 2, 3… bars (the sample's tempo, or the project's). Hold ⌥ to move freely"><input type="checkbox" id="edbars" checked> stick to bars</label><button id="edall">select all</button><button id="edzoom">🔍 zoom to selection</button><span class="sub">wheel = zoom</span></div>
+ <label class="sub"><input type="checkbox" id="edsnap" checked> snap to syllables</label><label class="sub" id="edbarsl" title="bar lines counted from where the selection starts (the line marked 2 is two bars on), and while you drag, the selection's length sticks at 1, 2, 3… bars (the sample's tempo, or the project's). Hold ⌥ to move freely"><input type="checkbox" id="edbars" checked> bars</label><button id="edall">select all</button><button id="edzoom">🔍 zoom to selection</button><span class="sub">wheel = zoom</span></div>
  <div class="edgrid"><span>Stretch</span><input type="range" id="edst" min="0.5" max="4" step="0.05" value="1"><span id="edstv">1×</span>
  <span>Pitch</span><input type="range" id="edpi" min="-12" max="12" step="1" value="0"><span id="edpiv">0 st</span>
  <span>Loop crossfade</span><input type="range" id="edxf" min="0" max="1000" step="10" value="20"><span id="edxfv">20 ms</span>
@@ -433,8 +433,8 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  const snap=t=>{if(!$('edsnap').checked||!ED.onsets.length)return t;const n=ED.onsets.reduce((a,b)=>Math.abs(b-t)<Math.abs(a-t)?b:a);return Math.abs(n-t)<0.2?n:t};
  let down=null,drag=null;c.onmousedown=e=>{drag=edHandleAt(e);if(drag)return;
   // grabbing an edge moves just that edge: anchor on the opposite one and let the normal drag logic extend from it
-  const edge=edEdgeAt(e);if(edge){down=edge==='a'?ED.sel[1]:ED.sel[0];return}
-  down=snap(tx(e));ED.sel=[down,down];edDraw()};
+  const edge=edEdgeAt(e);if(edge){down=edge==='a'?ED.sel[1]:ED.sel[0];ED.anchor=down;return}
+  down=snap(tx(e));ED.anchor=down;ED.sel=[down,down];edDraw()};
  c.onmousemove=e=>{if(drag){const t=tx(e),[a,b]=ED.sel;edSetEnv(drag,Math.max(0,(drag==='in'||drag==='xin'?t-a:b-t))*1000);return}
   c.style.cursor=down!=null||edHandleAt(e)||edEdgeAt(e)?'ew-resize':'crosshair';if(down==null)return;let t=tx(e);
   // the length sticks at whole bars (1, 2, 3…) when the edge comes within 8 px of one; ⌥ lets it move freely
@@ -442,13 +442,14 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
    if(n>=1&&Math.abs(Math.abs(t-down)-n*bar)<=tol){const tt=down+Math.sign(t-down)*n*bar;if(tt>=0&&tt<=ED.buf.duration+1e-6){t=Math.min(ED.buf.duration,tt);ED.stuck=n}}}
   ED.sel=[Math.min(down,t),Math.max(down,t)];edDraw()};
  window.addEventListener('mouseup',()=>{if(drag){drag=null;['edxf','edfi','edfo'].forEach(id=>$(id).dispatchEvent(new Event('change')));return}
-  if(down==null)return;down=null;if(!ED.stuck)ED.sel=[snap(ED.sel[0]),snap(ED.sel[1])];  // a whole-bar length stays exactly that
+  if(down==null)return;down=null;ED.anchor=null;if(!ED.stuck)ED.sel=[snap(ED.sel[0]),snap(ED.sel[1])];  // a whole-bar length stays exactly that
   if(ED.sel[1]-ED.sel[0]<0.03)ED.sel=[0,ED.buf.duration];
   // fades set for a longer selection would swallow a short one (it'd be all fade): back to the defaults
   const len=ED.sel[1]-ED.sel[0];[['edfi',10],['edfo',40],['edxf',20]].forEach(([id,def])=>{const el=$(id);if(+el.value/1000>len*0.25){el.value=Math.min(def,Math.floor(len*250/5)*5);el.dispatchEvent(new Event('input'))}});
   edDraw();edChanged()},{once:false});
  c.ondblclick=e=>{const t=tx(e),b=[0,...ED.onsets,ED.buf.duration];let k=b.findIndex(x=>x>t);if(k<1)k=1;ED.sel=[b[k-1],b[k]];edDraw();
  if(ED.P&&ED.P.loop)edChanged();else edPlaySel()};
+ $('edbars').onchange=()=>edDraw();
  $('edplay').onclick=edToggleSel;$('edzoom').onclick=()=>{const d=ED.buf.duration;ED.view&&(ED.view[1]-ED.view[0])<d-1e-3?edZoom(null):edZoom('sel')};$('edall').onclick=()=>{ED.sel=[0,ED.buf.duration];edDraw();edChanged()};
  ['edst','edpi','edfm','edrev','edfi','edfo','edxf','edtape','edtone','edpunch','eddecay','eddrive','edlow'].forEach(id=>$(id)&&$(id).addEventListener('change',edChanged));
  if($('eddrum')){const lab={edpunch:v=>v?v+'%':'off',eddecay:v=>v?decayS(v).toFixed(2)+' s':'natural',eddrive:v=>v?v+'%':'off',edlow:v=>v?v+' Hz':'off'};
@@ -468,7 +469,7 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  $('edprev').onclick=edPreview;$('edsave').onclick=edSave;$('edreset').onclick=edReset}
 // start over: every control back to its starting value (including ones studio.js adds), whole sample selected, zoom out.
 // loop / snap / the name are preferences, not edits, so they stay
-function edReset(){if(!ED||!ED.buf)return;$('editor').querySelectorAll('input,select').forEach(el=>{if(['edloop','edsnap','edname'].includes(el.id))return;
+function edReset(){if(!ED||!ED.buf)return;$('editor').querySelectorAll('input,select').forEach(el=>{if(['edloop','edsnap','edbars','edname'].includes(el.id))return;
  if(el.type==='checkbox')el.checked=el.defaultChecked;else if(el.tagName==='SELECT')el.selectedIndex=Math.max(0,[...el.options].findIndex(o=>o.defaultSelected));else el.value=el.defaultValue;
  el.dispatchEvent(new Event('input'));if(el.tagName==='SELECT')el.dispatchEvent(new Event('change'))});if($('tnrep'))$('tnrep').textContent='';  // menus redraw their panels (plugin controls, tuning report)
  ED.sugg=null;document.querySelectorAll('[data-sgk]').forEach(r=>r.style.background='');
@@ -503,6 +504,12 @@ function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.d
  ED.peaks.forEach(([mn,mx],x)=>{const t=edT(x/dpr,W/dpr),inS=t>=a&&t<=b,k=inS?gain(t):1;
   if(inS&&k<0.98){g.fillStyle='rgba(140,192,218,.28)';g.fillRect(x,mid-mx*amp,1,Math.max(1,(mx-mn)*amp))}  // what's there before the fade
   g.fillStyle=inS?'#8cc0da':'#3f4e58';g.fillRect(x,mid-mx*amp*k,1,Math.max(1,(mx-mn)*amp*k))});
+ const bar0=edBar();if(bar0&&(!$('edbars')||$('edbars').checked)){const o=ED.anchor!=null?ED.anchor:a,[v0,v1]=edView(),pxBar=bar0/(v1-v0)*W;
+  if(pxBar>=5*dpr){const every=Math.max(1,Math.ceil(26*dpr/pxBar));g.font=`${10*dpr}px ui-monospace,Menlo,monospace`;g.textBaseline='top';
+   if(pxBar>=90*dpr){g.fillStyle='rgba(224,164,88,.12)';for(let n=Math.ceil((v0-o)/bar0*4);o+n*bar0/4<=v1;n++)if(n%4)g.fillRect(X(o+n*bar0/4),top,1*dpr,bot-top)}  // beats, when there's room
+   for(let n=Math.ceil((v0-o)/bar0);o+n*bar0<=v1+1e-6;n++){if(!n)continue;const x=X(o+n*bar0),m=Math.abs(n),lab=m%every===0;
+    g.fillStyle=lab?'rgba(224,164,88,.45)':'rgba(224,164,88,.2)';g.fillRect(x,0,1*dpr,lab?H:bot);
+    if(lab){const txt=m===1?'1 bar':String(m);g.fillStyle='#12151a';g.fillRect(x+2*dpr,bot+1*dpr,g.measureText(txt).width+4*dpr,12*dpr);g.fillStyle='#e0a458';g.fillText(txt,x+4*dpr,bot+2*dpr)}}}}
  g.fillStyle='rgba(255,255,255,.28)';ED.onsets.forEach(t=>g.fillRect(X(t),H-7*dpr,1*dpr,7*dpr));
  g.fillStyle='#e0a458';[a,b].forEach(t=>{g.fillRect(X(t)-1*dpr,0,2*dpr,H);g.fillRect(X(t)-3*dpr,mid-10*dpr,6*dpr,20*dpr)});
  const line=(x0,y0,x1,y1,col,dash)=>{g.save();g.strokeStyle=col;g.lineWidth=1.5*dpr;g.setLineDash(dash?[4*dpr,3*dpr]:[]);g.beginPath();g.moveTo(x0,y0);g.lineTo(x1,y1);g.stroke();g.restore()};

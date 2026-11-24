@@ -108,7 +108,8 @@ an Ableton Drum Rack (`.adg`).
 ## Editing
 
 - **Editor:** trims, stretch, pitch (clean or **tape**), Tone, fades, reverse, and **Tune to** a key. ↺ reset.
-- **Selecting part of a sample:** drag on the waveform. The length sticks at whole bars (1, 2, 3…) of the sample's
+- **Selecting part of a sample:** drag on the waveform. Bar lines are counted from where the selection starts (the line
+  marked 2 is two bars on), and the length sticks at whole bars (1, 2, 3…) of the sample's
   tempo, or the project's; hold ⌥ to move freely, or untick *stick to bars*. The same goes for trimming a sketchpad
   lane. The fade knobs sit on the selection's top corners; the waveform under a fade stays visible, faintly.
 - **Drums:** Punch, Decay, Drive and Low cut; pitch defaults to tape.
