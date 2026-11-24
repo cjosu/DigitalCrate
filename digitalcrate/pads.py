@@ -94,18 +94,30 @@ def analyze(y, sr=C.SR):
         act = np.ones_like(act)
     mean = cs[:, act].mean(1)
     mean /= np.linalg.norm(mean) + 1e-9
+    pk = int(rms.argmax())
+    tail = rms[pk:]
+    hold = float(np.median(tail[len(tail) // 2:int(len(tail) * 0.8) + 1]) / (rms.max() + 1e-9)) if len(tail) > 4 else 0.0
     return dict(chords=ch, names=main, n=len(main), still=round(float((mean @ cs[:, act]).mean()), 3),
-                steady=round(float(np.std(np.log(on + 1e-6))) if len(on) > 1 else 0.0, 3))
+                steady=round(float(np.std(np.log(on + 1e-6))) if len(on) > 1 else 0.0, 3), hold=round(hold, 3))
 
 
-def is_pad(a):
+MIN_HOLD = 0.5  # a pad one-shot still has half its level well after the peak; a struck key or pluck has died away
+
+
+def is_pad(a, oneshot=False):
+    if oneshot:  # a short sound: what matters is that it sustains
+        return a.get("hold", 1.0) >= MIN_HOLD and a["n"] <= MAX_CHORDS
     return a["n"] <= MAX_CHORDS and a["still"] >= MIN_STILL and a["steady"] <= MAX_SWELL
 
 
 def where(row, a):
-    """Pads stay; moving orchestral passages go to Strings & Orchestral; moving synth chords to Chords & Keys."""
-    if is_pad(a):
+    """Pads stay; moving orchestral passages go to Strings & Orchestral; moving synth chords to Chords & Keys; struck
+    one-shots (a key, a pluck: they die away) to Chords & Keys."""
+    oneshot = row.get("kind") == "oneshot" if hasattr(row, "get") else row["kind"] == "oneshot"
+    if is_pad(a, oneshot):
         return PADS, row["subtype"]
+    if oneshot:
+        return "Chords & Keys", row["subtype"]
     if (row["instrument"] or "") in ORCHESTRAL:
         return STRINGS, row["subtype"]
     return "Chords & Keys", row["subtype"]
@@ -172,8 +184,9 @@ def run(redo=False, move=True):
     from .audio import decode
     from .recat import move_sample, overrides
     con = _db()
-    q = f"""SELECT * FROM samples WHERE category IN (?,?) AND kind != 'oneshot' {'' if redo else 'AND chords IS NULL'}"""
-    rows = con.execute(q, (PADS, STRINGS)).fetchall()
+    q = f"""SELECT * FROM samples WHERE (category IN (?,?) AND kind != 'oneshot' OR category=? AND kind='oneshot')
+            {'' if redo else 'AND chords IS NULL'}"""
+    rows = con.execute(q, (PADS, STRINGS, PADS)).fetchall()
     keep = overrides()
     print(f"TASK sorting real pads from {len(rows)} sustained samples", flush=True)
     moved = {PADS: 0, STRINGS: 0, "Chords & Keys": 0}
@@ -187,7 +200,7 @@ def run(redo=False, move=True):
         if a:
             con.execute("UPDATE samples SET chords=?, pad_still=?, pad_steady=? WHERE id=?",
                         (json.dumps(a["chords"]), a["still"], a["steady"], r["id"]))
-            cat, sub = where(r, a)
+            cat, sub = where(dict(r), a)
             moved[cat] += 1
             if move and cat != r["category"] and r["id"] not in keep:
                 try:

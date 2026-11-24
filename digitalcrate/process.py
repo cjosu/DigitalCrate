@@ -126,7 +126,9 @@ def _cap(cands):
     return out
 
 
-def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"):
+def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs", pads_only=False):
+    """Mine one song. pads_only: an already-mined song, looked at again for pads only; its samples stay, new pads
+    are added (unless they sound like one it already has)."""
     t0 = time.time()
     policy = row["policy"] or classify_track(row["artist"], row["genre"], row["path"])
     y = decode(row["path"])
@@ -158,11 +160,13 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
         print("    pad finder failed:", str(e)[:100])
     if policy == "vocals_only":  # the beat is someone else's sample: keep the original vocal only
         cands = [c for c in cands if c["group"] in ("vocal_phrase", "vocal_chop")]
+    if pads_only:
+        cands = [c for c in cands if c["group"] == "pad"]
     cands = [measure(c, mix, feats, masks) for c in cands]
     for c in cands:
         if c["group"] == "pad":
             c["quality"] += 0.05  # asked for: a loop that holds its chords
-    if stems is not None:  # song sections (optional: All-In-One), from the stems mining already has: ~5 s
+    if stems is not None and not pads_only:  # song sections (optional: All-In-One), from the stems mining already has: ~5 s
         try:
             from . import sections as SEC
             if SEC.available():
@@ -221,17 +225,30 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
                 kept.append(c)
         cands = _cap(_dedupe(kept))
         for c in cands:  # pads hold 1-2 chords and keep still; moving passages are strings & orchestral or chords
-            if c["kind"] != "oneshot" and c["category"] in ("Pads & Atmospheres", "Strings & Orchestral"):
+            if c["category"] in ("Pads & Atmospheres", "Strings & Orchestral") and (
+                    c["kind"] != "oneshot" or c["category"] == "Pads & Atmospheres"):
                 try:
                     from . import pads as PADS
                     a = PADS.analyze(audio_of(c))
                     c["chords"], c["pad_still"], c["pad_steady"] = json.dumps(a["chords"]), a["still"], a["steady"]
-                    c["category"], c["subtype"] = PADS.where(dict(subtype=c["subtype"], instrument=c.get("instrument")), a)
+                    c["category"], c["subtype"] = PADS.where(dict(subtype=c["subtype"], instrument=c.get("instrument"),
+                                                                  kind=c["kind"]), a)
                 except Exception as e:
                     print("    pad check failed:", str(e)[:100])
 
     # render + store
-    con.execute("DELETE FROM samples WHERE track_id=? AND parent_id IS NULL AND category != 'Percussion'", (row["id"],))
+    if pads_only:  # keep what the song has; skip new cuts that are already there or sound like a sample it has
+        have = con.execute("SELECT id, category, clap FROM samples WHERE track_id=? AND clap IS NOT NULL", (row["id"],)).fetchall()
+        ids = {r["id"] for r in have}
+        E = {r["id"]: (r["category"], np.frombuffer(r["clap"], np.float16).astype(np.float32)) for r in have}
+        def fresh(c):
+            sid = hashlib.sha1(f"{row['path']}|{c['source']}|{c['start']:.2f}|{c['kind']}".encode()).hexdigest()[:6]
+            if sid in ids:
+                return False
+            return all(float(c["emb"] @ e) < 0.93 for cat, e in E.values() if cat == c["category"])
+        cands = [c for c in cands if fresh(c)]
+    else:
+        con.execute("DELETE FROM samples WHERE track_id=? AND parent_id IS NULL AND category != 'Percussion'", (row["id"],))
     feat_by = {"mix": mix, **(feats or {})}
     from .recat import overrides
     user_overrides = overrides()
@@ -284,6 +301,12 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
                         (c["chords"], c["pad_still"], c["pad_steady"], sid))
         n += 1
 
+    if pads_only:
+        con.execute("UPDATE tracks SET pads_done=1 WHERE id=?", (row["id"],))
+        con.commit()
+        if verbose:
+            tqdm.write(f"  {row['artist']} - {row['title']}: {n} new pads ({time.time() - t0:.0f}s)")
+        return n
     vocal_frac = float(masks["vocals"].mean()) if "vocals" in masks else None
     con.execute(
         """UPDATE tracks SET status='done', error=NULL, bpm=?, bpm_conf=?, tempo_ok=?, key=?, scale=?, camelot=?,
@@ -420,3 +443,29 @@ def reclassify():
         moved += 1
     con.commit()
     print(f"reclassified {moved}, dropped {dropped}")
+
+
+def repads(limit=None):
+    """Look at every already-mined song again for pads only (pads.find): new pads are added, nothing is removed.
+    Songs mined with stems are separated again (their pads sit under drums); the rest use the mix. Resumable."""
+    con = connect()
+    if "pads_done" not in {r[1] for r in con.execute("PRAGMA table_info(tracks)")}:
+        con.execute("ALTER TABLE tracks ADD COLUMN pads_done INTEGER")
+        con.commit()
+    rows = con.execute("""SELECT * FROM tracks WHERE status='done' AND COALESCE(policy,'source')='source'
+                          AND pads_done IS NULL AND id IN (SELECT track_id FROM samples)
+                          ORDER BY separated, artist, album, path""").fetchall()
+    rows = rows[:limit] if limit else rows
+    print(f"TASK looking for pads in {len(rows)} mined songs", flush=True)
+    total = 0
+    for k, row in enumerate(rows, 1):
+        try:
+            total += process_track(con, row, "always" if row["separated"] else "never", verbose=False, pads_only=True)
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"    {row['artist']} - {row['title']}: {str(e)[:100]}", flush=True)
+            con.execute("UPDATE tracks SET pads_done=0 WHERE id=?", (row["id"],))
+            con.commit()
+        print(f"repads: {k}/{len(rows)} [{total} new pads]", flush=True)
+    print(f"TASK DONE {total} new pads from {len(rows)} songs", flush=True)

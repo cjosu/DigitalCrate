@@ -380,3 +380,15 @@ def test_moving_a_sample_keeps_every_reference(tmp_path):
     (tmp_path / "cfg.toml").write_text(f'library = "{tmp_path / "lib"}"\nmusic = "{tmp_path / "m"}"\n')
     r = subprocess.run([sys.executable, "-c", MOVE_SCRIPT], env=env, capture_output=True, text=True)
     assert "MOVED OK" in r.stdout, r.stderr[-2000:]
+
+
+def test_a_struck_key_is_not_a_pad():
+    pytest.importorskip("madmom")
+    from digitalcrate import pads
+    t = np.arange(int(2.5 * SR)) / SR
+    notes = (57, 60, 64)
+    key = sum(np.sin(2 * np.pi * 440 * 2 ** ((n - 69) / 12) * t) for n in notes) * np.exp(-t * 2.5) / 3  # struck, dies away
+    pad = sum(np.sin(2 * np.pi * 440 * 2 ** ((n - 69) / 12) * t) for n in notes) * np.minimum(1, t / 0.2) / 3  # held
+    a, b = pads.analyze(key.astype(np.float32)), pads.analyze(pad.astype(np.float32))
+    assert pads.where(dict(kind="oneshot", subtype="One-Shots", instrument="strings"), a) == ("Chords & Keys", "One-Shots")
+    assert pads.where(dict(kind="oneshot", subtype="One-Shots", instrument="pad"), b) == (pads.PADS, "One-Shots")

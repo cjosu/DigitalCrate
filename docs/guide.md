@@ -22,7 +22,8 @@ Everything the [README](../README.md) skips. The small **?** buttons in the app 
 - **∞ hold** on a pad, drone or held chord plays it and holds it on its seamless loop until you stop it.
 - **Pads** are sounds that hold one or two chords and keep still, so they loop and can be played. Sustained samples
   that move through more chords live in **Strings & Orchestral** (orchestral passages) or **Chords & Keys** (synth
-  progressions). The panel shows a sample's own chords (*Fm → D♭*).
+  progressions); one-shots that die away (a struck key, a pluck) are in Chords & Keys. The panel shows a sample's own
+  chords (*Fm → D♭*).
 - **🎹 playable** (pads, strings, chords) makes an instrument for Live in `Playable pads/`: a Simpler preset tuned to
   the sample's chord, so each key plays it from that note and holds it on its loop, plus its chords as a MIDI clip to
   start from. **♪ MIDI** transcribes its actual notes.
@@ -228,6 +229,7 @@ ytscout "query" [--mode voice|pads|guided]
 styles · lyrics · credits          whole-library passes
 loops [--redo]                     find sustain loops in pads, drones and held chords
 pads [--redo] [--no-move]          label chords of sustained samples; move non-pads to Strings & Orchestral
+pads --mine [--limit N]            look at mined songs again for pads only (adds, removes nothing)
 sections [--limit N]               song sections (needs All-In-One)
 reloop [--fix]                     re-cut older loops onto downbeats
 ```
