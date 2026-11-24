@@ -42,6 +42,8 @@ def _slot(cmd):
     f.write(f"{cmd} (pid {os.getpid()})")
     f.flush()
     _SLOT = f  # held until this process exits
+    from .memguard import wait
+    wait("loading models")
 
 
 def main():

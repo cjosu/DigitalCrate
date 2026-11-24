@@ -127,7 +127,8 @@ def site(tmp_path_factory):
         sf.write(d / f"01 {title}.wav", _song(chords, mel).T, SR)
     env = dict(os.environ, DIGITALCRATE_MUSIC=str(music), DIGITALCRATE_LIBRARY=str(lib),
                DIGITALCRATE_FOUND=str(root / "found"), DIGITALCRATE_ABLETON_SAMPLES=str(root / "ableton"),
-               DIGITALCRATE_CONFIG=str(root / "cfg.toml"), DIGITALCRATE_NO_SCOUT="1")
+               DIGITALCRATE_CONFIG=str(root / "cfg.toml"), DIGITALCRATE_NO_SCOUT="1",
+               DIGITALCRATE_NO_SLOT="1")  # the test library has its own jobs: no waiting on the real ones
     (root / "cfg.toml").write_text(f'music = "{music}"\nlibrary = "{lib}"\n')
     def run(*a):
         r = subprocess.run([sys.executable, *a], env=env, capture_output=True, text=True)

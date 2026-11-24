@@ -103,7 +103,12 @@ def run(limit=None, con=None):
                           WHERE s.track_id IS NULL AND t.status != 'duplicate'
                           ORDER BY (t.status='done') DESC, t.id""").fetchall()[:limit]
     names, t0, n = classes(), time.time(), 0
+    from .memguard import breathe
+    seen_ = 0
     for r in tqdm(rows, desc="styles", mininterval=5):
+        seen_ += 1
+        if seen_ % 25 == 1:  # every 25: wait while memory is low or a job you started runs
+            breathe()
         f = r["path"]
         try:
             res = analyse(f, r["duration"])

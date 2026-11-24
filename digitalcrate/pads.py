@@ -190,7 +190,10 @@ def run(redo=False, move=True):
     keep = overrides()
     print(f"TASK sorting real pads from {len(rows)} sustained samples", flush=True)
     moved = {PADS: 0, STRINGS: 0, "Chords & Keys": 0}
+    from .memguard import breathe
     for k, r in enumerate(rows, 1):
+        if k % 50 == 1:
+            breathe()
         f = C.LIB_ROOT / r["path"]
         try:
             a = analyze(decode(f)) if f.exists() else None

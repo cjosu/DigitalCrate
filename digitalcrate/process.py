@@ -458,7 +458,9 @@ def repads(limit=None):
     rows = rows[:limit] if limit else rows
     print(f"TASK looking for pads in {len(rows)} mined songs", flush=True)
     total = 0
+    from .memguard import breathe
     for k, row in enumerate(rows, 1):
+        breathe()
         try:
             total += process_track(con, row, "always" if row["separated"] else "never", verbose=False, pads_only=True)
         except KeyboardInterrupt:

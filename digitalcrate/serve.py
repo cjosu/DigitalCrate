@@ -41,6 +41,9 @@ _SLOW = {}
 
 def start_job(kind, args, target):
     import subprocess, sys, time
+    for jid, j in _saved_jobs().items():  # the same job already running (a double click): that one, not a second copy
+        if j["kind"] == kind and j.get("args") == list(args) and _alive(j["pid"]):
+            return jid
     jid = str(int(time.time() * 1000))
     C.DATA_DIR.mkdir(parents=True, exist_ok=True)
     logf = C.DATA_DIR / f"{kind}_{jid}.log"
@@ -59,7 +62,7 @@ def start_job(kind, args, target):
                             preexec_fn=(lambda: os.nice(nice)) if nice else None)
     JOBS[jid] = dict(kind=kind, target=target, proc=proc, log=logf)
     saved = _saved_jobs()
-    saved[jid] = dict(kind=kind, target=target, pid=proc.pid, log=str(logf), started=time.time())
+    saved[jid] = dict(kind=kind, target=target, pid=proc.pid, log=str(logf), started=time.time(), args=list(args))
     _jobs_file().write_text(json.dumps(dict(list(saved.items())[-40:])))
     return jid
 

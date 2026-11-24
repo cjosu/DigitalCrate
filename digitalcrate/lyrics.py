@@ -71,7 +71,12 @@ def run(limit=None, con=None, quiet=False):
               ORDER BY created_at DESC""", CATS) if r["id"] not in done]
     long_ = [r for r in rows if r["dur"] >= MIN_DUR][:limit]
     t0, n = time.time(), 0
+    from .memguard import breathe
+    seen_ = 0
     for r in tqdm(long_, desc="words", disable=quiet, mininterval=5):
+        seen_ += 1
+        if seen_ % 25 == 1:  # every 25: wait while memory is low or a job you started runs
+            breathe()
         f = C.LIB_ROOT / r["path"]
         if not f.exists():
             continue

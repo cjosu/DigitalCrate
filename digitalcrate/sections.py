@@ -116,7 +116,9 @@ def run(limit=None):
                           AND t.id IN (SELECT track_id FROM samples)""").fetchall()
     rows = rows[:limit] if limit else rows
     print(f"TASK finding song sections in {len(rows)} songs", flush=True)
+    from .memguard import breathe
     for k, r in enumerate(rows, 1):
+        breathe()
         try:
             secs = analyze(decode(r["path"]), name=f"t{r['id']}")
             save(con, r["id"], secs)
