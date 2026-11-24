@@ -27,7 +27,7 @@ SR = C.SR
 LAMBDA = 3.0       # cost of drifting from the original: cosine 0.9 costs 0.3 (in taste-score units)
 WINDOW = 8.0       # seconds rendered for scoring
 
-MATERIAL = {"Vocals": "vocal", "Vocal Atmospheres": "vocal", "Pads & Atmospheres": "sustained",
+MATERIAL = {"Vocals": "vocal", "Vocal Atmospheres": "vocal", "Pads & Atmospheres": "sustained", "Strings & Orchestral": "sustained",
             "Textures & Field": "sustained", "Chords & Keys": "melodic", "Melodies & Leads": "melodic",
             "Bass & Sub": "melodic", "Percussion": "perc"}
 

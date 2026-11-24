@@ -53,6 +53,9 @@ def main():
     sc.add_argument("--limit", type=int)
     lo = sub.add_parser("loops", help="find seamless sustain loops in pads, drones and held chords")
     lo.add_argument("--redo", action="store_true", help="look again at samples already done")
+    pd = sub.add_parser("pads", help="label the chords of sustained samples; move moving passages out of Pads")
+    pd.add_argument("--redo", action="store_true", help="look again at samples already done")
+    pd.add_argument("--no-move", action="store_true", help="label only, move nothing")
     sy = sub.add_parser("styles", help="tag every song with Discogs styles from its audio (genre gaps, related music)")
     sy.add_argument("--limit", type=int)
     bk = sub.add_parser("backup", help="back up your ratings, favourites, sketches, labels and edits (not regenerable)")
@@ -234,6 +237,9 @@ def main():
     elif a.cmd == "sections":
         from .sections import run as sections
         sections(a.limit)
+    elif a.cmd == "pads":
+        from .pads import run as pads
+        pads(a.redo, move=not a.no_move)
     elif a.cmd == "loops":
         from .loopfind import run as loops
         loops(a.redo)

@@ -35,7 +35,7 @@ def _saved_jobs():
         return {}
 
 
-BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections"}
+BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pads"}
 _SLOW = {}
 
 
@@ -124,10 +124,15 @@ def activity():
 TASKS = {  # library-wide analyses the Processing page can start: (label, SQL for done, SQL for total)
     "sections": ("Find song sections (intro, verse, chorus, break, outro)", "SELECT COUNT(*) FROM sections",
                  "SELECT COUNT(*) FROM tracks WHERE status='done' AND id IN (SELECT track_id FROM samples)"),
+    "pads": ("Sort real pads (1-2 chords, still) from strings & orchestral passages",
+             "SELECT COUNT(*) FROM samples WHERE chords IS NOT NULL AND kind != 'oneshot' "
+             "AND category IN ('Pads & Atmospheres','Strings & Orchestral','Chords & Keys')",
+             "SELECT COUNT(*) FROM samples WHERE kind != 'oneshot' AND (category IN ('Pads & Atmospheres',"
+             "'Strings & Orchestral') OR chords IS NOT NULL)"),
     "loops": ("Find sustain loops (pads, drones, held chords)", "SELECT COUNT(*) FROM samples WHERE loop_q IS NOT NULL "
-              "AND category IN ('Pads & Atmospheres','Textures & Field','Chords & Keys','Vocal Atmospheres') "
+              "AND category IN ('Pads & Atmospheres','Strings & Orchestral','Textures & Field','Chords & Keys','Vocal Atmospheres') "
               "AND kind != 'loop' AND dur >= 1.5",
-              "SELECT COUNT(*) FROM samples WHERE category IN ('Pads & Atmospheres','Textures & Field','Chords & Keys',"
+              "SELECT COUNT(*) FROM samples WHERE category IN ('Pads & Atmospheres','Strings & Orchestral','Textures & Field','Chords & Keys',"
               "'Vocal Atmospheres') AND kind != 'loop' AND dur >= 1.5"),
     "styles": ("Tag styles (Discogs, from the audio)", "SELECT COUNT(*) FROM styles",
                "SELECT COUNT(*) FROM tracks WHERE status != 'duplicate'"),
@@ -145,6 +150,9 @@ def analysis():
     con, out = connect(), []
     running = {j["kind"] for j in activity() if j["running"]}
     for k, (label, done_q, total_q) in TASKS.items():
+        if k == "pads":
+            from .pads import _db as _pads_db
+            _pads_db()  # its columns
         if k == "sections":
             from .sections import available
             if not available():  # optional: only offered once All-In-One is installed
@@ -511,6 +519,18 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path == "/api/favs":
             rows = _db().execute("SELECT path, sample_id, label, added_at FROM favorites ORDER BY added_at DESC")
             return self._json([dict(r) for r in rows])
+        rel = unquote(u.path.lstrip("/"))
+        if rel and not (C.LIB_ROOT / rel).exists():  # a sample that was moved (pads sorted out, recategorised)
+            try:
+                r = _db().execute("SELECT new FROM moved WHERE old=?", (rel,)).fetchone()
+            except Exception:
+                r = None
+            if r:
+                from urllib.parse import quote
+                self.send_response(301)
+                self.send_header("Location", "/" + quote(r["new"]))
+                self.end_headers()
+                return
         return super().do_GET()
 
     def do_POST(self):
@@ -560,6 +580,9 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json({"error": "not a library file"}, 400)
                 subprocess.Popen(["open", "-R", str(f)])
                 return self._json({"ok": True})
+            elif self.path == "/api/pad/playable":
+                from .pads import playable
+                return self._json(playable(path, reveal=req.get("reveal", True)))
             elif self.path == "/api/drums/export":
                 from .drumexport import drum_export
                 return self._json(drum_export(req.get("name") or "Drums", float(req.get("bpm") or 120), int(req.get("bars") or 1),

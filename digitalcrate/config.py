@@ -64,6 +64,7 @@ MAX_PER_TRACK = {
     "vocal_atmos": 4,
     "long": 8,      # pads / chords / melodies / textures loops+free
     "oneshot": 6,
+    "pad": 4,       # loops that hold 1-2 chords (pads.find)
 }
 MIN_QUALITY = 0.40
 LOOP_MAX_SECONDS = 32

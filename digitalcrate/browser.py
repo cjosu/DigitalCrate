@@ -3,7 +3,7 @@ import json
 from . import config as C
 
 ABBR = {"Vocals": "VOX", "Vocal Atmospheres": "VATM", "Pads & Atmospheres": "PAD", "Chords & Keys": "KEYS",
-        "Melodies & Leads": "MEL", "Textures & Field": "TEX", "Bass & Sub": "BASS", "Percussion": "PERC"}
+        "Melodies & Leads": "MEL", "Textures & Field": "TEX", "Bass & Sub": "BASS", "Percussion": "PERC", "Strings & Orchestral": "STR"}
 
 
 def _ops_label(ops):
@@ -87,6 +87,16 @@ def write_browser(d, tags, parts, kits):
                 loops[pos[r["id"]]] = [r["loop_start"], r["loop_end"], r["loop_xf"] or 0]
     except Exception:
         pass
+    chs = {}
+    try:  # a sample's own chords (pads, strings): index -> chord names in order, e.g. ["Fm", "D♭"]
+        for r in connect().execute("SELECT id, chords FROM samples WHERE chords IS NOT NULL"):
+            if r["id"] in pos:
+                names = [n for _, _, n in json.loads(r["chords"])]
+                names = [n for k, n in enumerate(names) if k == 0 or n != names[k - 1]]
+                if names:
+                    chs[pos[r["id"]]] = names[:8]
+    except Exception:
+        pass
     secs = {}
     try:  # song sections: index -> the section a sample mostly comes from (only once sections have been found)
         from .sections import by_track, of_sample
@@ -98,7 +108,7 @@ def write_browser(d, tags, parts, kits):
                     secs[i] = lab
     except Exception:
         pass
-    data = dict(tracks=tracks, samples=S, born=born, loops=loops, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+    data = dict(tracks=tracks, samples=S, born=born, loops=loops, chords=chs, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
     write_page(data)
 
@@ -133,7 +143,7 @@ TEMPLATE = r"""<!doctype html>
 <title>DigitalCrate</title><link rel="icon" href="studio/icon.svg">
 <style>
 :root{--bg:#0e1013;--panel:#15181d;--line:#242932;--ink:#d9dde3;--mute:#7d8592;--acc:#e0a458;--acc2:#7fb0c9;
---VOX:#e0a458;--VATM:#d1857a;--PAD:#7fb0c9;--KEYS:#9fc29a;--MEL:#c4a7e0;--TEX:#8f8f86;--BASS:#6c7fd1;--PERC:#d96c6c}
+--VOX:#e0a458;--VATM:#d1857a;--PAD:#7fb0c9;--KEYS:#9fc29a;--MEL:#c4a7e0;--TEX:#8f8f86;--BASS:#6c7fd1;--PERC:#d96c6c;--STR:#c9a27f}
 *{box-sizing:border-box}[hidden]{display:none!important}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
 font:13px/1.4 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
 button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:6px;padding:4px 9px;cursor:pointer}
@@ -665,7 +675,7 @@ const MOODS=[...new Set(S.flatMap(s=>s[F.tags]))].sort();
 function chips(el,items,set,label=x=>x){el.innerHTML=items.map(x=>`<button data-v="${esc(x)}">${esc(label(x))}</button>`).join('');
  el.onclick=e=>{const v=e.target.dataset.v;if(v==null)return;set.has(v)?set.delete(v):set.add(v);e.target.classList.toggle('on');st.shown=200;render()}}
 const CATORD=Object.keys(AB);CATS.sort((a,b)=>(CATORD.indexOf(a)+99*(CATORD.indexOf(a)<0))-(CATORD.indexOf(b)+99*(CATORD.indexOf(b)<0)));
-const SHORT={'Vocal Atmospheres':'Vocal Atmos','Pads & Atmospheres':'Pads','Chords & Keys':'Keys','Melodies & Leads':'Leads','Textures & Field':'Textures','Bass & Sub':'Bass','Percussion':'Drums'};
+const SHORT={'Vocal Atmospheres':'Vocal Atmos','Pads & Atmospheres':'Pads','Chords & Keys':'Keys','Melodies & Leads':'Leads','Textures & Field':'Textures','Bass & Sub':'Bass','Percussion':'Drums','Strings & Orchestral':'Strings'};
 function drawCats(){const el=$('cats');const show=st.tab==='S'||st.tab==='G';el.hidden=!show;$('subsBox').hidden=!show||!st.cats.size;if(!show)return;
  // counts follow every other filter, so each tab says how many you'd get by switching to it
  const sc=st.cats,ss=st.subs;st.cats=new Set();st.subs=new Set();let base;try{base=filtered()}finally{st.cats=sc;st.subs=ss}
@@ -813,7 +823,7 @@ const kitMembers=k=>k.m.filter(i=>!st.excl.has(S[i][F.genre])&&!GONE.has(i)&&!TA
 // Kits for you (served): each starts from a vocal the taste model rates highly, chosen with some chance so ↻ deals new
 // ones, then adds a pad, chords or melody, a texture, a vocal chop and a bass from that sample's goes-with picks, each
 // from a different song, ranked by fit and your taste. They're re-dealt when your ratings change (★ ✕ and listening).
-const KIT_ROLES=[['Pads & Atmospheres'],['Chords & Keys','Melodies & Leads'],['Textures & Field'],['Vocals'],['Pads & Atmospheres','Melodies & Leads','Bass & Sub']];
+const KIT_ROLES=[['Pads & Atmospheres'],['Chords & Keys','Melodies & Leads'],['Textures & Field'],['Vocals'],['Pads & Atmospheres','Melodies & Leads','Bass & Sub','Strings & Orchestral']];
 let KITS_FOR=null;
 function dealKits(n=24){const sc=TASTE.score,ok=i=>!GONE.has(i)&&!TASTE.disliked.has(S[i][F.path])&&!st.excl.has(S[i][F.genre]);
  const ranked=S.map((_,i)=>i).filter(i=>sc[S[i][F.path]]!=null&&ok(i)).sort((a,b)=>sc[S[b][F.path]]-sc[S[a][F.path]]);

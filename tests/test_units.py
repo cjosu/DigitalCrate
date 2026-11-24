@@ -307,3 +307,76 @@ def test_song_sections_label_samples_and_steer_mining():
                 dict(start=52.0, end=60.0, quality=0.5, kind="loop")], secs)
     assert c[0]["quality"] > 0.5 and c[1]["quality"] == 0.5 and c[2]["quality"] < 0.5 and c[3]["quality"] == 0.5
     assert [x["section"] for x in c] == ["intro", "verse", "verse", "chorus"]
+
+
+def _chords(seq, secs_each, sr=SR):
+    """Held triads with a little air, one after another: seq like [(57, 'm'), (53, '')] (root MIDI note, quality)."""
+    out = []
+    rng = np.random.default_rng(3)
+    for root, q in seq:
+        t = np.arange(int(secs_each * sr)) / sr
+        notes = [root, root + (3 if q == "m" else 4), root + 7, root + 12]
+        y = sum(np.sin(2 * np.pi * 440 * 2 ** ((n - 69) / 12) * t) for n in notes) / len(notes)
+        out.append(y + 0.01 * rng.standard_normal(len(t)))
+    y = np.concatenate(out)
+    return (0.4 * y).astype(np.float32)
+
+
+def test_pads_hold_their_chords_and_moving_passages_dont(tmp_path):
+    pytest.importorskip("madmom")
+    import pretty_midi
+    from digitalcrate import pads
+    a = pads.analyze(_chords([(57, "m")], 10.0))  # A minor, held
+    assert a["names"] == ["Am"] and pads.is_pad(a)
+    b = pads.analyze(_chords([(57, "m"), (53, ""), (48, ""), (55, "")], 3.0))  # Am F C G: a progression
+    assert b["n"] >= 3 and not pads.is_pad(b)
+    assert pads.where(dict(subtype="Free", instrument="strings"), b) == (pads.STRINGS, "Free")
+    assert pads.where(dict(subtype="Free", instrument="pad"), a) == (pads.PADS, "Free")
+    # two chords rocking back and forth is still a pad
+    c = pads.analyze(_chords([(57, "m"), (53, ""), (57, "m"), (53, "")], 3.0))
+    assert set(c["names"]) == {"Am", "F"} and c["n"] == 2
+    # mining: a held stretch then a moving one; with bar lines the cut is whole bars from the chord change
+    y = np.concatenate([_chords([(57, "m")], 8.0), _chords([(48, ""), (55, ""), (50, "m"), (52, "")], 1.0)])
+    found = pads.find(y, SR, bar_times=np.arange(0, 12.1, 2.0))
+    assert found and found[0][0] == 0.0 and found[0][2] in (2, 4) and found[0][1] <= 8.2
+    assert pads.find(y, SR)[0][2] is None  # no tempo: a free cut along the hold
+    # the chords as MIDI, and the note that plays the pad as recorded
+    mid = pads.chord_midi([(0, 4, "Am"), (4, 8, "F")], tmp_path / "c.mid", bpm=90)
+    pm = pretty_midi.PrettyMIDI(str(mid))
+    first = sorted(n.pitch % 12 for n in pm.instruments[0].notes if n.start == 0)
+    assert first == [0, 4, 9] and len(pm.instruments[0].notes) == 6
+    assert pads.root_note([(0, 6, "Am"), (6, 8, "F")]) == 57 and pads.root_note([(0, 6, "D")]) == 62
+
+
+MOVE_SCRIPT = r'''
+import json, soundfile as sf, numpy as np
+from digitalcrate import config as C
+from digitalcrate.db import connect
+from digitalcrate.recat import move_sample
+con = connect()
+old = "Pads & Atmospheres/Free/Pad_08A-Am_free_X-Y_0m10s_abc123.wav"
+(C.LIB_ROOT / old).parent.mkdir(parents=True, exist_ok=True)
+sf.write(str(C.LIB_ROOT / old), np.zeros((4410, 2), np.float32), 44100)
+con.execute("INSERT INTO tracks (id, path, status) VALUES (1, 'x.wav', 'done')")
+con.execute("INSERT INTO samples (id, track_id, category, subtype, kind, path) VALUES ('abc123', 1, 'Pads & Atmospheres', 'Free', 'free', ?)", (old,))
+con.execute("CREATE TABLE IF NOT EXISTS sketches (name TEXT, state TEXT)")
+con.execute("INSERT INTO sketches (name, state) VALUES ('s', ?)", (json.dumps({"lanes": [{"path": old}]}),))
+con.execute("INSERT INTO events (ts, path, sample_id, type) VALUES (0, ?, 'abc123', 'play')", (old,))
+new = move_sample(con, con.execute("SELECT * FROM samples WHERE id='abc123'").fetchone(), "Strings & Orchestral", "Free")
+con.commit()
+assert new.startswith("Strings & Orchestral/Free/Strings_"), new
+assert (C.LIB_ROOT / new).exists() and not (C.LIB_ROOT / old).exists()
+assert json.loads(con.execute("SELECT state FROM sketches").fetchone()[0])["lanes"][0]["path"] == new
+assert con.execute("SELECT path FROM events").fetchone()[0] == new
+assert con.execute("SELECT new FROM moved WHERE old=?", (old,)).fetchone()[0] == new
+print("MOVED OK")
+'''
+
+
+def test_moving_a_sample_keeps_every_reference(tmp_path):
+    import os, subprocess, sys
+    env = dict(os.environ, DIGITALCRATE_LIBRARY=str(tmp_path / "lib"), DIGITALCRATE_MUSIC=str(tmp_path / "m"),
+               DIGITALCRATE_CONFIG=str(tmp_path / "cfg.toml"))
+    (tmp_path / "cfg.toml").write_text(f'library = "{tmp_path / "lib"}"\nmusic = "{tmp_path / "m"}"\n')
+    r = subprocess.run([sys.executable, "-c", MOVE_SCRIPT], env=env, capture_output=True, text=True)
+    assert "MOVED OK" in r.stdout, r.stderr[-2000:]

@@ -69,7 +69,7 @@ MOOD_PROMPTS = {
 SUBTYPE_PREFIX = {
     ("Vocals", "Phrases"): "VoxPhrase", ("Vocals", "Chops"): "VoxChop",
     ("Vocals", "Spoken"): "VoxSpoken", ("Vocals", "Choir & Group"): "VoxChoir",
-    "Vocal Atmospheres": "VoxAtmos", "Pads & Atmospheres": "Pad", "Chords & Keys": "Keys",
+    "Vocal Atmospheres": "VoxAtmos", "Pads & Atmospheres": "Pad", "Strings & Orchestral": "Strings", "Chords & Keys": "Keys",
     "Melodies & Leads": "Melody", "Textures & Field": "Texture", "Bass & Sub": "Bass",
 }
 KIND_SUBTYPE = {"loop": "Loops", "free": "Free", "oneshot": "One-Shots", "phrase": "Free"}
@@ -148,9 +148,20 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
     t_sep = time.time()
 
     cands, masks = find_candidates(tk, mix, feats, bar_times)
+    try:  # real pads: stretches holding 1-2 chords for 2+ bars, cut on the chord change so they loop
+        from . import pads as PADS
+        src = "other" if stems is not None else "mix"
+        timed = tk["tempo_ok"] and len(bar_times) > 4
+        for a, b, L in PADS.find(stems["other"] if stems is not None else y, C.SR, bar_times if timed else None):
+            cands.append(dict(source=src, group="pad", kind="loop" if L else "free", start=a, end=b, bars=L))
+    except Exception as e:
+        print("    pad finder failed:", str(e)[:100])
     if policy == "vocals_only":  # the beat is someone else's sample: keep the original vocal only
         cands = [c for c in cands if c["group"] in ("vocal_phrase", "vocal_chop")]
     cands = [measure(c, mix, feats, masks) for c in cands]
+    for c in cands:
+        if c["group"] == "pad":
+            c["quality"] += 0.05  # asked for: a loop that holds its chords
     if stems is not None:  # song sections (optional: All-In-One), from the stems mining already has: ~5 s
         try:
             from . import sections as SEC
@@ -209,6 +220,15 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
             if c["quality"] >= C.MIN_QUALITY:
                 kept.append(c)
         cands = _cap(_dedupe(kept))
+        for c in cands:  # pads hold 1-2 chords and keep still; moving passages are strings & orchestral or chords
+            if c["kind"] != "oneshot" and c["category"] in ("Pads & Atmospheres", "Strings & Orchestral"):
+                try:
+                    from . import pads as PADS
+                    a = PADS.analyze(audio_of(c))
+                    c["chords"], c["pad_still"], c["pad_steady"] = json.dumps(a["chords"]), a["still"], a["steady"]
+                    c["category"], c["subtype"] = PADS.where(dict(subtype=c["subtype"], instrument=c.get("instrument")), a)
+                except Exception as e:
+                    print("    pad check failed:", str(e)[:100])
 
     # render + store
     con.execute("DELETE FROM samples WHERE track_id=? AND parent_id IS NULL AND category != 'Percussion'", (row["id"],))
@@ -257,6 +277,11 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
              json.dumps(dict(zip(TYPE_KEYS, np.round(c["probs"], 3).tolist()))),
              json.dumps(dict(zip(MOOD_PROMPTS, np.round(c["moods"], 4).tolist()))),
              c.get("instrument"), str(path.relative_to(C.LIB_ROOT)), json.dumps(env)))
+        if c.get("chords"):
+            from .pads import _db as _pdb
+            _pdb()
+            con.execute("UPDATE samples SET chords=?, pad_still=?, pad_steady=? WHERE id=?",
+                        (c["chords"], c["pad_still"], c["pad_steady"], sid))
         n += 1
 
     vocal_frac = float(masks["vocals"].mean()) if "vocals" in masks else None

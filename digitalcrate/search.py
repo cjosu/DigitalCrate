@@ -53,6 +53,7 @@ CAT_HINTS = [
     (re.compile(r"\b(organ|piano|keys|rhodes|chords?|wurlitzer|harpsichord)\b", re.I), ["Chords & Keys"]),
     (re.compile(r"\b(drums?|kick|snare|hats?|hi-hat|percussion|breaks?|cymbal|clap|shaker|toms?)\b", re.I), ["Percussion"]),
     (re.compile(r"\b(pad|drone|atmosphere|ambien\w*)\b", re.I), ["Pads & Atmospheres", "Vocal Atmospheres"]),
+    (re.compile(r"\b(strings?|orchestra\w*|violins?|cellos?|violas?|symphon\w*|classical)\b", re.I), ["Strings & Orchestral"]),
     (re.compile(r"\b(melody|lead|riff|line)\b", re.I), ["Melodies & Leads"]),
     (re.compile(r"\b(field recording|texture|noise|crackle|rain|birds?|room tone)\b", re.I), ["Textures & Field"]),
     (re.compile(r"\b(bass|sub)\b", re.I), ["Bass & Sub"]),

@@ -15,7 +15,7 @@ import numpy as np
 from . import config as C
 from .db import connect
 
-KEEP = ("Pads & Atmospheres", "Textures & Field", "Chords & Keys", "Vocal Atmospheres")
+KEEP = ("Pads & Atmospheres", "Strings & Orchestral", "Textures & Field", "Chords & Keys", "Vocal Atmospheres")
 MIN_Q = 0.55  # below this the seam is audible even with a crossfade: no loop
 
 
@@ -159,7 +159,7 @@ def write_smpl(path, start, end, unity=60):
         f.truncate()
 
 
-def export_loop(out, r, src_frames):
+def export_loop(out, r, src_frames, root=None):
     """An exported sustained sample (conformed or not) with its loop baked in, a smpl chunk, and a Simpler preset
     next to it. r: the sample's row (loop_start / loop_end / loop_xf, in seconds of the original)."""
     import soundfile as sf
@@ -174,7 +174,7 @@ def export_loop(out, r, src_frames):
     a, b = int(lp["start"] * sr), int(lp["end"] * sr) - 1
     write_smpl(out, a, b)
     try:
-        return simpler(out, out.stem[:60], out.with_suffix(".adv"), loop=(a, b))
+        return simpler(out, out.stem[:60], out.with_suffix(".adv"), loop=(a, b), root=root)
     except FileNotFoundError:  # no Live installed: the WAV still carries its loop
         return None
 

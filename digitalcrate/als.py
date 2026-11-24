@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-COLORS = {"Vocals": 26, "Vocal Atmospheres": 25, "Pads & Atmospheres": 16, "Chords & Keys": 13, "Bass & Sub": 2,
+COLORS = {"Vocals": 26, "Vocal Atmospheres": 25, "Pads & Atmospheres": 16, "Strings & Orchestral": 14, "Chords & Keys": 13, "Bass & Sub": 2,
           "Percussion": 4, "Leads & Melodic": 9, "FX & Textures": 21}
 WARP = {"beats": 0, "complex": 4}
 

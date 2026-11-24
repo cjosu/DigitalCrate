@@ -213,6 +213,9 @@ const _selectC=select;select=function(i,from){_selectC(i,from);
   xb.insertAdjacentHTML('afterend',`<button id="whybtn" title="why the taste model ranks this where it does">💡 why this?</button>`);if(WHY_OPEN)whyShow(i)}}
  const SC=D.sections||{};if(SC[i]){const m=document.querySelector('#detail .meta');if(m&&!m.querySelector('.secb'))m.insertAdjacentHTML('afterbegin',`<span class="badge secb" title="where in the song it comes from (All-In-One)">from the ${esc({inst:'instrumental break'}[SC[i]]||SC[i])}</span> `)}
  if(LOOPS[i]&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]'),lp=LOOPS[i];if(xb&&!$('holdit'))xb.insertAdjacentHTML('afterend',`<button id="holdit" data-i="${i}" title="play it and hold it on its seamless loop (${lp[0].toFixed(1)}–${lp[1].toFixed(1)} s) until you stop it: how it sustains in a sampler">∞ hold</button>`)}
+ const CH=D.chords||{};if(CH[i]){const m=document.querySelector('#detail .meta');if(m&&!m.querySelector('.chb'))m.insertAdjacentHTML('afterbegin',`<span class="badge chb" title="its own chords (madmom's chord recognizer)">${CH[i].map(esc).join(' → ')}</span> `)}
+ if(SERVED&&['Pads & Atmospheres','Strings & Orchestral','Chords & Keys','Vocal Atmospheres'].includes(S[i][F.cat])&&S[i][F.kind]!=='oneshot'){const xb=document.querySelector('#detail [data-xp]');
+  if(xb&&!$('playit'))xb.insertAdjacentHTML('afterend',`<button id="playit" data-i="${i}" title="for Live: a Simpler instrument tuned to its chord (each key plays it from that note, holding on its loop), and its chords as a MIDI clip to start from">🎹 playable</button>`)}
  if(SERVED){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('reveal'))xb.insertAdjacentHTML('afterend',`<button id="reveal" title="show the file in Finder, selected: drag it from there into Live (or anywhere)">↗ Finder</button>`)}
  if(SERVED&&S[i][F.cat]==='Percussion'&&S[i][F.kind]!=='loop'){const xb=document.querySelector('#detail [data-xp]');if(xb&&!$('kitaround'))xb.insertAdjacentHTML('afterend',`<button id="kitaround" title="start (or add to) the sketchpad's drum lane with this hit, then find the rest of a kit that sounds like it">🥁 build a kit around this</button>`)}const xb=document.querySelector('#detail [data-xp]');if(xb&&SERVED&&!$('detail').querySelector('[data-col]'))xb.insertAdjacentHTML('afterend',colBtn(i,true))};
 // the Favorites tab's 📁 view
@@ -698,6 +701,9 @@ $('sk').addEventListener('click',e=>{const b=e.target.closest('[data-sksec]');if
 $('sk').addEventListener('wheel',e=>{const t=e.target.closest&&e.target.closest('[data-dstep]');if(!t)return;e.preventDefault();
  const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r];let v=p.steps[j]||0;v=Math.round(Math.max(0,Math.min(1,v+(e.deltaY<0?0.1:-0.1)))*10)/10;
  p.steps[j]=v;t.classList.toggle('on',!!v);t.style.setProperty('--v',Math.round(v*100)+'%');t.title=v?`velocity ${Math.round(v*100)}%`:'off'},{passive:false});
+document.addEventListener('click',async e=>{const b=e.target.closest('#playit');if(!b)return;const i=+b.dataset.i;b.disabled=true;b.textContent='🎹 making it…';
+ try{const r=await api('api/pad/playable',{path:S[i][F.path]});toast(`Playable pads/${r.adv||r.wav} · drop the .adv on a MIDI track: ${r.chords.join(' → ')||'its note'} plays on ${['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B'][r.root%12]}; the chords clip is next to it`)}
+ catch(err){toast('failed: '+err.message)}b.disabled=false;b.textContent='🎹 playable'});
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-dtakes]');if(!b)return;e.stopPropagation();const [k,r]=b.dataset.dtakes.split(':').map(Number),p=SK.lanes[k]&&SK.lanes[k].pads[r];if(!p)return;
  if((p.takes||[]).length){p.tkopen=p.tkopen===false;drawSK();return}
  b.disabled=true;let T=[];try{T=(await api('api/drums/takes?path='+encodeURIComponent(p.path))).takes.map(t=>t.path).filter(x=>byPath.has(x)&&!GONE.has(byPath.get(x)))}catch(err){}

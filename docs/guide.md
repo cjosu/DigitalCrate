@@ -20,6 +20,12 @@ Everything the [README](../README.md) skips. The small **?** buttons in the app 
 - **🕘 Recent actions** lists every ★, ✕, category move, collection change and delete, each with undo.
 - **Added recently** narrows any sort to the latest run, day or week.
 - **∞ hold** on a pad, drone or held chord plays it and holds it on its seamless loop until you stop it.
+- **Pads** are sounds that hold one or two chords and keep still, so they loop and can be played. Sustained samples
+  that move through more chords live in **Strings & Orchestral** (orchestral passages) or **Chords & Keys** (synth
+  progressions). The panel shows a sample's own chords (*Fm → D♭*).
+- **🎹 playable** (pads, strings, chords) makes an instrument for Live in `Playable pads/`: a Simpler preset tuned to
+  the sample's chord, so each key plays it from that note and holds it on its loop, plus its chords as a MIDI clip to
+  start from. **♪ MIDI** transcribes its actual notes.
 - **Sections:** with song sections found, a filter picks samples from the intro, verse, chorus, a break or the
   outro (*intro · break · outro* are where songs are most exposed), and the panel says where a sample comes from.
 - **Drag** any row into Live or Finder; **↗ Finder** shows the file.
@@ -195,6 +201,10 @@ flowchart LR
 - **Sustain loops:** inside the steady part of a sound, the loop end's waveform is matched against every earlier
   position (normalized cross-correlation), checked for level and timbre, and the seam's spectral jump is measured;
   a short crossfade is baked in when needed. About 55% of sustained samples loop cleanly.
+- **Pads:** chords from [madmom](https://github.com/CPJKU/madmom)'s deep-chroma chord recognizer. A pad holds at
+  most 2 distinct chords, with its chroma close to its average throughout and a steady level. Mining also looks for
+  pads on purpose: stretches of the instrument stem that hold 1–2 chords, cut into 2, 4 or 8 bars starting on the
+  chord change (or 6–12 s without a steady tempo).
 - **Song sections:** [All-In-One](https://github.com/mir-aidj/all-in-one) (optional), with its neighborhood
   attention reimplemented in plain PyTorch so it needs no compiled NATTEN. Mining reuses its stems (about 5 s a song);
   exposed sections get a small bonus and loops avoid crossing a section change.
@@ -217,6 +227,7 @@ backup [--install] [--restore ZIP]
 ytscout "query" [--mode voice|pads|guided]
 styles · lyrics · credits          whole-library passes
 loops [--redo]                     find sustain loops in pads, drones and held chords
+pads [--redo] [--no-move]          label chords of sustained samples; move non-pads to Strings & Orchestral
 sections [--limit N]               song sections (needs All-In-One)
 reloop [--fix]                     re-cut older loops onto downbeats
 ```
@@ -225,8 +236,8 @@ reloop [--fix]                     re-cut older loops onto downbeats
 
 ```
 SampleLibrary/
-  Vocals/ · Vocal Atmospheres/ · Pads & Atmospheres/ · Chords & Keys/ · Melodies & Leads/
-  Textures & Field/ · Bass & Sub/ · Percussion/      split by subtype
+  Vocals/ · Vocal Atmospheres/ · Pads & Atmospheres/ · Strings & Orchestral/ · Chords & Keys/
+  Melodies & Leads/ · Textures & Field/ · Bass & Sub/ · Percussion/      split by subtype
   Edits/ · Favorites/ · Collections/ · Kits/ · _By Key/ · _By Tempo/
   _Reference/ (never exported) · _data/ (database, trash)
 ```

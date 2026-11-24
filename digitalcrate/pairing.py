@@ -14,7 +14,7 @@ from . import config as C
 
 WEIGHTS = C.DATA_DIR / "pairing.pt"
 CATS = ["Vocals", "Vocal Atmospheres", "Pads & Atmospheres", "Chords & Keys", "Melodies & Leads",
-        "Textures & Field", "Bass & Sub", "Percussion"]
+        "Textures & Field", "Bass & Sub", "Percussion", "Strings & Orchestral"]
 
 
 def _inputs(emb, cat_idx, mu=None):
@@ -85,6 +85,8 @@ def vectors(emb, cat_idx, state=None):
         if not WEIGHTS.exists():
             return None
         state = torch.load(WEIGHTS, weights_only=False)
+    if len(state["mu"]) != len(CATS):  # trained before a category was added: retrained at the next build
+        return None
     X, _ = _inputs(emb, cat_idx, state["mu"])
     f, g = _towers(state["d_in"])
     f.load_state_dict(state["f"]); g.load_state_dict(state["g"]); f.eval(); g.eval()

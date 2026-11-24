@@ -736,3 +736,24 @@ def test_pad_solo_hears_only_that_pad(page):
     assert page.locator("[data-dsolo]").first.get_attribute("class").split().count("on") == 1
     page.locator("[data-dsolo]").first.click()
     assert page.evaluate("CRATE.laneSolo(SK.lanes.find(l=>l.type==='drums'))") is False
+
+
+def test_playable_pad_for_live(site, page):
+    """🎹 playable: a Simpler preset tuned to the sample's chord, its loop in the WAV, and its chords as MIDI."""
+    import gzip, re
+    i = page.evaluate("S.findIndex(s=>['Pads & Atmospheres','Strings & Orchestral','Chords & Keys'].includes(s[F.cat])&&s[F.kind]!=='oneshot')")
+    assert i >= 0
+    page.evaluate(f"select({i},'list')")
+    page.wait_for_selector("#playit")
+    page.evaluate("window._t=[];const o=toast;toast=(m,...a)=>{_t.push(String(m));return o(m,...a)}")
+    page.route("**/api/pad/playable", lambda route: route.continue_(post_data=json.dumps({**json.loads(route.request.post_data), "reveal": False})))
+    page.click("#playit")
+    page.wait_for_function("_t.some(m=>m.includes('Playable pads')||m.includes('failed'))", timeout=60000)
+    msg = page.evaluate("_t.find(m=>m.includes('Playable pads')||m.includes('failed'))")
+    assert "Playable pads" in msg, msg
+    d = site["root"] / "ableton" / "Playable pads"
+    mids, advs = list(d.glob("*chords.mid")), list(d.glob("*.adv"))
+    assert mids and list(d.glob("*.wav"))
+    if advs:  # Live installed: the preset's root key is the chord's root
+        x = gzip.open(advs[0]).read().decode()
+        assert re.search(r'<RootKey Value="(\d+)"', x)

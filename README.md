@@ -52,8 +52,10 @@ models.
 
 ### Browse
 
-- Tabs for vocals, pads, chords, melodies, textures, bass and drums, plus an **Artists** view (artist → album → song).
+- Tabs for vocals, pads, strings & orchestral, chords, melodies, textures, bass and drums, plus an **Artists** view (artist → album → song).
 - **★** keeps a sample, **✕** hides it; both teach the taste model, which ranks everything you haven't heard yet.
+- **Pads** hold one or two chords and loop seamlessly; **🎹 playable** turns one into a Simpler instrument tuned to
+  its chord, with its chords as MIDI.
 - **Goes well with** lists samples that fit by key, tempo and sound; **⧉** plays a pair together.
 - **💡 why this?** explains any recommendation; **🕘 recent actions** undoes anything.
 - Arrow keys preview as you move; drag any row straight into Live.

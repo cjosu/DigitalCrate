@@ -1,6 +1,7 @@
 """Manual recategorisation: move/rename the file, update DB + favourites, and remember the override
 so reprocessing / reclassify never undo it. Overrides are keyed by sample id, which is a stable hash of
 (track, source, start, kind)."""
+import json
 import os
 import shutil
 from pathlib import Path
@@ -12,6 +13,7 @@ SUBTYPES = {
     "Vocals": ["Phrases", "Chops", "Choir & Group", "Spoken"],
     "Vocal Atmospheres": ["Loops", "Free", "One-Shots"],
     "Pads & Atmospheres": ["Loops", "Free", "One-Shots"],
+    "Strings & Orchestral": ["Loops", "Free", "One-Shots"],
     "Chords & Keys": ["Loops", "Free", "One-Shots"],
     "Melodies & Leads": ["Loops", "Free", "One-Shots"],
     "Textures & Field": ["Loops", "Free", "One-Shots"],
@@ -74,8 +76,17 @@ def move_sample(con, row, cat, sub):
                     except OSError:
                         shutil.copy2(dst, link)
                 con.execute("UPDATE favorites SET path=? WHERE path=?", (new_rel, old_rel))
-        if has("events"):
-            con.execute("UPDATE events SET path=? WHERE path=?", (new_rel, old_rel))
+        for t in ("events", "edit_ratings", "embeddings", "collection_items", "trash"):
+            if has(t):
+                con.execute(f"UPDATE {t} SET path=? WHERE path=?", (new_rel, old_rel))
+        if has("sketches"):  # saved sketches keep paths inside their JSON
+            old_j, new_j = json.dumps(old_rel)[1:-1], json.dumps(new_rel)[1:-1]
+            for r in con.execute("SELECT rowid, state FROM sketches WHERE instr(state, ?) > 0", (old_j,)).fetchall():
+                con.execute("UPDATE sketches SET state=? WHERE rowid=?", (r["state"].replace(old_j, new_j), r["rowid"]))
+        # anything else that remembered the old path (a sketch draft in the browser, a cached page) still finds it
+        con.execute("CREATE TABLE IF NOT EXISTS moved (old TEXT PRIMARY KEY, new TEXT)")
+        con.execute("UPDATE moved SET new=? WHERE new=?", (new_rel, old_rel))
+        con.execute("INSERT OR REPLACE INTO moved VALUES (?,?)", (old_rel, new_rel))
     con.execute("UPDATE samples SET category=?, subtype=?, path=? WHERE id=?", (cat, sub, new_rel, row["id"]))
     return new_rel
 

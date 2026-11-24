@@ -135,7 +135,7 @@ def library_artist(title, channel, con):
 def _taste_vec(con, mode="voice"):
     cats = ("'Vocals','Vocal Atmospheres'" if mode == "voice"
             else "'Pads & Atmospheres','Textures & Field','Chords & Keys','Vocal Atmospheres'" if mode == "pads"
-            else "'Vocals','Vocal Atmospheres','Pads & Atmospheres','Textures & Field','Chords & Keys','Melodies & Leads'")
+            else "'Vocals','Vocal Atmospheres','Pads & Atmospheres','Strings & Orchestral','Textures & Field','Chords & Keys','Melodies & Leads'")
     rows = con.execute(f"""SELECT s.clap FROM favorites f JOIN samples s ON s.path=f.path
                           WHERE s.category IN ({cats}) AND s.clap IS NOT NULL""").fetchall()
     if not rows:

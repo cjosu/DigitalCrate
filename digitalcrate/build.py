@@ -11,7 +11,7 @@ from .db import connect
 from .process import MOOD_PROMPTS
 
 CATS = ["Vocals", "Vocal Atmospheres", "Pads & Atmospheres", "Chords & Keys",
-        "Melodies & Leads", "Textures & Field", "Bass & Sub", "Percussion"]
+        "Melodies & Leads", "Textures & Field", "Bass & Sub", "Percussion", "Strings & Orchestral"]
 _R = {  # how well two roles sit together in an arrangement (symmetric)
     ("Vocals", "Vocals"): .45, ("Vocals", "Vocal Atmospheres"): .5, ("Vocals", "Pads & Atmospheres"): 1.,
     ("Vocals", "Chords & Keys"): .9, ("Vocals", "Melodies & Leads"): .65, ("Vocals", "Textures & Field"): .95,
@@ -30,6 +30,13 @@ _R = {  # how well two roles sit together in an arrangement (symmetric)
 for c, v in {"Vocals": .9, "Vocal Atmospheres": .85, "Pads & Atmospheres": .9, "Chords & Keys": .85,
              "Melodies & Leads": .8, "Textures & Field": .85, "Bass & Sub": .9, "Percussion": .6}.items():
     _R[(c, "Percussion")] = v
+for (a, b), v in list(_R.items()):  # strings & orchestral passages sit in an arrangement like pads used to
+    if "Pads & Atmospheres" in (a, b) and "Percussion" not in (a, b) and a != b:
+        o = b if a == "Pads & Atmospheres" else a
+        _R[(o, "Strings & Orchestral")] = v
+_R[("Strings & Orchestral", "Strings & Orchestral")] = .5
+_R[("Pads & Atmospheres", "Strings & Orchestral")] = .7
+_R[("Strings & Orchestral", "Percussion")] = .8
 ROLE = np.ones((len(CATS), len(CATS)))
 for (a, b), v in _R.items():
     ROLE[CATS.index(a), CATS.index(b)] = ROLE[CATS.index(b), CATS.index(a)] = v
@@ -221,7 +228,7 @@ def partners_for(sample_id):
 
 
 KIT_ROLES = [("Pads & Atmospheres",), ("Chords & Keys", "Melodies & Leads"), ("Textures & Field",),
-             ("Vocals",), ("Pads & Atmospheres", "Melodies & Leads", "Bass & Sub")]
+             ("Vocals",), ("Pads & Atmospheres", "Melodies & Leads", "Bass & Sub", "Strings & Orchestral")]
 
 
 def make_kits(d, tags, n_kits):

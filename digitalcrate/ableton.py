@@ -105,9 +105,10 @@ def _simpler_templates():
     raise FileNotFoundError("no Ableton Live Simpler preset found to use as a template")
 
 
-def simpler(path, name, out, loop=None):
+def simpler(path, name, out, loop=None, root=None):
     """A Simpler preset (.adv) playing path, with a forward sustain loop (start, end in frames) if given: the
-    sound plays from its start and holds on the loop while a key is down."""
+    sound plays from its start and holds on the loop while a key is down. root: the MIDI note that plays it as
+    recorded (a pad in F: F plays it as is, G plays it a tone up)."""
     path = Path(path)
     info = sf.info(str(path))
     x, part = _simpler_templates()
@@ -127,6 +128,8 @@ def simpler(path, name, out, loop=None):
            f'<Crossfade Value="0" />\n<Detune Value="0" />\n</SustainLoop>')
     part = re.sub(r"<SustainLoop>.*?</SustainLoop>", lambda m: sus, part, count=1, flags=re.S)
     part = re.sub(r"(<ReleaseLoop>.*?<End Value=\")\d+", lambda m: m.group(1) + str(n - 1), part, count=1, flags=re.S)
+    if root is not None:
+        part = re.sub(r'(<RootKey Value=")\d+', lambda m: m.group(1) + str(int(root)), part, count=1)
     x = x.replace("<SampleParts />", "<SampleParts>\n" + part + "\n</SampleParts>", 1)
     if loop:  # Simpler's own loop controls: the region ends at the loop end; the loop is its last stretch
         x = _set(x, "SampleLength", round((b + 1) / n, 6))
