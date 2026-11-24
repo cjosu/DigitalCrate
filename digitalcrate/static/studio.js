@@ -702,7 +702,7 @@ $('sk').addEventListener('wheel',e=>{const t=e.target.closest&&e.target.closest(
  const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r];let v=p.steps[j]||0;v=Math.round(Math.max(0,Math.min(1,v+(e.deltaY<0?0.1:-0.1)))*10)/10;
  p.steps[j]=v;t.classList.toggle('on',!!v);t.style.setProperty('--v',Math.round(v*100)+'%');t.title=v?`velocity ${Math.round(v*100)}%`:'off'},{passive:false});
 document.addEventListener('click',async e=>{const b=e.target.closest('#playit');if(!b)return;const i=+b.dataset.i;b.disabled=true;b.textContent='🎹 making it…';
- try{const r=await api('api/pad/playable',{path:S[i][F.path]});toast(`Playable pads/${r.adv||r.wav} · drop the .adv on a MIDI track: ${r.chords.join(' → ')||'its note'} plays on ${['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B'][r.root%12]}; the chords clip is next to it`)}
+ try{const r=await api('api/pad/playable',{path:S[i][F.path]});toast(`Playable pads/${r.adv||r.wav} · drop the .adv on a MIDI track: ${r.chords.join(' → ')||'its note'} plays on ${['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B'][r.root%12]}${r.midi?'; the chords clip is next to it':''}`)}
  catch(err){toast('failed: '+err.message)}b.disabled=false;b.textContent='🎹 playable'});
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-dtakes]');if(!b)return;e.stopPropagation();const [k,r]=b.dataset.dtakes.split(':').map(Number),p=SK.lanes[k]&&SK.lanes[k].pads[r];if(!p)return;
  if((p.takes||[]).length){p.tkopen=p.tkopen===false;drawSK();return}

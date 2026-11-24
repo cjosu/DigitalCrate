@@ -22,6 +22,8 @@ jobs:
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python --no-deps -r requirements.lock
           uv pip install --python .venv/bin/python --no-deps -e .
+          # the chord recognizer (pads, the stem mixer): built from git against the numpy above, as install.sh does
+          uv pip install --python .venv/bin/python --no-deps --no-build-isolation "madmom @ git+https://github.com/CPJKU/madmom@27f032e8947204902c675e5e341a3faf5dc86dae"
           uv pip install --python .venv/bin/python pytest
       - name: Tests
         run: .venv/bin/python -m pytest -q
@@ -49,6 +51,8 @@ jobs:
           uv venv --python 3.11 .venv
           uv pip install --python .venv/bin/python --no-deps -r requirements.lock
           uv pip install --python .venv/bin/python --no-deps -e .
+          # the chord recognizer (pads, the stem mixer): built from git against the numpy above, as install.sh does
+          uv pip install --python .venv/bin/python --no-deps --no-build-isolation "madmom @ git+https://github.com/CPJKU/madmom@27f032e8947204902c675e5e341a3faf5dc86dae"
           uv pip install --python .venv/bin/python pytest playwright==1.55.0
           .venv/bin/python -m playwright install chromium
       - name: Browser tests

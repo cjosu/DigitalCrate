@@ -26,6 +26,8 @@ def _slot(cmd):
     if os.environ.get("DIGITALCRATE_NO_SLOT") or cmd not in FOREGROUND | BACKGROUND_PASSES:
         return
     from . import config as C
+    from .memguard import yield_if_paused
+    yield_if_paused()  # paused: this job waits in the list too, and starts when you resume
     C.DATA_DIR.mkdir(parents=True, exist_ok=True)
     f = open(C.DATA_DIR / f"slot-{'jobs' if cmd in FOREGROUND else 'passes'}.lock", "a+")
     try:
@@ -42,6 +44,7 @@ def _slot(cmd):
     f.write(f"{cmd} (pid {os.getpid()})")
     f.flush()
     _SLOT = f  # held until this process exits
+    yield_if_paused()  # paused while it waited for its turn
     from .memguard import wait
     wait("loading models")
 

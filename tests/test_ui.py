@@ -754,7 +754,12 @@ def test_playable_pad_for_live(site, page):
     assert "Playable pads" in msg, msg
     d = site["root"] / "ableton" / "Playable pads"
     mids, advs = list(d.glob("*chords.mid")), list(d.glob("*.adv"))
-    assert mids and list(d.glob("*.wav"))
+    assert list(d.glob("*.wav"))
+    try:
+        import madmom  # noqa: F401  (the chords clip needs the chord recognizer; without it the instrument still works)
+        assert mids
+    except ImportError:
+        pass
     if advs:  # Live installed: the preset's root key is the chord's root
         x = gzip.open(advs[0]).read().decode()
         assert re.search(r'<RootKey Value="(\d+)"', x)

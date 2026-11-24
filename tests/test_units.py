@@ -563,3 +563,21 @@ def test_a_saved_loop_keeps_its_length_and_its_start(monkeypatch):
     # stretched: the length is the stretched selection's, and the start is still clean
     w, _ = edit.render("x.wav", dict(start=1.0, end=2.0, stretch=1.5, loop_xfade=50, normalize=False))
     assert abs(w.shape[1] - 1.5 * SR) < 0.02 * SR
+
+
+def test_pause_stops_jobs_and_resume_lists_them(tmp_path):
+    """⏸ pause: a job stops at its next checkpoint and notes itself; resume gives the list back and clears the pause."""
+    import os, subprocess, sys
+    env = dict(os.environ, DIGITALCRATE_LIBRARY=str(tmp_path / "lib"), DIGITALCRATE_CONFIG=str(tmp_path / "c.toml"))
+    env.pop("DIGITALCRATE_NO_SLOT", None)
+    (tmp_path / "c.toml").write_text(f'library = "{tmp_path / "lib"}"\n')
+    job = "import sys;sys.argv=['x','pads','--mine'];from digitalcrate.memguard import breathe;breathe();print('RAN')"
+    run = lambda code: subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert "RAN" in run(job).stdout                                       # not paused: carries on
+    run("from digitalcrate.memguard import pause;pause()")
+    r = run(job)
+    assert "RAN" not in r.stdout and "PAUSED" in r.stdout and r.returncode == 0   # paused: stops cleanly
+    run(job)                                                              # noted once, not twice
+    out = run("from digitalcrate.memguard import paused_jobs,resume,paused;print(paused_jobs()['jobs']);print(resume());print(paused())").stdout
+    assert out.count("{'kind': 'pads', 'args': ['--mine']}") == 2 and out.strip().endswith("False")
+    assert "RAN" in run(job).stdout                                       # resumed: runs again

@@ -179,4 +179,12 @@ def recut(min_grain=GRAINY, model=None, limit=None):
             con.commit()
             print(f"recut: {k}/{len(rows)} [{better} cleaner]", flush=True)
     con.commit()
+    if better:  # the page's grain tags and quality follow
+        try:
+            from .build import build
+            print("BUILDING", flush=True)
+            build()
+            print("BUILD DONE", flush=True)
+        except Exception as e:
+            print(f"    build failed: {str(e)[:100]}", flush=True)
     print(f"TASK DONE {better} of {len(rows)} grainy samples are cleaner now (old files in _data/recut_backup)", flush=True)

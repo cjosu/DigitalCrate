@@ -397,7 +397,9 @@ def run(where_sql="1=1", params=(), separate_mode="auto", limit=None, reprocess=
         rows = rows[:limit]
     print(f"{len(rows)} tracks to process (separation: {separate_mode}, vocals: {vocals})")
     total = 0
+    from .memguard import yield_if_paused
     for row in tqdm(rows, desc="process"):
+        yield_if_paused()  # ⏸ on the Activity page: stop after the song it's on; the rest are mined on resume
         try:
             dup = duplicate_of(con, row)
             if dup:
@@ -506,4 +508,12 @@ def repads(limit=None):
                 print("BUILD DONE", flush=True)
             except Exception as e:
                 print(f"    build failed: {str(e)[:100]}", flush=True)
+    if total:  # so they show up in the app
+        try:
+            from .build import build
+            print("BUILDING", flush=True)
+            build()
+            print("BUILD DONE", flush=True)
+        except Exception as e:
+            print(f"    build failed: {str(e)[:100]}", flush=True)
     print(f"TASK DONE {total} new pads from {len(rows)} songs", flush=True)

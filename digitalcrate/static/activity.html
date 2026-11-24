@@ -31,7 +31,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td{padding:4px 6px 4px 
 .err{color:var(--bad)}.plan{background:#0b0d10;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px}
 .legend{display:flex;gap:12px;font-size:11px;color:var(--mute);margin-bottom:6px}.legend i{display:inline-block;width:10px;height:8px;border-radius:2px;margin-right:4px;vertical-align:0}
 </style></head><body><main>
-<header><h1>Processing</h1><span class="sub" id="upd"></span><a href="/" style="margin-left:auto">← back to the library</a></header>
+<header><h1>Processing</h1><span class="sub" id="upd"></span><button id="pausebtn" style="margin-left:14px" title="need the machine? every job stops after the song it's on and frees its memory; resume starts them again where they left off">⏸ pause background work</button><span class="sub" id="pausemsg"></span><a href="/" style="margin-left:auto">← back to the library</a></header>
 <div class="grid">
 <div>
   <section class="card"><h2>Running now</h2><div id="jobs"></div></section>
@@ -75,7 +75,12 @@ const running=()=>(A?.jobs||[]).some(j=>j.running&&(j.kind==='process'||j.kind==
 async function load(){
   try{A=await (await fetch('api/activity')).json()}catch(e){$('upd').textContent='server not reachable';return}
   $('upd').textContent='updated '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const P=A.paused,run=(A.jobs||[]).filter(j=>j.running).length,pb=$('pausebtn');
+  pb.textContent=P?'▶ resume background work':'⏸ pause background work';pb.dataset.on=P?'1':'';
+  $('pausemsg').textContent=P?(run?` pausing: ${run} job${run>1?'s':''} finishing the song ${run>1?'they are':'it is'} on…`:` paused · ${P.jobs.length} job${P.jobs.length===1?'':'s'} waiting to resume`+(P.jobs.length?': '+P.jobs.map(j=>j.kind+(j.args.length?' '+j.args.join(' '):'')).join(', '):'')):'';
   render();clearTimeout(timer);timer=setTimeout(load,(A.jobs||[]).some(j=>j.running)?3000:15000)}
+document.getElementById('pausebtn').onclick=async e=>{const on=e.currentTarget.dataset.on==='1';e.currentTarget.disabled=true;
+  try{await fetch(on?'api/activity/resume':'api/activity/pause',{method:'POST',body:'{}'})}catch(err){}e.currentTarget.disabled=false;load()};
 
 function jobHTML(j){
   if(j.external)return `<div class="job"><div class="jt"><span class="dot live"></span><b>Started from a terminal</b><span class="r sub">running ${esc(j.elapsed)}</span></div><pre>${esc(j.target)}</pre><div class="sub">Its progress isn't visible here; it can be stopped from the terminal it runs in.</div></div>`;

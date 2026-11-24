@@ -220,6 +220,7 @@ def run(redo=False, move=True):
 
 # ---------------------------------------------------------------- playable + MIDI
 
+NOTES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 PC = {"C": 0, "D♭": 1, "D": 2, "E♭": 3, "E": 4, "F": 5, "F♯": 6, "G": 7, "A♭": 8, "A": 9, "B♭": 10, "B": 11}
 
 
@@ -270,9 +271,15 @@ def playable(rel, reveal=True):
         raise ValueError("no such sample")
     chs = json.loads(r["chords"]) if r["chords"] else None
     if chs is None:
-        from .audio import decode
-        chs = analyze(decode(C.LIB_ROOT / rel))["chords"]
+        try:
+            from .audio import decode
+            chs = analyze(decode(C.LIB_ROOT / rel))["chords"]
+        except Exception:  # no chord recognizer (madmom) here: the instrument still works, tuned to the sample's key
+            chs = []
     root = root_note(chs)
+    if not chs and r["key"] in NOTES_SHARP:
+        pc = NOTES_SHARP.index(r["key"])
+        root = 60 + pc if pc < 6 else 48 + pc
     dest = C.ABLETON_SAMPLES / "Playable pads"
     dest.mkdir(parents=True, exist_ok=True)
     wav = dest / Path(rel).name
@@ -288,10 +295,10 @@ def playable(rel, reveal=True):
             adv = simpler(wav, wav.stem[:60], wav.with_suffix(".adv"), root=root)
     except FileNotFoundError:  # no Live installed: the WAV (with its loop) and the chords still help
         adv = None
-    mid = chord_midi(chs, wav.with_name(wav.stem + " chords.mid"), r["bpm"])
+    mid = chord_midi(chs, wav.with_name(wav.stem + " chords.mid"), r["bpm"]) if chs else None
     if reveal:
         import subprocess
         subprocess.run(["open", "-R", str(adv or wav)])
     names = [n for _, _, n in chs]
-    return dict(dest=str(dest), wav=wav.name, adv=adv.name if adv else None, midi=mid.name, root=root,
+    return dict(dest=str(dest), wav=wav.name, adv=adv.name if adv else None, midi=mid.name if mid else None, root=root,
                 chords=[n for k, n in enumerate(names) if k == 0 or n != names[k - 1]])

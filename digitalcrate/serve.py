@@ -39,6 +39,11 @@ BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pad
 _SLOW = {}
 
 
+LABELS = dict(pads="pads", grain="separation grain", stems="stems for the mixer", sections="song sections",
+              styles="styles", lyrics="words", loops="sustain loops", process="mining", drums="drums",
+              ytscout="scout", ingest="adding a source")
+
+
 def start_job(kind, args, target):
     import subprocess, sys, time
     for jid, j in _saved_jobs().items():  # the same job already running (a double click): that one, not a second copy
@@ -518,8 +523,9 @@ class Handler(SimpleHTTPRequestHandler):
             import time as _t
             if _t.time() - _SLOW.get("at", 0) > 20:  # library stats change slowly; the page polls every 3 s in a run
                 _SLOW.update(at=_t.time(), coverage=coverage(), analysis=analysis())
+            from .memguard import paused_jobs
             return self._json(dict(jobs=activity(), coverage=_SLOW["coverage"], backup=last_backup(),
-                                   analysis=_SLOW["analysis"]))
+                                   analysis=_SLOW["analysis"], paused=paused_jobs()))
         if u.path == "/api/jobs":
             return self._json(job_status(q.get("kind")))
         if self.path == "/api/favs":
@@ -726,6 +732,16 @@ class Handler(SimpleHTTPRequestHandler):
                     + (["--build"] if req.get("build", True) else [])
                 label = f"{plan['n']} songs · {plan['mode']} · {plan['artists']} artists"
                 return self._json({"job": start_job("process", args, label)})
+            elif self.path == "/api/activity/pause":
+                from .memguard import pause
+                pause()
+                return self._json(dict(ok=True))
+            elif self.path == "/api/activity/resume":
+                from .memguard import resume
+                jobs = resume()
+                for j in jobs:  # they take turns as usual (one heavy job at a time)
+                    start_job(j["kind"], j["args"], LABELS.get(j["kind"], j["kind"]) + (" (resumed)"))
+                return self._json(dict(ok=True, started=len(jobs)))
             elif self.path == "/api/activity/task":
                 t = req.get("task")
                 if t not in TASKS:
@@ -787,7 +803,8 @@ def _scout_daily():
     while True:
         try:
             from .ytscout import auto_due, set_auto
-            if auto_due() and not any(_alive(j["pid"]) for j in _saved_jobs().values()):
+            from .memguard import paused
+            if not paused() and auto_due() and not any(_alive(j["pid"]) for j in _saved_jobs().values()):
                 set_auto(last=time.time())
                 start_job("ytscout", ["--auto"], "daily finds")
         except Exception as e:
