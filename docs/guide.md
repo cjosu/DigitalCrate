@@ -138,6 +138,9 @@ an Ableton Drum Rack (`.adg`).
   marked 2 is two bars on), and the length sticks at whole bars (1, 2, 3…) of the sample's
   tempo, or the project's; hold ⌥ to move freely, or untick *stick to bars*. The same goes for trimming a sketchpad
   lane. The fade knobs sit on the selection's top corners; the waveform under a fade stays visible, faintly.
+- **Loops:** with *loop* on, the crossfade blends the selection's end into the audio that leads into its start (the
+  shaded lead-in before the selection). The saved file is exactly the selection's length and starts clean, so it
+  loops seamlessly and still plays right from the top. The settings an edit was saved with are kept with it.
 - **Drums:** Punch, Decay, Drive and Low cut; pitch defaults to tape.
 - **Your plugins:** any installed AU or VST3 effect, with its controls.
 - **✨ Suggested edits:** a dozen candidate edits are rendered and judged by your taste model; you get the best three

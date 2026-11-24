@@ -540,3 +540,26 @@ def test_stem_mixer_renders_fits_and_learns(tmp_path, monkeypatch):
         stems.log("like", good, "bass"); stems.log("dislike", bad, "bass")
     w1, n1 = stems.weights(con)
     assert n1 == 16 and w1[stems.FEATURES.index("fit")] > stems.W0[stems.FEATURES.index("fit")]
+
+
+def test_a_saved_loop_keeps_its_length_and_its_start(monkeypatch):
+    """Loop crossfade: the file is exactly the selection, its start untouched, and its end leads back into its start
+    (it used to blend the tail into the head: a ghost of the ending at the start, and a file shorter than selected)."""
+    from digitalcrate import edit
+    t = np.arange(3 * SR) / SR
+    src = np.stack([np.sin(2 * np.pi * 220 * t) * (0.4 + 0.3 * t / 3)] * 2).astype(np.float32)  # rising, so head != tail
+    monkeypatch.setattr(edit, "_load", lambda rel: src.copy())
+    y, _ = edit.render("x.wav", dict(start=1.0, end=2.0, loop_xfade=50, normalize=False))
+    a, n = SR, SR
+    assert y.shape[1] == n                                              # exactly the selection: one second, not less
+    assert np.allclose(y[:, :2000], src[:, a:a + 2000], atol=1e-4)      # the start is the source's, nothing blended in
+    assert abs(float(y[0, -1]) - float(src[0, a - 1])) < 0.02           # the end arrives where the start picks up
+    jump = abs(float(y[0, 0]) - float(y[0, -1]))
+    raw = abs(float(src[0, a]) - float(src[0, a + n - 1]))
+    assert jump < 0.03 and jump < raw                                    # seamless at the loop point
+    # nothing before the selection to blend from: still the exact length, with a 3 ms fade either side
+    z, _ = edit.render("x.wav", dict(start=0.0, end=1.0, loop_xfade=50, normalize=False))
+    assert z.shape[1] == SR and abs(float(z[0, 0])) < 1e-3 and abs(float(z[0, -1])) < 1e-3
+    # stretched: the length is the stretched selection's, and the start is still clean
+    w, _ = edit.render("x.wav", dict(start=1.0, end=2.0, stretch=1.5, loop_xfade=50, normalize=False))
+    assert abs(w.shape[1] - 1.5 * SR) < 0.02 * SR

@@ -96,7 +96,14 @@ def render(rel, p):
     y = _load(rel)
     a = int(max(0, p["start"]) * SR)
     b = int(p["end"] * SR) if p["end"] else y.shape[1]
-    y = y[:, a:max(b, a + 64)].copy()
+    b = max(b, a + 64)
+    # a seamless loop needs the audio just outside the selection (what leads into its start): it goes through the
+    # same processing as the selection and is blended into the loop's last stretch at the end (see below)
+    sel, pre = b - a, 0
+    if p["loop_xfade"] > 0:
+        want = int(p["loop_xfade"] * SR / max(0.1, p["stretch"]))  # in source samples
+        pre = min(want, sel // 3, (y.shape[1] - b) if p["reverse"] else a)
+    y = (y[:, a:b + pre] if p["reverse"] else y[:, a - pre:b]).copy()
     if p["reverse"]:
         y = y[:, ::-1].copy()
     if p["tape"] and abs(p["semis"]) > 1e-3:  # tape: the pitch change also changes the length, like a turntable
@@ -123,14 +130,20 @@ def render(rel, p):
     if p.get("plugins"):  # your AU/VST3 effects (plugins.py), with room for a reverb or delay to ring out
         from .plugins import apply
         y = apply(y, SR, p["plugins"], tail=p.get("tail") or 0)
-    n = y.shape[1]
-    xf = min(int(p["loop_xfade"] * SR), n // 3)
-    if xf > 32:  # seamless loop: crossfade the tail into the head (equal-power), drop separate fades
-        t = np.linspace(0, np.pi / 2, xf, dtype=np.float32)
-        body = y[:, :-xf].copy()
-        body[:, :xf] = body[:, :xf] * np.sin(t) + y[:, -xf:] * np.cos(t)
-        y = body
-        p = dict(p, fade_in=0, fade_out=0)
+    if p["loop_xfade"] > 0:
+        # Seamless loop, the way samplers do it: the file is exactly the selection (its length and its start are
+        # untouched), and its last stretch blends into what leads into the selection's start, so the jump from the
+        # end back to the start is continuous. (It used to blend the tail into the head instead: the file then began
+        # with a ghost of its own ending, and came out shorter than the selection, off the bar.)
+        lead = int(round(y.shape[1] * pre / (pre + sel))) if pre else 0  # the lead-in, as long as it came out
+        head, y = y[:, :lead], y[:, lead:].copy()
+        xf = min(lead, y.shape[1] // 3)
+        if xf > 32:
+            t = np.linspace(0, np.pi / 2, xf, dtype=np.float32)
+            y[:, -xf:] = y[:, -xf:] * np.cos(t) + head[:, -xf:] * np.sin(t)
+            p = dict(p, fade_in=0, fade_out=0)
+        else:  # nothing leads into it (the selection starts where the file does): just keep the seam from clicking
+            p = dict(p, fade_in=0.003, fade_out=0.003)
     n = y.shape[1]
     fi, fo = min(int(p["fade_in"] * SR), n // 3), min(int(p["fade_out"] * SR), n // 3)
     if fi:
@@ -190,7 +203,15 @@ def save(rel, params, name=None):
     if parent is None:
         raise ValueError("edits start from a library sample")
     y, p = render(rel, params)
-    return store(parent, rel, y, p, name)
+    row = store(parent, rel, y, p, name)
+    try:  # the settings it was made with, so the edit can be opened again from the original
+        if "edit_params" not in {r[1] for r in con.execute("PRAGMA table_info(samples)")}:
+            con.execute("ALTER TABLE samples ADD COLUMN edit_params TEXT")
+        con.execute("UPDATE samples SET edit_params=? WHERE id=?", (json.dumps(clean_params(params)), row["id"]))
+        con.commit()
+    except Exception:
+        pass
+    return row
 
 
 def store(parent, rel, y, p, name=None, override=None, prefix="Edit", folder="Edits"):

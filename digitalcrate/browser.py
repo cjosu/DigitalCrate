@@ -435,7 +435,7 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
   // grabbing an edge moves just that edge: anchor on the opposite one and let the normal drag logic extend from it
   const edge=edEdgeAt(e);if(edge){down=edge==='a'?ED.sel[1]:ED.sel[0];ED.anchor=down;return}
   down=snap(tx(e));ED.anchor=down;ED.sel=[down,down];edDraw()};
- c.onmousemove=e=>{if(drag){const t=tx(e),[a,b]=ED.sel;edSetEnv(drag,Math.max(0,(drag==='in'||drag==='xin'?t-a:b-t))*1000);return}
+ c.onmousemove=e=>{if(drag){const t=tx(e),[a,b]=ED.sel;edSetEnv(drag,Math.max(0,(drag==='in'?t-a:drag==='xin'?a-t:b-t))*1000);return}
   c.style.cursor=down!=null||edHandleAt(e)||edEdgeAt(e)?'ew-resize':'crosshair';if(down==null)return;let t=tx(e);
   // the length sticks at whole bars (1, 2, 3…) when the edge comes within 8 px of one; ⌥ lets it move freely
   ED.stuck=0;const bar=edBar();if(bar&&!e.altKey&&$('edbars').checked){const [v0,v1]=edView(),tol=Math.min(0.2*bar,8*(v1-v0)/c.clientWidth),n=Math.round(Math.abs(t-down)/bar);
@@ -499,7 +499,7 @@ function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.d
  if(!ED.peaks){ED.peaks=[];const s0=v0*sr,step=(v1-v0)*sr/W;for(let x=0;x<W;x++){let mn=0,mx=0;const k0=Math.floor(s0+x*step),k1=Math.max(k0+1,Math.floor(s0+(x+1)*step));
   for(let k=k0;k<Math.min(d0.length,k1);k++){const v=(d0[k]+d1[k])/2;if(v<mn)mn=v;if(v>mx)mx=v}ED.peaks.push([mn,mx])}}
  const [a,b]=ED.sel,X=t=>edX(t,W),e=edEnv(),top=6*dpr,bot=H-14*dpr,mid=(top+bot)/2,amp=(bot-top)/2;
- const gain=t=>{if(t<a||t>b)return 1;const gi=e.fin>0?Math.min(1,(t-a)/e.fin):1,tail=e.loop?e.xf:e.fout,go=tail>0?Math.min(1,(b-t)/tail):1;return Math.min(gi,go)};
+ const gain=t=>{if(t<a||t>b)return 1;const gi=!e.loop&&e.fin>0?Math.min(1,(t-a)/e.fin):1,tail=e.loop?e.xf:e.fout,go=tail>0?Math.min(1,(b-t)/tail):1;return Math.min(gi,go)};  // a loop's start is left as it is
  g.clearRect(0,0,W,H);g.fillStyle='rgba(224,164,88,.10)';g.fillRect(X(a),0,X(b)-X(a),H);
  ED.peaks.forEach(([mn,mx],x)=>{const t=edT(x/dpr,W/dpr),inS=t>=a&&t<=b,k=inS?gain(t):1;
   if(inS&&k<0.98){g.fillStyle='rgba(140,192,218,.28)';g.fillRect(x,mid-mx*amp,1,Math.max(1,(mx-mn)*amp))}  // what's there before the fade
@@ -513,15 +513,15 @@ function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.d
  g.fillStyle='rgba(255,255,255,.28)';ED.onsets.forEach(t=>g.fillRect(X(t),H-7*dpr,1*dpr,7*dpr));
  g.fillStyle='#e0a458';[a,b].forEach(t=>{g.fillRect(X(t)-1*dpr,0,2*dpr,H);g.fillRect(X(t)-3*dpr,mid-10*dpr,6*dpr,20*dpr)});
  const line=(x0,y0,x1,y1,col,dash)=>{g.save();g.strokeStyle=col;g.lineWidth=1.5*dpr;g.setLineDash(dash?[4*dpr,3*dpr]:[]);g.beginPath();g.moveTo(x0,y0);g.lineTo(x1,y1);g.stroke();g.restore()};
- if(e.fin>0)line(X(a),bot,X(a+e.fin),top,'#ffffff');
+ if(e.fin>0&&!e.loop)line(X(a),bot,X(a+e.fin),top,'#ffffff');
  if(e.loop){if(e.fout>0)line(X(b-e.fout),top,X(b),bot,'rgba(255,255,255,.45)',true);
-  if(e.xf>0){line(X(b-e.xf),top,X(b),bot,'#e0a458');line(X(a),bot,X(a+e.xf),top,'#e0a458',true)}}
+  if(e.xf>0){line(X(b-e.xf),top,X(b),bot,'#e0a458');line(X(a-e.xf),bot,X(a),top,'#e0a458',true);g.fillStyle='rgba(224,164,88,.07)';g.fillRect(X(a-e.xf),0,X(a)-X(a-e.xf),H)}}  // the lead-in the end blends into
  else if(e.fout>0)line(X(b-e.fout),top,X(b),bot,'#ffffff');
  edKnobs().forEach(k=>{g.beginPath();g.arc(X(k.t),top,(k.small?4:6)*dpr,0,Math.PI*2);g.fillStyle=k.col;g.fill();g.lineWidth=2*dpr;g.strokeStyle='#101317';g.stroke()});
  const bar=edBar(),nb=bar?(b-a)/bar:0,bars=bar&&Math.abs(nb-Math.round(nb))<0.004&&Math.round(nb)>=1?` · ${Math.round(nb)} bar${Math.round(nb)>1?'s':''}`:'';
  if($('edbarsl'))$('edbarsl').hidden=!bar;
  $('edsel').textContent=`selection ${a.toFixed(2)}–${b.toFixed(2)} s (${(b-a).toFixed(2)} s${bars}) · fade in ${Math.round(e.fin*1000)} ms · `+
-  (e.loop?`loop crossfade ${Math.round(e.xf*1000)} ms`:`fade out ${Math.round(e.fout*1000)} ms`)+(e.loop?` · fade out on stop ${Math.round(e.fout*1000)} ms`:'')+` · drag knobs to adjust`;
+  (e.loop?`loop crossfade ${Math.round(e.xf*1000)} ms${e.xf<0.001&&a<0.003?' (nothing before the selection to blend from: start it a little later for a crossfade)':' into the lead-in'}`:`fade out ${Math.round(e.fout*1000)} ms`)+(e.loop?` · fade out on stop ${Math.round(e.fout*1000)} ms`:'')+` · drag knobs to adjust`;
  edPaint()}
 // one bar in this sample's own time: its tempo if it has one (loops), else the project's
 function edBar(){if(!ED)return 0;const own=S[ED.i]&&S[ED.i][F.bpm],pj=(typeof PROJ!=='undefined'&&PROJ&&PROJ.bpm)||0,bpm=own||pj;return bpm?240/bpm:0}
@@ -531,9 +531,10 @@ function edT(px,W){const [v0,v1]=edView();return Math.max(0,Math.min(ED.buf.dura
 function edZoom(to){const d=ED.buf.duration;if(to==='sel'){const [a,b]=ED.sel,m=Math.max(0.05,(b-a)*0.12);ED.view=[a-m,b+m]}else ED.view=to;
  ED.peaks=null;edDraw();if($('edzoom'))$('edzoom').textContent=ED.view&&(ED.view[1]-ED.view[0])<d-1e-3?'🔍 zoom out':'🔍 zoom to selection'}
 function edEnv(){const [a,b]=ED.sel,len=b-a,loop=$('edloop').checked,cap=v=>Math.max(0,Math.min(v,len/2-0.002));
- return{loop,fin:cap(+$('edfi').value/1000),fout:cap(+$('edfo').value/1000),xf:cap(+$('edxf').value/1000)}}
-function edKnobs(){const e=edEnv(),[a,b]=ED.sel;const k=[{id:'in',t:a+e.fin,col:'#ffffff'}];
- if(e.loop){k.push({id:'xout',t:b-e.xf,col:'#e0a458'},{id:'xin',t:a+e.xf,col:'#e0a458',small:true})}else k.push({id:'out',t:b-e.fout,col:'#ffffff'});return k}
+ // a loop's crossfade blends its end into the audio that leads into its start: it can't be longer than that lead-in
+ return{loop,fin:cap(+$('edfi').value/1000),fout:cap(+$('edfo').value/1000),xf:Math.max(0,Math.min(+$('edxf').value/1000,len/3,a))}}
+function edKnobs(){const e=edEnv(),[a,b]=ED.sel;const k=e.loop?[]:[{id:'in',t:a+e.fin,col:'#ffffff'}];  // a loop's start is left as it is
+ if(e.loop){k.push({id:'xout',t:b-e.xf,col:'#e0a458'},{id:'xin',t:a-e.xf,col:'#e0a458',small:true})}else k.push({id:'out',t:b-e.fout,col:'#ffffff'});return k}
 function edEdgeAt(ev){const c=$('edc');if(!ED||!ED.buf)return null;const [a,b]=ED.sel,W=c.clientWidth;
  const da=Math.abs(ev.offsetX-edX(a,W)),db=Math.abs(ev.offsetX-edX(b,W));if(Math.min(da,db)>7)return null;return da<db?'a':'b'}
 function edHandleAt(ev){const c=$('edc');if(ev.offsetY>15)return null;let best=null,bd=8;  // on the knob itself (6 px from the top), not just near it
@@ -544,19 +545,23 @@ function edPaint(pos){const c=$('edc');if(!c||!ED||!ED.base)return;const g=c.get
  if(pos==null)return;const dpr=window.devicePixelRatio||1,x=edX(pos,c.width);if(x<0||x>c.width)return;g.fillStyle='#fff';g.fillRect(x-dpr,0,2*dpr,c.height);g.fillStyle='rgba(255,255,255,.12)';g.fillRect(x-6*dpr,0,5*dpr,c.height)}
 // one sample-accurate loop player for both the selection and the rendered preview
 const eqIn=n=>Float32Array.from({length:n},(_,k)=>Math.sin(k/(n-1)*Math.PI/2)),eqOut=n=>Float32Array.from({length:n},(_,k)=>Math.cos(k/(n-1)*Math.PI/2));
-function lpGrain(P,when,pass,first,last){const len=pass.b-pass.a,ov=P.loop&&!last?Math.min(pass.xf,len/3):0,
- fin=first?Math.max(0.004,pass.fin):Math.min(pass.xf,len/3),fout=last?Math.max(0.004,pass.fout):ov;
+// one pass of the selection. Looping is seamless the way the saved file will be: every pass is the whole selection
+// at its exact length, and each later pass comes in over the previous one's end from the audio that leads into the
+// selection's start (the "lead-in"), so the start itself is never blended with anything.
+function lpLead(P,pass){const len=pass.b-pass.a;return P.loop?Math.max(0,Math.min(pass.xf||0,len/3,pass.a||0)):0}
+function lpGrain(P,when,pass,first,last){const len=pass.b-pass.a,loop=P.loop&&!last,pre=lpLead(P,pass),lead=first?0:pre,
+ fin=first?Math.max(0.004,P.loop?0.004:pass.fin):(lead>0.001?lead:0.003),fout=last?Math.max(0.004,pass.fout):(pre>0.001?pre:0.003);
  const g=AC.createGain(),src=AC.createBufferSource();src.buffer=pass.buf;src.connect(g);g.connect(AC.destination);
- const fi=Math.min(fin,len/2-0.002),fo=Math.min(fout,len/2-0.002);
- if(fi>0.001)g.gain.setValueCurveAtTime(eqIn(64),when,fi);else g.gain.setValueAtTime(1,when);
+ const fi=Math.min(fin,len/2-0.002),fo=Math.min(fout,len/2-0.002),t0=Math.max(AC.currentTime,when-lead);
+ if(fi>0.001)g.gain.setValueCurveAtTime(eqIn(64),t0,fi);else g.gain.setValueAtTime(1,t0);
  if(fo>0.001)g.gain.setValueCurveAtTime(eqOut(64),when+len-fo,fo);
- src.start(when,pass.a,len);const v={src,g};P.voices.push(v);src.onended=()=>{P.voices=P.voices.filter(x=>x!==v)};
- P.segs.push({t0:when,len,map:pass.map});if(P.segs.length>8)P.segs.shift();return len-ov}
+ src.start(t0,Math.max(0,pass.a-(when-t0)),len+(when-t0));const v={src,g};P.voices.push(v);src.onended=()=>{P.voices=P.voices.filter(x=>x!==v)};
+ P.segs.push({t0:when,len,map:pass.map});if(P.segs.length>8)P.segs.shift();return len}
 function lpSchedule(){const P=ED&&ED.P;if(!P)return;
- if(P.pending&&(!P.loop||P.next<=AC.currentTime+0.35)){P.cur=P.pending;P.pending=null;if(P.onSwitch)P.onSwitch()}
+ if(P.pending&&(!P.loop||P.next<=AC.currentTime+0.35+lpLead(P,P.cur))){P.cur=P.pending;P.pending=null;if(P.onSwitch)P.onSwitch()}
  if(!P.loop){if(!P.segs.length){const len=lpGrain(P,P.next,P.cur,true,true);P.end=P.next+len}
   if(AC.currentTime>P.end+0.05){ED.P=null;edButtons();drawNP();edPaint();return}P.timer=setTimeout(lpSchedule,60);return}
- while(P.next<AC.currentTime+0.35){if(P.pending){P.cur=P.pending;P.pending=null;if(P.onSwitch)P.onSwitch()}
+ while(P.next<AC.currentTime+0.35+lpLead(P,P.cur)){if(P.pending){P.cur=P.pending;P.pending=null;if(P.onSwitch)P.onSwitch()}
   P.next+=Math.max(0.03,lpGrain(P,P.next,P.cur,!P.segs.length,false))}
  P.timer=setTimeout(lpSchedule,60)}
 function lpStart(mode,pass,label){stopAll();AC.resume();
