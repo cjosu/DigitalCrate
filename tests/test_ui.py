@@ -789,3 +789,17 @@ def test_search_from_crate_and_by_id(page):
     page.wait_for_function(f"document.querySelectorAll('#list .row').length===1&&document.querySelector('#list .row').dataset.i==='3'", timeout=5000)
     page.fill("#search", "")
     page.evaluate("st.cats=new Set();render()")
+
+
+def test_now_playing_does_not_move_the_page(page):
+    """Starting and stopping playback never shifts the list (the now-playing strip floats over it)."""
+    page.evaluate("CRATE.setTab('S')")
+    row = page.locator("#list .row").nth(1)
+    y0 = row.bounding_box()["y"]
+    page.locator("#list .row [data-play]").first.click()
+    page.wait_for_function("!document.querySelector('#np').hidden", timeout=10000)
+    y1 = row.bounding_box()["y"]
+    page.evaluate("stopAll()")
+    page.wait_for_function("document.querySelector('#np').hidden", timeout=10000)
+    y2 = row.bounding_box()["y"]
+    assert abs(y1 - y0) < 1 and abs(y2 - y0) < 1, (y0, y1, y2)

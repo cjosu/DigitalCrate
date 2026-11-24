@@ -83,7 +83,8 @@ body.wide .top>:not(.tabs){display:none}
 .dtk{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0 0 4px 34px;padding:3px 6px;border-left:2px solid var(--acc)}.dtk .tbtn{padding:1px 6px}.dtk select{padding:1px 4px}.dtkb{display:inline-flex;gap:1px}
 .dsm{display:inline-flex;gap:2px}
 /* playback progress */
-.dock .np{position:relative}
+.dock .np{position:absolute;left:0;right:0;bottom:100%;box-shadow:0 -6px 16px rgba(0,0,0,.35)}  /* floats: showing it never moves the page */
+#list{padding-bottom:64px}
 #npbar{position:absolute;left:0;top:0;height:2px;width:0;background:var(--acc);opacity:.75;pointer-events:none}
 svg.wave .phs{fill:var(--acc);opacity:.18}svg.wave .phl{fill:var(--acc);opacity:.9}
 .tag.grainy,.badge.grb{background:#5a3b2a;color:#f0c9a8}
