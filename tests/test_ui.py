@@ -713,11 +713,13 @@ def test_drum_takes_pin_shuffle_and_make_main(site, page):
     assert seq == [t2] * 3  # pinned: every pass
     # ★ make take 2 the main hit
     old = page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].path")
-    page.locator("[data-dedit]").first.click()
-    page.locator("[data-dtkmain]").first.click()
+    page.locator("[data-dtkmain]").first.click()  # the takes row shows under the pad once takes are on
     page.wait_for_function(f"(()=>{{const p=SK.lanes.find(l=>l.type==='drums').pads[0];return p.path==={json.dumps(t2)}&&p.buf}})()", timeout=30000)
     p = page.evaluate("(()=>{const p=SK.lanes.find(l=>l.type==='drums').pads[0];return {takes:p.takes,pin:p.pins[4]}})()")
     assert p["takes"][0] == old and p["pin"] == 1  # the pin follows its recording, now the main one
     # shuffled is in the saved state
     page.select_option("[data-dtkord]", "shuffle")
     assert page.evaluate("JSON.parse(CRATE.skSnap()).lanes.find(l=>l.type==='drums').pads[0].order") == "shuffle"
+    # each pad row stays on one line (✕ doesn't wrap)
+    tops = page.evaluate("[...document.querySelector('.drow').children].map(e=>Math.round(e.getBoundingClientRect().top+e.getBoundingClientRect().height/2))")
+    assert max(tops) - min(tops) <= 4, tops

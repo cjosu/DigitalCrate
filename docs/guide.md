@@ -55,7 +55,8 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
     then a new order, never the same take twice running; 🎲 gives a different shuffle. Both play the same way every
     time, so bounces and exports match what you heard.
   - **⇧-click a step** to pin it to one take (the step shows its number); ⇧-click again to move on, back to auto.
-  - Open the pad (click its name) to hear each take, and **★** to make one the main hit.
+  - The takes row under the pad plays each take (▶ 1, ▶ 2…), and **★** makes one the main hit. 🔁 shows or hides
+    the row; **off** goes back to one take.
 - **✨ starter** writes a pattern from the pad types.
 - **🔎 complete the kit** suggests hits for the kinds you're missing that sound recorded alike (it compares the
   recording's character, not the drum type; AUC 0.83 at picking a song's own drums). **↻ more**, **✕** next,
