@@ -1525,9 +1525,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    if(!p)return `<div class="mxrow" data-mxrow="${stem}">${name}<div class="mxsrc"><span class="sub">empty</span></div><button class="tbtn" data-mxroll="${stem}" title="pull a part that fits">🎲</button><button class="tbtn" data-mxfind="${stem}" title="choose the song yourself: the mixer takes its best-fitting bars">🔍</button>${MX.order.length>1?`<button class="tbtn" data-mxrm="${stem}" title="remove this slot">✕ remove slot</button>`:''}</div>${findHTML(stem)}`;
    const eq=p.eq||[0,0,0],sm=p.semis||0;
    return `<div class="mxrow${p.mute?' muted':''}" data-mxrow="${stem}">${name}
-    <div class="mxsrc" title="${esc(p.artist)} — ${esc(p.title)}${why(p)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')}<br><span class="sub">${p.err?'failed: '+esc(p.err):p._loading?'rendering…':`bars ${p.bar0+1}–${p.bar0+Math.max(1,Math.round(p.n*(p.k||1)))}${(I.slots||{})[stem]?` · from ${(I.slots[stem].src_bpm)} bpm${(p.k||1)===2?' (half-time)':(p.k||1)===0.5?' (double-time)':''}${pit?` · ${I.slots[stem].key}${sm?` ${sm>0?'+':''}${sm} st`:''}`:''}`:''}`}</span></div>
+    <div class="mxsrc" title="${esc(p.artist)} — ${esc(p.title)}${why(p)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')}<br><span class="sub">${p.err?'failed: '+esc(p.err):p._loading?'rendering…':`bars ${p.bar0+1}–${p.bar0+Math.max(1,Math.round(p.n*(p.k||1)))}${(I.slots||{})[stem]?` · from ${(I.slots[stem].src_bpm)} bpm${(p.k||1)===2?' (half-time)':(p.k||1)===0.5?' (double-time)':''}${p.alt?` · take ${p.alt[0]}/${p.alt[1]}`:''}${pit?` · ${I.slots[stem].key}${sm?` ${sm>0?'+':''}${sm} st`:''}`:''}`:''}`}</span></div>
     <div class="mxwave" data-mxwave="${stem}"><canvas></canvas><i></i></div>
-    <button class="tbtn" data-mxroll="${stem}" title="pull another part that fits what's playing" ${p.lock?'disabled':''}>🎲</button><button class="tbtn" data-mxfind="${stem}" title="choose the song yourself: the mixer takes its best-fitting bars">🔍</button><button class="tbtn${p.lock?' on':''}" data-mxlock="${stem}" title="keep this part when you 🎲 all">🔒</button><button class="tbtn" data-mxdel="${stem}" title="take this part out (the slot stays empty until you 🎲 or 🔍)">✕</button>
+    <button class="tbtn" data-mxroll="${stem}" title="pull another part that fits what's playing" ${p.lock?'disabled':''}>🎲</button><button class="tbtn" data-mxfind="${stem}" title="choose the song yourself: the mixer takes its best-fitting bars">🔍</button><button class="tbtn" data-mxalt="${stem}" title="another stretch of this from the same song (its other takes), best-fitting first">⇄</button><button class="tbtn${p.lock?' on':''}" data-mxlock="${stem}" title="keep this part when you 🎲 all">🔒</button><button class="tbtn" data-mxdel="${stem}" title="take this part out (the slot stays empty until you 🎲 or 🔍)">✕</button>
     <span class="mxgrp" title="where in the song the loop starts: earlier / later by one loop length"><span class="mxlab">bars</span><button class="tbtn" data-mxpos="${stem}:-1">◀</button><button class="tbtn" data-mxpos="${stem}:1">▶</button></span>
     <select data-mxlen="${stem}" title="loop length">${[1,2,4,8].map(n=>`<option value="${n}" ${p.n===n?'selected':''}>${n} bar${n>1?'s':''}</option>`).join('')}</select>
     <span class="mxgrp" title="${pit?'your own shift in semitones, on top of the shift to the key':'drums are never pitch-shifted'}"><span class="mxlab">pitch</span><button class="tbtn" data-mxoff="${stem}:-1" ${pit?'':'disabled'} title="a semitone down">−</button><output>${pit?((p.off||0)>0?'+':'')+(p.off||0)+' st':'·'}</output><button class="tbtn" data-mxoff="${stem}:1" ${pit?'':'disabled'} title="a semitone up">＋</button></span>
@@ -1560,6 +1560,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxdlyon){const p=MX.slots[ds.mxdlyon];p.dlyOn=p.dlyOn===false;apply(ds.mxdlyon);save();draw();return}
   if(t.id==='mxclear'){MX.order.forEach(s=>{stopSrc(s);delete MX.slots[s]});  // the slots stay, emptied
    MX.info=null;MX.name='';save();draw();return}
+  if(ds.mxalt){const id=ds.mxalt,p=MX.slots[id],key=[p.track,p.n,role(id),MX.bpm].join('|');
+   if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('stem mixer: '+err.message);return}}
+   const A=p._alts||[];if(A.length<2){toast('no other good stretch of this in the song');return}
+   const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];p.since=performance.now();await sync();return}
   if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);stopSrc(s);delete MX.slots[s];await sync();return}
   if(ds.mxfind){if(MX.find&&MX.find.stem===ds.mxfind){MX.find=null;draw();return}MX.find={stem:ds.mxfind,q:''};if(!MX.songs)await refreshSongs();draw();return}
   if(ds.mxsong){const [s,tid]=ds.mxsong.split(':');MX.find=null;await roll(s,false,+tid);if(!MX.on)play(true);return}
@@ -1570,7 +1574,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(t.id==='mxdown'){ev('dislike');MX.order.forEach(s=>{if(MX.slots[s])MX.slots[s].since=null});await rollAll();return}
   if(ds.mxroll){await roll(ds.mxroll);if(!MX.on)play(true);return}
   if(ds.mxlock){const p=MX.slots[ds.mxlock];p.lock=!p.lock;if(p.lock)ev('lock',ds.mxlock);save();draw();return}
-  if(ds.mxpos){const [s,d]=ds.mxpos.split(':'),p=MX.slots[s];const ns=Math.max(1,Math.round(p.n*(p.k||1)));p.bar0=Math.max(0,Math.min((p.bars||9999)-ns,p.bar0+(+d)*ns));await sync();return}
+  if(ds.mxpos){const [s,d]=ds.mxpos.split(':'),p=MX.slots[s];const ns=Math.max(1,Math.round(p.n*(p.k||1)));p.alt=null;p.bar0=Math.max(0,Math.min((p.bars||9999)-ns,p.bar0+(+d)*ns));await sync();return}
   if(ds.mxoff){const [s,d]=ds.mxoff.split(':'),p=MX.slots[s];p.off=Math.max(-12,Math.min(12,(p.off||0)+(+d)));await sync();return}
   if(ds.mxsolo){const p=MX.slots[ds.mxsolo];p.solo=!p.solo;MX.order.forEach(apply);draw();return}
   if(ds.mxmute){const p=MX.slots[ds.mxmute];p.mute=!p.mute;MX.order.forEach(apply);save();draw();return}});

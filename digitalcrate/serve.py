@@ -605,6 +605,8 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json(dict(url=str(f.relative_to(C.LIB_ROOT))))
                 if what == "info":
                     return self._json(SM.info(state))
+                if what == "alts":
+                    return self._json(dict(alts=SM.alts(state, req["slot"])))
                 if what == "save":
                     SM.save_mix(req["name"], req["mix"])
                     SM.log("save", state)

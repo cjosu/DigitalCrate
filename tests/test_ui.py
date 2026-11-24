@@ -966,6 +966,11 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function("CRATE.MX.rated>0", timeout=10000)
     # the waveform and its play line
     page.wait_for_function(f"(()=>{{const b=document.querySelector('[data-mxwave=\"{stem}\"]');return b&&b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'}})()", timeout=10000)
+    # ⇄ steps to another stretch of the same stem in the same song
+    b0, tr = page.evaluate(f"[CRATE.MX.slots['{stem}'].bar0,CRATE.MX.slots['{stem}'].track]")
+    page.click(f'[data-mxalt="{stem}"]')
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].bar0!=={b0}&&CRATE.MX.slots['{stem}'].buf&&!CRATE.MX.slots['{stem}']._loading", timeout=60000)
+    assert page.evaluate(f"CRATE.MX.slots['{stem}'].track") == tr and page.evaluate(f"CRATE.MX.slots['{stem}'].alt[1]") >= 2
     # ✕ takes a part out; 🔍 puts a chosen song in
     page.click(f'[data-mxdel="{stem}"]')
     page.wait_for_function(f"!CRATE.MX.slots['{stem}']", timeout=10000)

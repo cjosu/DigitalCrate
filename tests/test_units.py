@@ -521,6 +521,16 @@ def test_stem_mixer_renders_fits_and_learns(tmp_path, monkeypatch):
     assert p["stem"] == "other" and p["track"] not in (1, 2)   # not what a plays, not what b had
     assert stems.log("like", two) == 2 and stems.log("kept", two, "b") == 1
     stems._db().execute("DELETE FROM stem_events").connection.commit()
+    # other stretches of the same stem in the same song, for stepping through its takes
+    al = stems.alts(two, "b")
+    assert len(al) >= 2 and all(a["track"] == 2 for a in al) and len({a["bar0"] for a in al}) == len(al)
+    # every part comes out equally loud, and a stem that is all but silent in its song isn't offered
+    import json as _json
+    y, _ = sf.read(str(stems.render(1, "other", 0, 2, 100)))
+    assert abs(float(np.sqrt(np.mean(y ** 2))) - stems.TARGET_RMS) < 0.01
+    sf.write(str(stems.DIR / "t3" / "drums.flac"), np.zeros((24 * int(2.4 * SR), 2), np.float32), SR, format="FLAC", subtype="PCM_16")
+    m3 = _json.loads((stems.DIR / "t3" / "meta.json").read_text()); m3.pop("level", None); m3["stems"] = list(stems.STEMS)
+    assert "drums" not in stems._levels(3, m3)["stems"] and "other" in m3["stems"]
     # learning: the guesses until a dozen ratings; then the weights move toward what you rated
     w0, n0 = stems.weights(con)
     assert n0 == 0 and np.allclose(w0, stems.W0)

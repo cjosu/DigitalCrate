@@ -45,6 +45,31 @@ def _meta_path(tid):
 _LIB = {"at": 0, "n": -1, "lib": {}}
 
 
+SILENT_DB = -30.0   # a stem this far below its song's loudest stem isn't really there (the "drums" of a horn trio)
+TARGET_RMS = 0.08   # every rendered part is brought to this loudness (about -22 dBFS), like sketchpad lanes
+
+
+def _levels(tid, m):
+    """Each stem's loudness (dBFS, the RMS of its loudest bars); stems that are all but silent in the song are
+    dropped from what the mixer offers. Worked out once per song and kept in its meta."""
+    import soundfile as sf
+    lv = {}
+    for k in STEMS:
+        f = DIR / f"t{tid}" / f"{k}.flac"
+        if not f.exists():
+            continue
+        y, sr = sf.read(str(f), dtype="float32", always_2d=True)
+        mono = y.mean(1)
+        e = (np.array(m["bars"]) * sr).astype(int)
+        rms = np.array([np.sqrt(np.mean(mono[a:b] ** 2) + 1e-12) for a, b in zip(e[:-1], e[1:]) if b > a])
+        lv[k] = round(float(20 * np.log10(np.quantile(rms, 0.9) + 1e-9)), 1) if len(rms) else -120.0
+    top = max(lv.values()) if lv else 0.0
+    m["level"] = lv
+    m["stems"] = [k for k in m["stems"] if lv.get(k, -120) >= top + SILENT_DB and lv.get(k, -120) > -55]
+    _meta_path(tid).write_text(json.dumps(m))
+    return m
+
+
 def library():
     """Every prepared song's meta, by track id (re-read when a song is added)."""
     files = sorted(DIR.glob("t*/meta.json")) if DIR.exists() else []
@@ -53,6 +78,8 @@ def library():
         for f in files:
             try:
                 m = json.loads(f.read_text())
+                if "level" not in m:  # prepared before levels were kept
+                    m = _levels(int(m["track"]), m)
                 lib[int(m["track"])] = m
             except Exception:
                 pass
@@ -108,8 +135,7 @@ def prepare_track(con, row, separate=True):
     meta = dict(track=row["id"], artist=row["artist"] or "", title=row["title"] or "", bpm=round(float(tk["bpm"]), 2),
                 pc=int(tk["pc"]), scale=tk["scale"], camelot=tk["camelot"], bars=bt.round(4).tolist(), act=act,
                 chroma=chroma, stems=["vocals"] if policy == "vocals_only" else list(STEMS), separated=bool(separate))
-    _meta_path(row["id"]).write_text(json.dumps(meta))
-    return meta
+    return _levels(row["id"], meta)
 
 
 def choose(con, n_random=40):
@@ -164,7 +190,7 @@ def render(track, stem, bar0, n, bpm, semis=0, k=1):
     n, k = max(1, int(n)), float(k or 1)
     ns = min(src_bars(n, k), len(bt) - 2)
     bar0 = max(0, min(int(bar0), len(bt) - 1 - ns))
-    h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis}|v2".encode()).hexdigest()[:16]
+    h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis}|v3".encode()).hexdigest()[:16]
     out = CACHE / f"{h}.wav"
     if out.exists():
         return out
@@ -179,6 +205,8 @@ def render(track, stem, bar0, n, bpm, semis=0, k=1):
         y = y[:, :N]
     else:
         y = np.pad(y, ((0, 0), (0, N - y.shape[1])))
+    rms, peak = float(np.sqrt(np.mean(y ** 2) + 1e-12)), float(np.abs(y).max() + 1e-9)
+    y = y * min(TARGET_RMS / rms, 0.9 / peak, 60.0)  # equally loud parts: a quiet recording isn't lost under a loud one
     f = int(0.002 * C.SR)  # 2 ms in and out: the loop point never clicks
     ramp = np.linspace(0, 1, f, dtype=np.float32)
     y[:, :f] *= ramp
@@ -378,7 +406,7 @@ def features(stem, m, bar0, n, state, lib, taste, target, k=1, slot=None):
     return x, semis, ratio
 
 
-def _candidates(stem, state, lib, taste, target, w, n, skip, only=None, any_tempo=False, slot=None):
+def _candidates(stem, state, lib, taste, target, w, n, skip, only=None, any_tempo=False, slot=None, per=4):
     """Scored candidate parts: per song its four most active stretches (on 4-bar phrases), each also tried starting
     1-3 bars later when there's harmony to fit (the chords may line up better a bar or two on)."""
     ctx = stem in PITCHED and any(sid != slot and s_ in PITCHED for sid, s_, _ in _parts(state, lib))
@@ -397,7 +425,7 @@ def _candidates(stem, state, lib, taste, target, w, n, skip, only=None, any_temp
             continue
         step = 4 if ns >= 4 else ns
         wins = [(float(np.mean(m["act"][stem][b:b + ns])), b) for b in range(0, nb - ns + 1, step)]
-        for a, b in sorted(wins, reverse=True)[:4]:
+        for a, b in sorted(wins, reverse=True)[:per]:
             if a < 0.45 and only is None:
                 continue
             best = None
@@ -448,6 +476,28 @@ def pick(stem, state, avoid=(), n=None, rng=None, track=None, slot=None):
     return dict(stem=stem, track=tid, bar0=b, n=n, k=k, off=0, artist=m["artist"], title=m["title"], semis=semis,
                 bars=len(m["bars"]) - 1, why=dict(zip(FEATURES, [round(float(v), 3) for v in x])), score=round(sc, 3),
                 rated=n_rated, of=len(cands))
+
+
+def alts(state, slot):
+    """Other stretches of the same stem in the same song as the slot's part, best-fitting first (up to 8, the part
+    playing among them): for stepping through a song's takes of a part."""
+    lib, con = library(), _db()
+    cur = (state.get("slots") or {}).get(slot) or {}
+    if cur.get("track") is None or int(cur["track"]) not in lib:
+        return []
+    stem, tid, n = _role(slot, cur), int(cur["track"]), int(cur.get("n") or 4)
+    w, _ = weights(con)
+    cands = _candidates(stem, state, lib, _taste(con), target_key(state, skip=slot), w, n, set(), only=tid,
+                        any_tempo=True, slot=slot, per=8)
+    cands.sort(key=lambda c: -c[0])
+    m = lib[tid]
+    out = [dict(stem=stem, track=tid, bar0=b, n=n, k=k, semis=semis, artist=m["artist"], title=m["title"],
+                bars=len(m["bars"]) - 1, why=dict(zip(FEATURES, [round(float(v), 3) for v in x])), score=round(sc, 3))
+           for sc, _, b, semis, x, k in cands]
+    if not any(o["bar0"] == int(cur["bar0"]) for o in out):
+        out.insert(0, dict(stem=stem, track=tid, bar0=int(cur["bar0"]), n=n, k=float(cur.get("k") or 1), artist=m["artist"],
+                           title=m["title"], bars=len(m["bars"]) - 1))
+    return out
 
 
 def log(kind, state, stem=None):
