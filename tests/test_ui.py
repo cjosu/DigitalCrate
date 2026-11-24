@@ -758,3 +758,11 @@ def test_playable_pad_for_live(site, page):
     if advs:  # Live installed: the preset's root key is the chord's root
         x = gzip.open(advs[0]).read().decode()
         assert re.search(r'<RootKey Value="(\d+)"', x)
+
+
+def test_tab_survives_refresh(page):
+    page.click("#tabC")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='C'", timeout=30000)
+    assert "on" in page.locator("#tabC").get_attribute("class").split()
+    page.click("#tabS")  # leave it where the other tests expect it

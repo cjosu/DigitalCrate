@@ -1379,3 +1379,7 @@ function midiPanel(){const nm=id=>!id?'—':id[0]==='n'?`note ${id.slice(2)} (${
  $('midireset').onclick=()=>{MIDI.map={play:'n:36',next:'n:37',prev:'n:38',star:'n:39',nope:'n:40',pad1:'n:44'};midiSave();midiPanel()}}
 document.addEventListener('click',e=>{const b=e.target.closest('[data-midilearn]');if(!b)return;MIDI.learn=MIDI.learn===b.dataset.midilearn?null:b.dataset.midilearn;midiPanel();if(!MIDI.inputs.length)midiInit()});
 midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permissions.query({name:'midi'}).then(r=>{if(r.state==='granted')midiInit()}).catch(()=>{});
+// ---------- the tab you were on survives a refresh
+{const _rTab=render;render=function(...a){try{localStorage.setItem('dcTab',st.tab)}catch(e){}return _rTab.apply(this,a)};
+ let t=null;try{t=localStorage.getItem('dcTab')}catch(e){}
+ if(t&&t!=='S'&&/^[A-Z]$/.test(t)&&$('tab'+t))window.CRATE.setTab(t)}
