@@ -911,7 +911,8 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
  <input id="skname" placeholder="sketch name" style="width:130px" value="${esc(SK.name||'')}"><button id="sksave" class="${skDirty()?'dirty':''}" title="${skDirty()?'unsaved changes: save to keep this version (⌘S)':'saved (⌘S)'}">${skDirty()?'save •':'save'}</button><select id="skbars" title="bounce / stems / Live set length">${songBars()?`<option value="${songBars()}" selected>song · ${songBars()} bars</option>`:''}<option value="4">4 bars</option><option value="8" ${songBars()?'':'selected'}>8 bars</option><option value="16">16 bars</option></select><button id="skbounce" title="render the mix as a new sample (favourited, with provenance)">⤓ bounce</button>
  <button id="skstems" title="each lane as its own WAV, all the same length from bar 1, in the sketch's key and tempo: drop them into Live and they line up">⇩ stems</button><button id="skals" title="a Live set: one audio track per lane, a clip wherever it plays, at the sketch's tempo (muted lanes come in as muted tracks). Opens in Live.">⇩ Live set</button><button id="skexp" title="export conformed copies + a Drum Rack to Ableton">⇩ Ableton</button><button id="skclear">clear</button></h3>
  ${SK.lanes.map((l,k)=>{if(l.type==='drums')return drumLaneHTML(l,k);const s=S[l.i]||[];const loop=s[F.kind]==='loop';const pu=l.state==='ok'&&!loop?skPulse(l):null;
-  const tags=[l.trim?`✂ ${Math.round((l.trim[1]-l.trim[0])*100)}%`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,l.hold&&LOOPS[l.i]?'∞ held':'',
+  const tbars=l.trim&&l.buf&&barLen()?(l.trim[1]-l.trim[0])*l.buf.duration/barLen():0,tb=Math.round(tbars);
+  const tags=[l.trim?`✂ ${tb>=1&&Math.abs(tbars-tb)<0.004?`${tb} bar${tb>1?'s':''}`:Math.round((l.trim[1]-l.trim[0])*100)+'%'}`:'',l.nat?'orig key':'',loop?'loop':`every ${l.every} · +${l.offset}`,l.hold&&LOOPS[l.i]?'∞ held':'',
    loop||l.state!=='ok'?'':l.src?`tempo-matched to ${PROJ.bpm}`:pu?`pulse ≈ ${pu.bpm} bpm`:'no pulse'].filter(Boolean).join(' · ');
   const fit=!loop&&l.state==='ok'&&pu&&!l.src;
   return`<div class="lane${l.mute?' muted':''}" data-ln="${k}">
@@ -941,7 +942,11 @@ function drawSK(){const el=$('sk');if(typeof drawNP==='function')drawNP();
   else{drag={c,l,anchor:f};l.trim=[f,f]}});
  window.addEventListener('mousemove',e=>{if(drag&&drag.nudgeFrom!=null){drag.l.nudge=Math.max(-2,Math.min(2,drag.n0+(e.clientX-drag.nudgeFrom)/drag.c.clientWidth*drag.l.buf.duration*(e.shiftKey?0.1:1)));
    skWave(drag.c,drag.l.buf,drag.l.trim);return}
-  if(drag){const f=frac(drag.c,e);drag.l.trim=[Math.min(drag.anchor,f),Math.max(drag.anchor,f)];skWave(drag.c,drag.l.buf,drag.l.trim);return}
+  if(drag){let f=frac(drag.c,e);
+   // the length sticks at whole bars (1, 2, 3…) of the project when the edge comes within 8 px of one; ⌥ moves freely
+   const d=drag.l.buf.duration,bar=barLen();if(bar&&!e.altKey){const len=Math.abs(f-drag.anchor)*d,n=Math.round(len/bar),tol=Math.min(0.2*bar,8/drag.c.clientWidth*d);
+    if(n>=1&&Math.abs(len-n*bar)<=tol){const ff=drag.anchor+Math.sign(f-drag.anchor)*n*bar/d;if(ff>=-1e-6&&ff<=1+1e-6)f=Math.max(0,Math.min(1,ff))}}
+   drag.l.trim=[Math.min(drag.anchor,f),Math.max(drag.anchor,f)];skWave(drag.c,drag.l.buf,drag.l.trim);return}
   const c=e.target.closest&&e.target.closest('[data-skw]');if(c){const l=SK.lanes[+c.dataset.skw];const f=frac(c,e),[a,b]=(l&&l.trim)||[0,1],px=7/c.clientWidth;c.style.cursor=l&&l.trim&&(Math.abs(f-a)<=px||Math.abs(f-b)<=px)?'ew-resize':'crosshair'}});
  window.addEventListener('mouseup',()=>{if(!drag)return;if(drag.nudgeFrom!=null){drag=null;drawSK();return}const l=drag.l;if(l.trim&&l.trim[1]-l.trim[0]<0.01)l.trim=null;if(l.trim&&l.trim[0]<0.002&&l.trim[1]>0.998)l.trim=null;drag=null;drawSK()});
  sk.addEventListener('dblclick',e=>{const c=e.target.closest('[data-skw]');if(!c)return;SK.lanes[+c.dataset.skw].trim=null;drawSK()})})();

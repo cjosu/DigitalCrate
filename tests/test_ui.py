@@ -857,3 +857,62 @@ def test_alternate_takes_play_through(page):
     page.wait_for_function(f"st.sel==={nxt}", timeout=5000)
     page.evaluate("stopAll()")
     page.fill("#search", "")
+
+
+def test_editor_selection_sticks_to_bars_and_knobs_need_a_real_grab(page):
+    """Dragging a selection in the editor: its length sticks at whole bars; a click near (not on) a fade knob selects."""
+    page.evaluate("CRATE.setTab('S')")
+    i = page.evaluate("S.findIndex(s=>s[F.kind]==='loop'&&s[F.bpm]>0&&s[F.dur]>240/s[F.bpm]*1.6)")
+    if i < 0:  # no loop long enough: a free sample against the project tempo
+        i = page.evaluate("S.findIndex(s=>s[F.dur]>5)")
+        page.evaluate("PROJ.bpm=120")
+    page.evaluate(f"select({i},'list')")
+    page.evaluate(f"openEditor({i})")
+    page.wait_for_function("ED&&ED.buf&&document.querySelector('#edc')", timeout=30000)
+    box = page.locator("#edc").bounding_box()
+    bar, dur = page.evaluate("edBar()"), page.evaluate("ED.buf.duration")
+    assert bar > 0 and dur > bar * 1.5
+    x = lambda t: box["x"] + t / dur * box["width"]
+    fi0 = page.evaluate("+$('edfi').value")
+    # near the left edge, below the knob: starts a selection, the fade stays as it was
+    page.evaluate("$('edsnap').checked=false")
+    t0 = 0.15 * dur   # well clear of the edges (within 7 px of one, a drag moves that edge instead)
+    page.mouse.move(x(t0), box["y"] + 60)
+    page.mouse.down()
+    page.mouse.move(x(t0 + bar) + 5, box["y"] + 60, steps=8)   # 5 px past one bar: sticks to exactly one
+    page.mouse.up()
+    a, b = page.evaluate("ED.sel")
+    assert abs((b - a) - bar) < 0.002, (a, b, bar)
+    assert "1 bar" in page.inner_text("#edsel")
+    assert page.evaluate("+$('edfi').value") == fi0
+    # a click 20 px down, right by the fade-in knob, is not a knob grab
+    page.mouse.move(x(a) + 6, box["y"] + 22)
+    page.mouse.down()
+    page.mouse.move(x(a) + 80, box["y"] + 22, steps=4)
+    page.mouse.up()
+    assert page.evaluate("+$('edfi').value") <= max(fi0, 10)
+    page.keyboard.press("Escape")
+
+
+def test_lane_trim_sticks_to_bars(page):
+    """Dragging a part of a sketchpad lane: its length sticks at whole bars of the project."""
+    i = page.evaluate("S.findIndex(s=>s[F.cat]!=='Percussion'&&s[F.dur]>6)")
+    assert i >= 0
+    n0 = page.evaluate("SK.lanes.length")
+    page.evaluate(f"CRATE.skAdd({i})")
+    page.wait_for_function(f"SK.lanes.length>{n0}&&SK.lanes[SK.lanes.length-1].state==='ok'", timeout=60000)
+    k = page.evaluate("SK.lanes.length-1")
+    c = page.locator(f'[data-skw="{k}"]')
+    c.scroll_into_view_if_needed()
+    box = c.bounding_box()
+    dur, bar = page.evaluate(f"SK.lanes[{k}].buf.duration"), page.evaluate("CRATE.barLen()")
+    assert dur > bar * 1.2
+    x = lambda t: box["x"] + t / dur * box["width"]
+    t0 = 0.15 * dur   # well clear of the edges
+    page.mouse.move(x(t0), box["y"] + 15)
+    page.mouse.down()
+    page.mouse.move(x(t0 + bar) + 4, box["y"] + 15, steps=8)   # 4 px past one bar
+    page.mouse.up()
+    a, b = page.evaluate(f"SK.lanes[{k}].trim")
+    assert abs((b - a) * dur - bar) < 0.003, ((b - a) * dur, bar)
+    assert "1 bar" in page.locator(".lane .meta").last.inner_text()

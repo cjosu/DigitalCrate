@@ -408,7 +408,7 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
  box.innerHTML=`<canvas id="edc" style="width:100%;height:120px;background:#101317;border-radius:6px;cursor:crosshair"></canvas>
  <div class="sub" id="edsel">drag to select · double-click selects one syllable/note · loading…</div>
  <div class="edrow"><button id="edplay">▶ selection</button><label class="sub"><input type="checkbox" id="edloop" checked> loop</label>
- <label class="sub"><input type="checkbox" id="edsnap" checked> snap to syllables</label><button id="edall">select all</button><button id="edzoom">🔍 zoom to selection</button><span class="sub">wheel = zoom</span></div>
+ <label class="sub"><input type="checkbox" id="edsnap" checked> snap to syllables</label><label class="sub" id="edbarsl" title="while you drag, the selection's length sticks at 1, 2, 3… bars (the sample's tempo, or the project's). Hold ⌥ to move freely"><input type="checkbox" id="edbars" checked> stick to bars</label><button id="edall">select all</button><button id="edzoom">🔍 zoom to selection</button><span class="sub">wheel = zoom</span></div>
  <div class="edgrid"><span>Stretch</span><input type="range" id="edst" min="0.5" max="4" step="0.05" value="1"><span id="edstv">1×</span>
  <span>Pitch</span><input type="range" id="edpi" min="-12" max="12" step="1" value="0"><span id="edpiv">0 st</span>
  <span>Loop crossfade</span><input type="range" id="edxf" min="0" max="1000" step="10" value="20"><span id="edxfv">20 ms</span>
@@ -436,9 +436,17 @@ async function openEditor(i){const box=$('editor');if(!box)return;if(!box.hidden
   const edge=edEdgeAt(e);if(edge){down=edge==='a'?ED.sel[1]:ED.sel[0];return}
   down=snap(tx(e));ED.sel=[down,down];edDraw()};
  c.onmousemove=e=>{if(drag){const t=tx(e),[a,b]=ED.sel;edSetEnv(drag,Math.max(0,(drag==='in'||drag==='xin'?t-a:b-t))*1000);return}
-  c.style.cursor=down!=null||edHandleAt(e)||edEdgeAt(e)?'ew-resize':'crosshair';if(down==null)return;const t=tx(e);ED.sel=[Math.min(down,t),Math.max(down,t)];edDraw()};
+  c.style.cursor=down!=null||edHandleAt(e)||edEdgeAt(e)?'ew-resize':'crosshair';if(down==null)return;let t=tx(e);
+  // the length sticks at whole bars (1, 2, 3…) when the edge comes within 8 px of one; ⌥ lets it move freely
+  ED.stuck=0;const bar=edBar();if(bar&&!e.altKey&&$('edbars').checked){const [v0,v1]=edView(),tol=Math.min(0.2*bar,8*(v1-v0)/c.clientWidth),n=Math.round(Math.abs(t-down)/bar);
+   if(n>=1&&Math.abs(Math.abs(t-down)-n*bar)<=tol){const tt=down+Math.sign(t-down)*n*bar;if(tt>=0&&tt<=ED.buf.duration+1e-6){t=Math.min(ED.buf.duration,tt);ED.stuck=n}}}
+  ED.sel=[Math.min(down,t),Math.max(down,t)];edDraw()};
  window.addEventListener('mouseup',()=>{if(drag){drag=null;['edxf','edfi','edfo'].forEach(id=>$(id).dispatchEvent(new Event('change')));return}
-  if(down==null)return;down=null;ED.sel=[snap(ED.sel[0]),snap(ED.sel[1])];if(ED.sel[1]-ED.sel[0]<0.03)ED.sel=[0,ED.buf.duration];edDraw();edChanged()},{once:false});
+  if(down==null)return;down=null;if(!ED.stuck)ED.sel=[snap(ED.sel[0]),snap(ED.sel[1])];  // a whole-bar length stays exactly that
+  if(ED.sel[1]-ED.sel[0]<0.03)ED.sel=[0,ED.buf.duration];
+  // fades set for a longer selection would swallow a short one (it'd be all fade): back to the defaults
+  const len=ED.sel[1]-ED.sel[0];[['edfi',10],['edfo',40],['edxf',20]].forEach(([id,def])=>{const el=$(id);if(+el.value/1000>len*0.25){el.value=Math.min(def,Math.floor(len*250/5)*5);el.dispatchEvent(new Event('input'))}});
+  edDraw();edChanged()},{once:false});
  c.ondblclick=e=>{const t=tx(e),b=[0,...ED.onsets,ED.buf.duration];let k=b.findIndex(x=>x>t);if(k<1)k=1;ED.sel=[b[k-1],b[k]];edDraw();
  if(ED.P&&ED.P.loop)edChanged();else edPlaySel()};
  $('edplay').onclick=edToggleSel;$('edzoom').onclick=()=>{const d=ED.buf.duration;ED.view&&(ED.view[1]-ED.view[0])<d-1e-3?edZoom(null):edZoom('sel')};$('edall').onclick=()=>{ED.sel=[0,ED.buf.duration];edDraw();edChanged()};
@@ -492,8 +500,9 @@ function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.d
  const [a,b]=ED.sel,X=t=>edX(t,W),e=edEnv(),top=6*dpr,bot=H-14*dpr,mid=(top+bot)/2,amp=(bot-top)/2;
  const gain=t=>{if(t<a||t>b)return 1;const gi=e.fin>0?Math.min(1,(t-a)/e.fin):1,tail=e.loop?e.xf:e.fout,go=tail>0?Math.min(1,(b-t)/tail):1;return Math.min(gi,go)};
  g.clearRect(0,0,W,H);g.fillStyle='rgba(224,164,88,.10)';g.fillRect(X(a),0,X(b)-X(a),H);
- ED.peaks.forEach(([mn,mx],x)=>{const t=edT(x/dpr,W/dpr),inS=t>=a&&t<=b,k=inS?gain(t):1;g.fillStyle=inS?'#8cc0da':'#3f4e58';
-  g.fillRect(x,mid-mx*amp*k,1,Math.max(1,(mx-mn)*amp*k))});
+ ED.peaks.forEach(([mn,mx],x)=>{const t=edT(x/dpr,W/dpr),inS=t>=a&&t<=b,k=inS?gain(t):1;
+  if(inS&&k<0.98){g.fillStyle='rgba(140,192,218,.28)';g.fillRect(x,mid-mx*amp,1,Math.max(1,(mx-mn)*amp))}  // what's there before the fade
+  g.fillStyle=inS?'#8cc0da':'#3f4e58';g.fillRect(x,mid-mx*amp*k,1,Math.max(1,(mx-mn)*amp*k))});
  g.fillStyle='rgba(255,255,255,.28)';ED.onsets.forEach(t=>g.fillRect(X(t),H-7*dpr,1*dpr,7*dpr));
  g.fillStyle='#e0a458';[a,b].forEach(t=>{g.fillRect(X(t)-1*dpr,0,2*dpr,H);g.fillRect(X(t)-3*dpr,mid-10*dpr,6*dpr,20*dpr)});
  const line=(x0,y0,x1,y1,col,dash)=>{g.save();g.strokeStyle=col;g.lineWidth=1.5*dpr;g.setLineDash(dash?[4*dpr,3*dpr]:[]);g.beginPath();g.moveTo(x0,y0);g.lineTo(x1,y1);g.stroke();g.restore()};
@@ -502,9 +511,13 @@ function edDraw(){const c=$('edc');if(!c||!ED||!ED.buf)return;const dpr=window.d
   if(e.xf>0){line(X(b-e.xf),top,X(b),bot,'#e0a458');line(X(a),bot,X(a+e.xf),top,'#e0a458',true)}}
  else if(e.fout>0)line(X(b-e.fout),top,X(b),bot,'#ffffff');
  edKnobs().forEach(k=>{g.beginPath();g.arc(X(k.t),top,(k.small?4:6)*dpr,0,Math.PI*2);g.fillStyle=k.col;g.fill();g.lineWidth=2*dpr;g.strokeStyle='#101317';g.stroke()});
- $('edsel').textContent=`selection ${a.toFixed(2)}–${b.toFixed(2)} s (${(b-a).toFixed(2)} s) · fade in ${Math.round(e.fin*1000)} ms · `+
+ const bar=edBar(),nb=bar?(b-a)/bar:0,bars=bar&&Math.abs(nb-Math.round(nb))<0.004&&Math.round(nb)>=1?` · ${Math.round(nb)} bar${Math.round(nb)>1?'s':''}`:'';
+ if($('edbarsl'))$('edbarsl').hidden=!bar;
+ $('edsel').textContent=`selection ${a.toFixed(2)}–${b.toFixed(2)} s (${(b-a).toFixed(2)} s${bars}) · fade in ${Math.round(e.fin*1000)} ms · `+
   (e.loop?`loop crossfade ${Math.round(e.xf*1000)} ms`:`fade out ${Math.round(e.fout*1000)} ms`)+(e.loop?` · fade out on stop ${Math.round(e.fout*1000)} ms`:'')+` · drag knobs to adjust`;
  edPaint()}
+// one bar in this sample's own time: its tempo if it has one (loops), else the project's
+function edBar(){if(!ED)return 0;const own=S[ED.i]&&S[ED.i][F.bpm],pj=(typeof PROJ!=='undefined'&&PROJ&&PROJ.bpm)||0,bpm=own||pj;return bpm?240/bpm:0}
 function edView(){const d=ED.buf.duration,v=ED.view||[0,d];return [Math.max(0,v[0]),Math.min(d,v[1])]}
 function edX(t,W){const [v0,v1]=edView();return (t-v0)/(v1-v0)*W}
 function edT(px,W){const [v0,v1]=edView();return Math.max(0,Math.min(ED.buf.duration,v0+px/W*(v1-v0)))}
@@ -516,7 +529,7 @@ function edKnobs(){const e=edEnv(),[a,b]=ED.sel;const k=[{id:'in',t:a+e.fin,col:
  if(e.loop){k.push({id:'xout',t:b-e.xf,col:'#e0a458'},{id:'xin',t:a+e.xf,col:'#e0a458',small:true})}else k.push({id:'out',t:b-e.fout,col:'#ffffff'});return k}
 function edEdgeAt(ev){const c=$('edc');if(!ED||!ED.buf)return null;const [a,b]=ED.sel,W=c.clientWidth;
  const da=Math.abs(ev.offsetX-edX(a,W)),db=Math.abs(ev.offsetX-edX(b,W));if(Math.min(da,db)>7)return null;return da<db?'a':'b'}
-function edHandleAt(ev){const c=$('edc');if(ev.offsetY>24)return null;let best=null,bd=10;
+function edHandleAt(ev){const c=$('edc');if(ev.offsetY>15)return null;let best=null,bd=8;  // on the knob itself (6 px from the top), not just near it
  edKnobs().forEach(k=>{const d=Math.abs(ev.offsetX-edX(k.t,c.clientWidth));if(d<bd){bd=d;best=k.id}});return best}
 function edSetEnv(which,ms){const el={in:$('edfi'),out:$('edfo'),xin:$('edxf'),xout:$('edxf')}[which],st=+el.step||1;
  el.value=Math.round(ms/st)*st;el.dispatchEvent(new Event('input'))}
