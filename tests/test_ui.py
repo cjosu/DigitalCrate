@@ -916,3 +916,57 @@ def test_lane_trim_sticks_to_bars(page):
     a, b = page.evaluate(f"SK.lanes[{k}].trim")
     assert abs((b - a) * dur - bar) < 0.003, ((b - a) * dur, bar)
     assert "1 bar" in page.locator(".lane .meta").last.inner_text()
+
+
+STEM_SONGS = r'''
+import json, numpy as np, soundfile as sf
+from digitalcrate import stems, config as C
+SR = C.SR
+for tid, bpm, pc in ((901, 100, 0), (902, 110, 2), (903, 92, 7)):
+    d = stems.DIR / f"t{tid}"; d.mkdir(parents=True, exist_ok=True)
+    bar, nb = 240.0 / bpm, 16
+    t = np.arange(int(nb * bar * SR)) / SR
+    tone = lambda f: (0.25 * np.sin(2 * np.pi * f * t)).astype(np.float32)
+    click = (0.5 * (np.modf(t / (bar / 4))[0] < 0.02) * np.sin(2 * np.pi * 90 * t)).astype(np.float32)
+    root = 220 * 2 ** ((pc - 9) / 12)
+    parts = dict(drums=click, bass=tone(root / 2), vocals=tone(root * 2), other=tone(root) + tone(root * 1.26) + tone(root * 1.5))
+    for k, y in parts.items():
+        sf.write(str(d / f"{k}.flac"), np.stack([y, y]).T, SR, format="FLAC", subtype="PCM_16")
+    ch = np.zeros(12); ch[[pc, (pc + 4) % 12, (pc + 7) % 12]] = 1; ch /= np.linalg.norm(ch)
+    e = np.zeros((4, 512), np.float16); e[:, tid % 512] = 1; np.save(d / "emb.npy", e)
+    (d / "meta.json").write_text(json.dumps(dict(track=tid, artist=f"Stem Artist {tid}", title="Song", bpm=bpm, pc=pc,
+        scale="major", camelot="8B", bars=[round(b * bar, 4) for b in range(nb + 1)], act={k: [1.0] * nb for k in stems.STEMS},
+        chroma=[ch.round(3).tolist()] * nb, stems=list(stems.STEMS), separated=False)))
+print("STEMS OK")
+'''
+
+
+def test_stem_mixer_deals_plays_and_learns(site, page):
+    """🎛 Stems: prepared songs, 🎲 all fills the slots with parts rendered to the tempo, they loop in sync, and a
+    rating is logged."""
+    # three prepared songs written straight into the test library (the beat tracker doesn't take the synthetic songs)
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    n = json.load(urllib.request.urlopen(urllib.request.Request(site["base"] + "api/stems/library", data=b"{}", method="POST")))["n"]
+    assert n == 3
+    page.click("#tabM")
+    page.wait_for_selector("#mxall")
+    page.fill("#mxbpm", "100")
+    page.dispatch_event("#mxbpm", "change")
+    page.click("#mxall")
+    page.wait_for_function("CRATE.MX.on&&Object.values(CRATE.MX.slots).some(p=>p&&p.buf)", timeout=90000)
+    slots = page.evaluate("Object.fromEntries(Object.entries(CRATE.MX.slots).map(([k,p])=>[k,{n:p.n,dur:p.buf?p.buf.duration:0,track:p.track}]))")
+    for k, p in slots.items():
+        if p["dur"]:
+            assert abs(p["dur"] - p["n"] * 2.4) < 0.01, (k, p)   # n bars at 100 bpm, whatever the song's tempo
+    stem = next(k for k, p in slots.items() if p["dur"])
+    page.select_option(f'[data-mxlen="{stem}"]', "2")
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
+    page.click("#mxup")
+    page.wait_for_function("CRATE.MX.rated>0", timeout=10000)
+    page.click("#mxplay")
+    assert page.evaluate("CRATE.MX.on") is False
+    page.reload()                                   # the tab and the combination come back
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'", timeout=30000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].n===2", timeout=10000)
+    page.click("#tabS")

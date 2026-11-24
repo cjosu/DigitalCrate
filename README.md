@@ -57,6 +57,8 @@ models.
 - **Pads** hold one or two chords and loop seamlessly; **🎹 playable** turns one into a Simpler instrument tuned to
   its chord, with its chords as MIDI.
 - **Goes well with** lists samples that fit by key, tempo and sound; **⧉** plays a pair together.
+- **🎛 Stems** (prototype) recombines drums, bass, vocals and the rest from different songs on one tempo and key,
+  and learns which combinations you like.
 - **💡 why this?** explains any recommendation; **🕘 recent actions** undoes anything.
 - Arrow keys preview as you move; drag any row straight into Live.
 

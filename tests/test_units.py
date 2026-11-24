@@ -444,3 +444,70 @@ def test_alternate_takes_grouping_rules():
     assert same_take(p1, p2, 0.95, 0.95, set(), set()) and not same_take(p1, p2, 0.95, 0.6, set(), set())  # same notes
     assert not same_take(p1, s("Chords & Keys", "Free", 12, 8.0), 0.95, 0.95, set(), set())  # overlapping cuts
     assert not same_take(p1, s("Chords & Keys", "Free", 40, 2.0), 0.95, 0.95, set(), set())  # very different lengths
+
+
+def _fake_stem_song(tmp, tid, bpm, pc, scale, chroma_pc, monkeypatch=None):
+    """A prepared song for the stem mixer without a separator: 24 bars of a held triad on each stem."""
+    import json, soundfile as sf
+    from digitalcrate import stems
+    d = stems.DIR / f"t{tid}"
+    d.mkdir(parents=True, exist_ok=True)
+    bar = 240.0 / bpm
+    nb = 24
+    t = np.arange(int(nb * bar * SR)) / SR
+    y = (0.3 * sum(np.sin(2 * np.pi * 220 * 2 ** ((chroma_pc + k - 9) / 12) * t) for k in (0, 4, 7))).astype(np.float32)
+    for k in stems.STEMS:
+        sf.write(str(d / f"{k}.flac"), np.stack([y, y]).T, SR, format="FLAC", subtype="PCM_16")
+    ch = np.zeros(12); ch[[chroma_pc, (chroma_pc + 4) % 12, (chroma_pc + 7) % 12]] = 1; ch /= np.linalg.norm(ch)
+    e = np.zeros((4, 512), np.float16); e[:, tid % 512] = 1
+    np.save(d / "emb.npy", e)
+    meta = dict(track=tid, artist=f"A{tid}", title=f"T{tid}", bpm=bpm, pc=pc, scale=scale, camelot="8B",
+                bars=[round(b * bar, 4) for b in range(nb + 1)], act={k: [1.0] * nb for k in stems.STEMS},
+                chroma=[ch.round(3).tolist()] * nb, stems=list(stems.STEMS), separated=False)
+    (d / "meta.json").write_text(json.dumps(meta))
+
+
+def test_stem_mixer_renders_fits_and_learns(tmp_path, monkeypatch):
+    import soundfile as sf
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    import sqlite3
+    def _con():  # its own database: never the library's
+        c = sqlite3.connect(tmp_path / "t.sqlite"); c.row_factory = sqlite3.Row
+        return c
+    monkeypatch.setattr(stems, "connect", _con)
+    stems._LIB.update(n=-1, lib={})
+    stems._EMB.clear()
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)    # C major, playing C
+    _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)    # D major, playing D
+    _fake_stem_song(tmp_path, 3, 100, 0, "major", 6)    # says C major but plays F#: a wrong key on file
+    _fake_stem_song(tmp_path, 4, 160, 0, "major", 0)    # far too fast
+    lib = stems.library()
+    assert set(lib) == {1, 2, 3, 4}
+    # a part is exactly n bars at the mixer's tempo, whatever the song's own tempo
+    f = stems.render(2, "other", 4, 2, 100, semis=-2)
+    info = sf.info(str(f))
+    assert info.frames == round(2 * 240 / 100 * SR)
+    # keys: D major comes down two semitones to C; relative minor counts as the same key
+    assert stems.key_semis(lib[2], (0, "major")) == -2 and stems.key_semis(lib[1], (9, "minor")) == 0
+    assert stems.parse_key("F#m") == (6, "minor") and stems.parse_key("Bb") == (10, "major")
+    # harmony fit: the same notes after shifting = 1; a song that plays something else than its key says, low
+    a, b, c = (lib[1], 0, 4, 0), (lib[2], 0, 4, -2), (lib[3], 0, 4, 0)
+    assert stems.fit(a, b) > 0.98 and stems.fit(a, c) < 0.4
+    # picking a bass part under song 1's "other": never the too-fast song, and the one that fits wins
+    con = stems._db()
+    state = dict(bpm=100, key=None, slots=dict(other=dict(track=1, bar0=0, n=4, off=0)))
+    picks = [stems.pick("bass", state, rng=np.random.default_rng(k)) for k in range(12)]
+    assert all(p["track"] not in (1, 4) for p in picks)  # not the song already playing, not the too-fast one
+    assert sum(p["track"] == 2 for p in picks) >= 9
+    assert stems.info(dict(state, slots=dict(state["slots"], bass=dict(track=2, bar0=0, n=4, off=0))))["fit"] > 0.98
+    # learning: the guesses until a dozen ratings; then the weights move toward what you rated
+    w0, n0 = stems.weights(con)
+    assert n0 == 0 and np.allclose(w0, stems.W0)
+    good = dict(state, slots=dict(state["slots"], bass=dict(track=2, bar0=0, n=4, off=0)))
+    bad = dict(state, slots=dict(state["slots"], bass=dict(track=3, bar0=0, n=4, off=0)))
+    for _ in range(8):
+        stems.log("like", good, "bass"); stems.log("dislike", bad, "bass")
+    w1, n1 = stems.weights(con)
+    assert n1 == 16 and w1[stems.FEATURES.index("fit")] > stems.W0[stems.FEATURES.index("fit")]

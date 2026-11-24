@@ -2,7 +2,7 @@
 
 Everything the [README](../README.md) skips. The small **?** buttons in the app explain features in place too.
 
-- [Browse](#browse) · [Sketchpad](#sketchpad) · [Drum lane](#drum-lane) · [Chords](#chords) · [Pads](#pads) ·
+- [Browse](#browse) · [Sketchpad](#sketchpad) · [Drum lane](#drum-lane) · [Stem mixer](#stem-mixer) · [Chords](#chords) · [Pads](#pads) ·
   [Drum Racks from songs](#drum-racks-from-songs) · [Search](#search) · [Editing](#editing) · [Taste](#taste) ·
   [Scout](#scout) · [Organizing](#organizing) · [Mining](#mining-and-sources) · [Export](#export) · [Keyboard and MIDI](#keyboard-and-midi) ·
   [How it works](#how-it-works) · [Command line](#command-line) · [Library on disk](#the-library-on-disk) ·
@@ -75,6 +75,26 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
   its decay, or open the full editor. Each pad has a volume fader; every change is heard immediately.
 - **🥁 slice into pads** cuts a drum loop at its hits, each on its step, ready to re-sequence.
 - **⇩ MIDI + rack** writes a Drum Rack of the pads and a MIDI clip of the pattern for Live.
+
+## Stem mixer
+
+**🎛 Stems** recombines songs: drums, bass, vocals and "other" (keys, guitars, pads), each from a different song,
+all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md](plans/stems.md).
+
+- **Prepare songs first:** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
+  (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used; hip-hop
+  gives vocals only.
+- **🎲** on a slot pulls another part that fits what's playing; **🎲 all** deals every unlocked slot; **🔒** keeps a
+  part. A slot avoids songs that are already playing in another slot.
+- **Per slot:** where the loop starts (◀ ▶), its length (1–8 bars), your own pitch offset (− ＋; drums keep their
+  pitch), volume, solo and mute, a 3-band EQ and a tempo-synced delay. Everything but pitch, position and length is
+  live.
+- **Tempo and key** are the mixer's own. *Auto* key follows the "other" slot. Parts are stretched to the tempo and
+  shifted by the smallest interval to the key.
+- **Harmony fit** compares the pitched parts' notes bar by bar after shifting (100% = the same notes). New parts are
+  picked to fit.
+- **It learns:** 👍 and 👎 rate the whole combination; a part you throw out within seconds counts a little against
+  it, one you keep or lock a little for it. After a dozen ratings the recommendations adapt.
 
 ## Chords
 
@@ -245,6 +265,7 @@ loops [--redo]                     find sustain loops in pads, drones and held c
 pads [--redo] [--no-move]          label chords of sustained samples; move non-pads to Strings & Orchestral
 pads --mine [--limit N]            look at mined songs again for pads only (adds, removes nothing)
 grain [--recut]                    score stem samples for separation grain; --recut: cut grainy ones again
+stems [--random N] [--limit N]     prepare songs for the stem mixer (favorites' sources + N random)
 sections [--limit N]               song sections (needs All-In-One)
 reloop [--fix]                     re-cut older loops onto downbeats
 ```

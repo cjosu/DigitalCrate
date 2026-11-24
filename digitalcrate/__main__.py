@@ -14,7 +14,7 @@ from . import config as C
 # around never runs five copies at once and fills memory. Two slots: one for what you start (mining, ingest, scout),
 # one for library passes, so a long pass never holds up your scouting. A job waiting for its slot says so in its log.
 FOREGROUND = {"process", "drums", "ingest", "ytscout", "shootout", "reclassify", "mangle", "transform"}
-BACKGROUND_PASSES = {"sections", "pads", "styles", "lyrics", "grain"}
+BACKGROUND_PASSES = {"sections", "pads", "styles", "lyrics", "grain", "stems"}
 _SLOT = None
 
 
@@ -89,6 +89,10 @@ def main():
     sc.add_argument("--limit", type=int)
     lo = sub.add_parser("loops", help="find seamless sustain loops in pads, drones and held chords")
     lo.add_argument("--redo", action="store_true", help="look again at samples already done")
+    sm = sub.add_parser("stems", help="prepare songs for the stem mixer (separate and keep their stems)")
+    sm.add_argument("--random", type=int, default=40, help="random mined songs on top of your favorites' sources")
+    sm.add_argument("--limit", type=int, help="at most N songs this run")
+    sm.add_argument("--no-separate", action="store_true", help="tests: rough stand-in stems, no separator")
     gr = sub.add_parser("grain", help="check stem samples for separation grain (grainy ones rank lower)")
     gr.add_argument("--redo", action="store_true")
     gr.add_argument("--recut", action="store_true", help="cut the grainy samples again with the better separator (in place)")
@@ -280,6 +284,9 @@ def main():
     elif a.cmd == "sections":
         from .sections import run as sections
         sections(a.limit)
+    elif a.cmd == "stems":
+        from .stems import prepare
+        prepare(a.random, a.limit, separate=not a.no_separate)
     elif a.cmd == "grain":
         if a.recut:
             from .grain import recut

@@ -35,7 +35,7 @@ def _saved_jobs():
         return {}
 
 
-BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pads", "grain"}
+BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pads", "grain", "stems"}
 _SLOW = {}
 
 
@@ -586,6 +586,27 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json({"error": "not a library file"}, 400)
                 subprocess.Popen(["open", "-R", str(f)])
                 return self._json({"ok": True})
+            elif self.path.startswith("/api/stems/"):
+                from . import stems as SM
+                what, state = self.path.rsplit("/", 1)[1], req.get("state") or {}
+                if what == "library":
+                    lib = SM.library()
+                    return self._json(dict(n=len(lib), rated=SM.weights()[1], songs=[
+                        dict(track=t, artist=m["artist"], title=m["title"], bpm=m["bpm"], bars=len(m["bars"]) - 1,
+                             key=SM.NOTES[m["pc"]] + ("m" if m["scale"] == "minor" else ""), stems=m["stems"])
+                        for t, m in lib.items()]))
+                if what == "pick":
+                    return self._json(dict(part=SM.pick(req["stem"], state, avoid=set(req.get("avoid") or []),
+                                                        n=req.get("n")), info=SM.info(state)))
+                if what == "render":
+                    f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0)
+                    return self._json(dict(url=str(f.relative_to(C.LIB_ROOT))))
+                if what == "info":
+                    return self._json(SM.info(state))
+                if what == "event":
+                    n = SM.log(req["kind"], state, req.get("stem"))
+                    return self._json(dict(logged=n, rated=SM.weights()[1]))
+                return self._json({"error": "unknown"}, 404)
             elif self.path == "/api/pad/playable":
                 from .pads import playable
                 return self._json(playable(path, reveal=req.get("reveal", True)))
