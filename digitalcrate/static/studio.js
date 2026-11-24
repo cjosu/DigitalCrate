@@ -518,7 +518,9 @@ function skAttack(l){const [r0,R]=skRegion(l),key=`${r0}|${R}`;if(l.att&&l.att.k
 let reloadSeq=0;
 async function skReload(){if(!SK.lanes.length)return;const seq=++reloadSeq,was=SK.playing;if(was)skStop();SK.lanes.forEach(l=>l.state='loading');drawSK();
  await Promise.all(SK.lanes.map(skLoad));if(seq!==reloadSeq)return;drawSK();if(was)skPlay()}
-function skGains(){const solo=SK.lanes.some(l=>l.solo);SK.lanes.forEach(l=>{if(l.g)l.g.gain.setTargetAtTime(l.mute||(solo&&!l.solo)?0:laneGain(l),AC.currentTime,0.02)})}
+// a soloed drum pad solos its lane too: you hear just that pad
+const laneSolo=l=>l.solo||(l.type==='drums'&&l.pads.some(p=>p.solo));
+function skGains(){const solo=SK.lanes.some(laneSolo);SK.lanes.forEach(l=>{if(l.g)l.g.gain.setTargetAtTime(l.mute||(solo&&!laneSolo(l))?0:laneGain(l),AC.currentTime,0.02)})}
 if(Object.keys(D.sections||{}).length&&$('secsel'))$('secsel').hidden=false;  // the section filter, once sections exist
 // ---------- sustain loops (loopfind.py): where a pad, drone or held chord loops seamlessly. D.loops[i] = [start, end, crossfade]
 const LOOPS=D.loops||{},HOLDBUF=new Map();
@@ -639,7 +641,7 @@ function drumLaneHTML(l,k){const n=16*l.bars;
   <button class="tbtn${(p.takes||[]).length?' on':''}" data-dtakes="${k}:${r}" title="${(p.takes||[]).length?`alternating ${p.takes.length+1} takes of this hit (round robin) · ⇧-click a step to pin it to one take · click to show or hide its takes row (hear each, pick the main one, shuffle, off)`:'alternate takes (round robin): cycle through other hits of this drum from the same song, so repeated hits sound played, not copied'}">🔁${(p.takes||[]).length?' '+(p.takes.length+1):''}</button>
   <select class="dchoke" data-dchoke="${k}:${r}" title="choke group: pads in the same group cut each other off, like a real hi-hat (a closed hat silences a ringing open hat). Put both hats in group 1; pads with no choke ring over each other"><option value="0">no choke</option>${[1,2,3].map(g=>`<option value="${g}" ${p.choke===g?'selected':''}>choke grp ${g}</option>`).join('')}</select>
   <span class="dvol" title="this pad's volume against the other pads (every pad starts equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-dpv="${k}:${r}"><output>${dbTxt(p.db||0)}</output></span>
-  <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>${p.tkopen!==false?takesHTML(k,p,r):''}${p.open?padEditHTML(l,k,p,r):''}`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
+  <span class="dsm"><button class="tbtn${p.solo?' on':''}" data-dsolo="${k}:${r}" title="solo: hear only this pad (and any other soloed pads)">S</button><button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button></span><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>${p.tkopen!==false?takesHTML(k,p,r):''}${p.open?padEditHTML(l,k,p,r):''}`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
 function drumFindHTML(l,k){const f=l.find;if(!f)return'';if(f.loading&&!f.missing)return '<div class="sub dfind">listening for hits that match this kit…</div>';if(f.error)return `<div class="sub dfind">${esc(f.error)}</div>`;
  const rows=f.missing.filter(m=>f.all||!m.have);
  const pick=(m,p)=>{const i=byPath.get(p.path);if(i==null)return'';const s=S[i];const steer=f.steer[m.kind]===p.path;
@@ -657,7 +659,7 @@ async function drumFind(l,keep){const prev=l.find||{};l.find={...prev,loading:tr
 function drumHeads(){const now=AC.currentTime;SK.lanes.forEach((l,k)=>{if(l.type!=='drums')return;const g=document.querySelector(`[data-dgrid="${k}"]`);if(!g)return;
  const L=barLen(),v=(l.sched||[]).filter(x=>now>=x.t&&now<x.t+L).pop(),cur=SK.playing&&v?(v.bar%l.bars)*16+Math.floor((now-v.t)/(L/16)):-1;
  if(g._cur===cur)return;g._cur=cur;g.querySelectorAll('.dstep.now').forEach(b=>b.classList.remove('now'));if(cur>=0)g.querySelectorAll(`[data-dstep$=":${cur}"]`).forEach(b=>b.classList.add('now'))})}
-$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dstart],[data-dclear],[data-dfind],[data-dfplay],[data-dfadd],[data-dfmore],[data-dfno],[data-dfsteer]');if(!t)return;e.stopPropagation();
+$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep],[data-dpad],[data-dpx],[data-dmute],[data-dsolo],[data-dstart],[data-dclear],[data-dfind],[data-dfplay],[data-dfadd],[data-dfmore],[data-dfno],[data-dfsteer]');if(!t)return;e.stopPropagation();
  if(t.dataset.dfmore!=null){const [k,kind,d]=t.dataset.dfmore.split('|'),f=SK.lanes[+k].find;f.off[kind]=Math.max(0,(f.off[kind]||0)+(+d));drawSK();return}
  if(t.dataset.dfno!=null){const [k,,p]=t.dataset.dfno.split('|');SK.lanes[+k].find.hidden.add(p);drawSK();return}
  if(t.dataset.dfsteer!=null){const [k,kind,p]=t.dataset.dfsteer.split('|'),l=SK.lanes[+k];if(l.find.steer[kind]===p)delete l.find.steer[kind];else l.find.steer[kind]=p;drumFind(l,true);return}
@@ -673,6 +675,7 @@ $('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep
  if(t.dataset.dpad){const [k,r]=t.dataset.dpad.split(':').map(Number),p=SK.lanes[k].pads[r];if(!p.buf)return;AC.resume();
   const one={...SK.lanes[k],pads:[{...p,steps:[1],mute:false,solo:false}],bars:1,swing:0};drumBar(AC,AC.destination,one,0,AC.currentTime+0.01,barLen(),null);return}
  if(t.dataset.dmute){const [k,r]=t.dataset.dmute.split(':').map(Number),p=SK.lanes[k].pads[r];p.mute=!p.mute;drawSK();return}
+ if(t.dataset.dsolo){const [k,r]=t.dataset.dsolo.split(':').map(Number),p=SK.lanes[k].pads[r];p.solo=!p.solo;skGains();drawSK();return}
  if(t.dataset.dpx){const [k,r]=t.dataset.dpx.split(':').map(Number),l=SK.lanes[k];l.pads.splice(r,1);if(!l.pads.length)SK.lanes.splice(k,1);if(!SK.lanes.length)skStop();drawSK();drawProj();return}
  const l=SK.lanes[+(t.dataset.dstart??t.dataset.dclear)];
  if(t.dataset.dclear!=null){l.pads.forEach(p=>p.steps.fill(0));drawSK();return}
@@ -781,7 +784,7 @@ $('sk').addEventListener('change',e=>{if(e.target.id==='skbpm')skTempo(+e.target
 $('sk').addEventListener('keydown',e=>{if(e.target.id==='skbpm'&&e.key==='Enter')e.target.blur()},true);
 // ---------- sketch state: one definition, used by save, bounce provenance, undo/redo, "unsaved" and the draft
 function skLanesState(){return SK.lanes.map(l=>l.type==='drums'?{type:'drums',secs:l.secs||null,bars:l.bars,swing:l.swing,db:l.db||0,mute:!!l.mute,solo:!!l.solo,
-  human:l.human||0,pads:l.pads.map(p=>({path:p.path,label:p.label||null,db:p.db||0,mute:!!p.mute,steps:p.steps.slice(),flams:(p.flams||[]).slice(),choke:p.choke||0,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto,takes:(p.takes||[]).slice(),pins:(p.pins||[]).slice(),order:p.order||'cycle',seed:p.seed||1}))}
+  human:l.human||0,pads:l.pads.map(p=>({path:p.path,label:p.label||null,db:p.db||0,mute:!!p.mute,solo:!!p.solo,steps:p.steps.slice(),flams:(p.flams||[]).slice(),choke:p.choke||0,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto,takes:(p.takes||[]).slice(),pins:(p.pins||[]).slice(),order:p.order||'cycle',seed:p.seed||1}))}
  :({path:l.path,secs:l.secs||null,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:!!l.mute,solo:!!l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat,hold:!!l.hold}))}
 const skSnap=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:SK.name||'',arr:SK.arr||'',sec:SK.sec||4,lanes:skLanesState()});
 const EMPTY_SNAP=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:'',arr:'',sec:4,lanes:[]});
@@ -960,8 +963,8 @@ $('sk').addEventListener('click',async e=>{const t=e.target;
  if(t.id==='skstems'){skStems(+$('skbars').value);return}if(t.id==='skals'){skStems(+$('skbars').value,true);return}});
 // aligned stems: render every audible lane alone over the same N bars, so each file starts on bar 1 and they all line up
 async function skStems(bars,als){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
- const L=barLen(),sr=44100,solo=SK.lanes.some(l=>l.solo),name=($('skname').value||'').trim()||SK.name||'Sketch '+new Date().toISOString().slice(0,10);
- const off=l=>l.mute||(solo&&!l.solo);
+ const L=barLen(),sr=44100,solo=SK.lanes.some(laneSolo),name=($('skname').value||'').trim()||SK.name||'Sketch '+new Date().toISOString().slice(0,10);
+ const off=l=>l.mute||(solo&&!laneSolo(l));
  // stems: only what you hear; a Live set: every lane, the silent ones as muted tracks you can bring back
  const lanes=als?SK.lanes:SK.lanes.filter(l=>!off(l));if(!lanes.length){toast('every lane is muted');return}toast(`rendering ${lanes.length} ${als?'tracks':'stems'}…`);
  const stems=[];for(const l of lanes){const ctx=new OfflineAudioContext(2,Math.ceil(bars*L*sr),sr),g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);
@@ -977,8 +980,8 @@ $('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.skon!=null){
 $('sk').addEventListener('input',e=>{if(e.target.id==='skname')SK.name=e.target.value},true);
 async function skBounce(bars){if(!SK.lanes.length||SK.lanes.some(l=>!l.buf)){toast('wait for every lane to load');return}
  const L=barLen(),sr=44100,len=bars*L,tail=SK.lanes.some(l=>l.every)?Math.min(4,Math.max(...SK.lanes.map(l=>l.buf.duration))):0;
- const ctx=new OfflineAudioContext(2,Math.ceil((len)*sr),sr),solo=SK.lanes.some(l=>l.solo);
- SK.lanes.forEach(l=>{if(l.mute||(solo&&!l.solo))return;const g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null)});
+ const ctx=new OfflineAudioContext(2,Math.ceil((len)*sr),sr),solo=SK.lanes.some(laneSolo);
+ SK.lanes.forEach(l=>{if(l.mute||(solo&&!laneSolo(l)))return;const g=ctx.createGain();g.gain.value=laneGain(l);g.connect(ctx.destination);for(let b=0;b<bars;b++)skBar(ctx,g,l,b,b*L,L,null)});
  toast('bouncing…');const buf=await ctx.startRendering();const first=SK.lanes.find(l=>l.path)||{path:(SK.lanes[0].pads[0]||{}).path};
  try{const r=await api('api/bounce',{parent:first.path,wav:wavB64(buf),kind:'loop',bpm:PROJ.bpm,bars,key:PROJ.key,prefix:'Sketch',name:($('skname').value||'').trim(),
    tag:`sketch ${SK.lanes.length} layers`,ops:{key:PROJ.key,bpm:PROJ.bpm,lanes:skLanesState()}});
@@ -1328,7 +1331,7 @@ $('expbtn').onclick=()=>{if(!SERVED){toast('needs the local server');return}
 // ================= stop everything =================
 $('stop').onclick=()=>{stopAll();skStop();padsStopLoop()};
 
-window.CRATE={takeIdx,setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd,sliceLoop,skSnap,LOOPS,laneHold,drumTake};  // hooks for tools/screenshots.py and the console
+window.CRATE={takeIdx,laneSolo,setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd,sliceLoop,skSnap,LOOPS,laneHold,drumTake};  // hooks for tools/screenshots.py and the console
 drawProj();if(PROJ.link)linkPoll();render();
 })();
 

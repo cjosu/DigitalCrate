@@ -723,3 +723,16 @@ def test_drum_takes_pin_shuffle_and_make_main(site, page):
     # each pad row stays on one line (✕ doesn't wrap)
     tops = page.evaluate("[...document.querySelector('.drow').children].map(e=>Math.round(e.getBoundingClientRect().top+e.getBoundingClientRect().height/2))")
     assert max(tops) - min(tops) <= 4, tops
+
+
+def test_pad_solo_hears_only_that_pad(page):
+    """S on a drum pad: only that pad plays, and the other lanes go quiet too."""
+    i = page.evaluate("S.findIndex(s=>s[F.cat]==='Percussion'&&s[F.kind]==='oneshot')")
+    page.evaluate(f"CRATE.drumAdd({i},{{quiet:true}})")
+    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=60000)
+    page.locator("[data-dsolo]").first.click()
+    assert page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].solo") is True
+    assert page.evaluate("CRATE.laneSolo(SK.lanes.find(l=>l.type==='drums'))") is True
+    assert page.locator("[data-dsolo]").first.get_attribute("class").split().count("on") == 1
+    page.locator("[data-dsolo]").first.click()
+    assert page.evaluate("CRATE.laneSolo(SK.lanes.find(l=>l.type==='drums'))") is False
