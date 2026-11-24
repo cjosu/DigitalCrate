@@ -35,7 +35,7 @@ def _saved_jobs():
         return {}
 
 
-BACKGROUND = {"styles", "lyrics", "credits", "reloop"}
+BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections"}
 _SLOW = {}
 
 
@@ -122,6 +122,13 @@ def activity():
 
 
 TASKS = {  # library-wide analyses the Processing page can start: (label, SQL for done, SQL for total)
+    "sections": ("Find song sections (intro, verse, chorus, break, outro)", "SELECT COUNT(*) FROM sections",
+                 "SELECT COUNT(*) FROM tracks WHERE status='done' AND id IN (SELECT track_id FROM samples)"),
+    "loops": ("Find sustain loops (pads, drones, held chords)", "SELECT COUNT(*) FROM samples WHERE loop_q IS NOT NULL "
+              "AND category IN ('Pads & Atmospheres','Textures & Field','Chords & Keys','Vocal Atmospheres') "
+              "AND kind != 'loop' AND dur >= 1.5",
+              "SELECT COUNT(*) FROM samples WHERE category IN ('Pads & Atmospheres','Textures & Field','Chords & Keys',"
+              "'Vocal Atmospheres') AND kind != 'loop' AND dur >= 1.5"),
     "styles": ("Tag styles (Discogs, from the audio)", "SELECT COUNT(*) FROM styles",
                "SELECT COUNT(*) FROM tracks WHERE status != 'duplicate'"),
     "credits": ("Check sample credits (MusicBrainz; pop, soul, ambient, untagged…)", "SELECT COUNT(*) FROM mb",
@@ -138,6 +145,10 @@ def analysis():
     con, out = connect(), []
     running = {j["kind"] for j in activity() if j["running"]}
     for k, (label, done_q, total_q) in TASKS.items():
+        if k == "sections":
+            from .sections import available
+            if not available():  # optional: only offered once All-In-One is installed
+                continue
         try:
             done = con.execute(done_q).fetchone()[0]
         except Exception:  # its table doesn't exist until the first run
@@ -454,6 +465,9 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json(related_artists())
                 except Exception as e:
                     return self._json(dict(seeds=[], artists=[], error=str(e)[:200]))
+            if u.path == "/api/drums/takes":
+                from .drumkit import takes
+                return self._json(dict(takes=takes(q.get("path", ""))))
             if u.path == "/api/ytscout":
                 from .ytscout import results, PRESETS, auto_state, learned
                 from .related import guided_queries, profile

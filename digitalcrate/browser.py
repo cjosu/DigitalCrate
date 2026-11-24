@@ -80,7 +80,25 @@ def write_browser(d, tags, parts, kits):
     wl = for_browser(con, [r["id"] for r in d["rows"]])
     words = {i: t for i, t in enumerate(wl) if t}  # sung words; and which were transcribed and found wordless
     wordless = [i for i, t in enumerate(wl) if t == ""]
-    data = dict(tracks=tracks, samples=S, born=born, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+    loops = {}
+    try:  # sustain loops: index -> [start, end, crossfade] (seconds)
+        for r in connect().execute("SELECT id, loop_start, loop_end, loop_xf FROM samples WHERE loop_q > 0"):
+            if r["id"] in pos:
+                loops[pos[r["id"]]] = [r["loop_start"], r["loop_end"], r["loop_xf"] or 0]
+    except Exception:
+        pass
+    secs = {}
+    try:  # song sections: index -> the section a sample mostly comes from (only once sections have been found)
+        from .sections import by_track, of_sample
+        bt = by_track()
+        for i, r in enumerate(d["rows"]):
+            if r["track_id"] in bt and r["start"] is not None:
+                lab = of_sample(bt[r["track_id"]], r["start"], r["start"] + (r["dur"] or 0))
+                if lab:
+                    secs[i] = lab
+    except Exception:
+        pass
+    data = dict(tracks=tracks, samples=S, born=born, loops=loops, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
     write_page(data)
 
@@ -201,7 +219,7 @@ svg.wave{display:block}.name{white-space:nowrap;overflow:hidden;text-overflow:el
 <main>
   <div class="top"><div class="tabs"><button id="tabS" class="on">Samples</button><button id="tabA" title="browse by artist, album and song">👤 Artists</button><button id="tabK" title="recommended kits and your saved sketches">Kits &amp; sketches</button><button id="tabF">★ Favorites</button><button id="tabR">🆕 Recent</button><button id="tabP" title="mining runs: what's processing, start a new run, how much of your library is mined" hidden>⚙ Processing</button><button id="tabT" title="your taste model: how accurate it is, what it has learned, what to rate next" hidden>🧠 Taste</button></div>
     <input type="search" id="search" placeholder="search artist, title, mood, instrument, id…">
-    <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select><span id="sorthq"></span><select id="since" title="only samples added recently — combine with any sort, e.g. for you"><option value="">added any time</option><option value="batch">latest run</option><option value="0.25">last 6 hours</option><option value="1">last day</option><option value="3">last 3 days</option><option value="7">last week</option><option value="30">last month</option></select><select id="wsel" title="vocals: with sung words, or wordless (oohs, hums, vowels) — words are transcribed by Whisper; search finds lyrics too"><option value="">words or not</option><option value="w">with words</option><option value="n">wordless</option></select>
+    <select id="sort"><option value="div">diverse (best of each artist)</option><option value="you">for you</option><option value="vibe">today's vibe</option><option value="disc">discover</option><option value="q">best quality</option><option value="key">key</option><option value="bpm">tempo</option><option value="dur">length</option><option value="ref">closest to reference</option><option value="var">has variations</option><option value="new">newest first</option><option value="rnd">shuffle</option></select><span id="sorthq"></span><select id="since" title="only samples added recently — combine with any sort, e.g. for you"><option value="">added any time</option><option value="batch">latest run</option><option value="0.25">last 6 hours</option><option value="1">last day</option><option value="3">last 3 days</option><option value="7">last week</option><option value="30">last month</option></select><select id="secsel" hidden title="the part of the song a sample comes from (All-In-One): intros, outros and breaks are where songs are most exposed"><option value="">any section</option><option value="exposed">intro · break · outro</option><option value="intro">intro</option><option value="verse">verse</option><option value="chorus">chorus</option><option value="bridge">bridge</option><option value="inst">instrumental break</option><option value="solo">solo</option><option value="outro">outro</option></select><select id="wsel" title="vocals: with sung words, or wordless (oohs, hums, vowels) — words are transcribed by Whisper; search finds lyrics too"><option value="">words or not</option><option value="w">with words</option><option value="n">wordless</option></select>
     <button id="addsrc">＋ add source</button><button id="expbtn" title="copy what's listed into Ableton's User Library">⇩ export to Ableton</button><button id="refresh" class="pill" hidden>↻ recommendations updated</button><select id="grp" title="group by"><option value="">no grouping</option><option value="track">group by track</option><option value="type">group by type</option><option value="genre">group by genre</option></select><button id="stop">■ stop all</button>
     <div class="cattabs" id="cats" title="⌘/ctrl-click to pick several"></div><div id="subsBox" class="chips subrow" hidden></div></div>
   <div id="tbanner" class="prov" style="margin:8px 16px" hidden></div>
@@ -684,7 +702,7 @@ function paintWheel(){const cnt={};S.forEach(s=>{if(s[F.cam])cnt[s[F.cam]]=(cnt[
  p.style.fill=nb&&nb.has(c)?(c===st.key?'#e0a458':'#8a6a3e'):`rgba(127,176,201,${0.08+v*0.6})`});
  $('keylbl').textContent=st.key?st.key:''}
 $('nbr').onclick=e=>{st.nbr=!st.nbr;e.target.classList.toggle('on');render()};$('clrkey').onclick=()=>{st.key=null;render()};
-['bmin','bmax','half','q','sort','grp','since','wsel'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
+['bmin','bmax','half','q','sort','grp','since','wsel','secsel'].forEach(id=>$(id).addEventListener('input',()=>{st.shown=200;render()}));
 let searchT=null;$('search').addEventListener('input',()=>{clearTimeout(searchT);searchT=setTimeout(()=>{st.shown=200;render()},160)});
 $('stop').onclick=stopAll;
 // the Processing page (served only), with a badge while a mining run is going
@@ -708,6 +726,7 @@ function filtered(){const q=$('search').value.toLowerCase().trim(),mq=+$('q').va
  if(st.moods.size&&![...st.moods].every(m=>s[F.tags].includes(m)))return;
  if(q&&!(`${s[F.artist]} ${s[F.title]} ${s[F.tags].join(' ')} ${s[F.inst]} ${s[F.id]} ${s[F.cat]} ${s[F.sub]} ${s[F.genre]} ${WORDS[i]||''}`.toLowerCase().includes(q)))return;out.push(i)});
  const wv=$('wsel').value;if(wv)out=out.filter(i=>wv==='w'?WORDS[i]:WORDLESS.has(i));
+ const secv=$('secsel').value,SECS=D.sections||{};if(secv)out=out.filter(i=>secv==='exposed'?['intro','outro','break','inst','bridge'].includes(SECS[i]):SECS[i]===secv);
  out=out.filter(i=>!TASTE.disliked.has(S[i][F.path])&&!GONE.has(i));
  const sv=$('since').value;if(sv){const lim=sv==='batch'?BATCH0:Date.now()/60000-sv*1440;out=out.filter(i=>(BORN[i]||0)>=lim)}
  const k=$('sort').value;

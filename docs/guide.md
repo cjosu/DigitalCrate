@@ -19,6 +19,9 @@ Everything the [README](../README.md) skips. The small **?** buttons in the app 
   **⧉** plays a pair together, **💾** saves it as a sketch.
 - **🕘 Recent actions** lists every ★, ✕, category move, collection change and delete, each with undo.
 - **Added recently** narrows any sort to the latest run, day or week.
+- **∞ hold** on a pad, drone or held chord plays it and holds it on its seamless loop until you stop it.
+- **Sections:** with song sections found, a filter picks samples from the intro, verse, chorus, a break or the
+  outro (*intro · break · outro* are where songs are most exposed), and the panel says where a sample comes from.
 - **Drag** any row into Live or Finder; **↗ Finder** shows the file.
 
 ## Sketchpad
@@ -28,6 +31,8 @@ Up to 8 lanes, in the project key and tempo. Open a kit in it or add samples wit
 - **Timing:** amber lines are the project's bars and beats; white ticks are the clip's attacks. Rhythmic clips can
   **⟷ match tempo**; **↺ re-align** puts a selection's first attack on the beat; ⌥-drag slides a lane.
 - **Per lane:** trim, on/off, solo, fades, repeat every N bars, keep its own key, and a relative fader (all start at 0 dB).
+- **∞ hold** (in a lane's ⋯) sustains a pad on its loop for the whole repeat length, so a 3-second pad becomes a
+  4-bar bed.
 - **Tempo:** − / +, type it, or tap.
 - **Arrangement:** type sections (`AABA`) and their length, then tick the sections each lane plays in.
 - **Undo:** ↶ ↷ (⌘Z / ⌘⇧Z). **save •** turns amber with unsaved changes (⌘S). The sketch survives a refresh.
@@ -43,6 +48,8 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
 
 - **Steps:** click for on → soft → off; scroll for exact velocity; ⌥-click for a flam.
 - **Feel:** swing, humanize, and choke groups (closed hat cuts off open hat).
+- **🔁 takes** (round robin): a pad alternates between other hits of the same drum from the same song, so repeated
+  hits sound played rather than copied. The rack export puts each take on its own pad and the MIDI alternates.
 - **✨ starter** writes a pattern from the pad types.
 - **🔎 complete the kit** suggests hits for the kinds you're missing that sound recorded alike (it compares the
   recording's character, not the drum type; AUC 0.83 at picking a song's own drums). **↻ more**, **✕** next,
@@ -136,7 +143,9 @@ Finds new music to sample on YouTube. Nothing enters the library until you press
 ## Export
 
 To `Ableton User Library/Samples/DigitalCrate/…` with an `_info.csv`, optionally conformed to a key and tempo, with
-MIDI for tonal samples and a Drum Rack (drum hits start on the hit). From the CLI:
+MIDI for tonal samples and a Drum Rack (drum hits start on the hit). Samples with a sustain loop get it baked in,
+stored in the WAV (the `smpl` chunk most samplers read), and a Simpler preset (`.adv`) next to them that holds on the
+loop while a key is down. From the CLI:
 `digitalcrate export --favorites --rack --key Fm --bpm 124`.
 
 ## Keyboard and MIDI
@@ -176,6 +185,12 @@ flowchart LR
 - **Conforming:** the smallest pitch shift to the key; Signalsmith Stretch or tape-style Re-Pitch, picked in blind
   listening tests.
 - **Chords:** basic-pitch notes + chroma, mood-colored vocabulary, beam search with voice-leading terms.
+- **Sustain loops:** inside the steady part of a sound, the loop end's waveform is matched against every earlier
+  position (normalized cross-correlation), checked for level and timbre, and the seam's spectral jump is measured;
+  a short crossfade is baked in when needed. About 55% of sustained samples loop cleanly.
+- **Song sections:** [All-In-One](https://github.com/mir-aidj/all-in-one) (optional), with its neighborhood
+  attention reimplemented in plain PyTorch so it needs no compiled NATTEN. Mining reuses its stems (about 5 s a song);
+  exposed sections get a small bonus and loops avoid crossing a section change.
 
 ## Command line
 
@@ -194,6 +209,8 @@ export --favorites|--kit K|--ids … [--rack] [--key Fm --bpm 124]
 backup [--install] [--restore ZIP]
 ytscout "query" [--mode voice|pads|guided]
 styles · lyrics · credits          whole-library passes
+loops [--redo]                     find sustain loops in pads, drones and held chords
+sections [--limit N]               song sections (needs All-In-One)
 reloop [--fix]                     re-cut older loops onto downbeats
 ```
 

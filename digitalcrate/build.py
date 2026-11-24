@@ -325,6 +325,12 @@ def build(n_kits=60):
         st = train(d["emb"], d["cat"], d["track"], ok)
         if st is not None:
             d["Fa"], d["Gb"] = vectors(d["emb"], d["cat"], st)
+    try:  # sustain loops for what's new since the last build (the whole library: the Processing page's pass)
+        from .loopfind import _db as loop_db, todo, run as find_loops
+        if 0 < len(todo(loop_db())) <= 400:
+            find_loops()
+    except Exception as e:
+        print("sustain loops skipped:", e)
     print("computing compatibility…")
     parts = partners(d)
     kits = make_kits(d, tags, n_kits)

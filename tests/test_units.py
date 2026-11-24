@@ -228,3 +228,82 @@ def test_fits_my_track_key_and_tempo():
     assert fit[0] > fit[1] > fit[2] > fit[3] and fit[4] == 0.75
     tf, pct = tempo_fit(np.array([True, True, True, False]), np.array([90.0, 45.0, 100.0, 0.0]), 90.0)
     assert tf[0] == tf[1] == 1.0 and pct[2] > 10 and tf[2] < 0.2 and tf[3] == 1.0  # half time is on tempo
+
+
+def _pad(sr=SR, secs=6.0, seed=1):
+    """A synthetic pad: a soft attack, a steady chord with slow vibrato and some air, and a fade."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(secs * sr)) / sr
+    y = sum(np.sin(2 * np.pi * f * t + 0.3 * np.sin(2 * np.pi * 0.25 * t)) for f in (220.0, 277.18, 329.63)) / 3
+    y = y + 0.02 * rng.standard_normal(len(t))
+    env = np.minimum(1, t / 0.3) * np.minimum(1, (secs - t) / 0.8)
+    return (0.5 * y * env).astype(np.float32)
+
+
+def test_sustain_loop_is_seamless_and_survives_export(tmp_path):
+    import soundfile as sf
+    import struct
+    from digitalcrate.loopfind import find_loop, seam, bake, write_smpl, MAX_SEAM
+    y = _pad()
+    lp = find_loop(y, SR)
+    assert lp and 0.3 <= lp["start"] < lp["end"] <= 5.3 and lp["end"] - lp["start"] >= 0.5
+    assert seam(y, SR, lp) <= MAX_SEAM
+    assert find_loop(np.zeros(SR * 4, np.float32), SR) is None  # silence: nothing to loop
+    b = bake(y, SR, dict(lp, xf=0.05))
+    a, e, n = int(lp["start"] * SR), int(lp["end"] * SR), int(0.05 * SR)
+    assert np.allclose(b[:e - n], y[:e - n]) and np.allclose(b[e:], y[e:])  # only the loop's last 50 ms change
+    f = tmp_path / "pad.wav"
+    sf.write(str(f), y, SR, subtype="PCM_24")
+    write_smpl(f, a, e - 1)
+    raw = f.read_bytes()
+    assert struct.unpack("<I", raw[4:8])[0] == len(raw) - 8
+    k = raw.index(b"smpl")
+    assert struct.unpack("<6I", raw[k + 8 + 36:k + 8 + 60])[2:4] == (a, e - 1)
+    assert sf.read(str(f))[0].shape[0] == len(y)  # still an ordinary WAV
+
+
+def test_neighborhood_attention_matches_a_direct_reference():
+    """The plain-PyTorch NATTEN functions (for All-In-One's song sections), against a slow obvious version."""
+    import torch
+    from digitalcrate import _natten as N
+
+    def ref_1d(q, k, rpb, K, d):
+        n = q.shape[2]
+        out = torch.zeros(*q.shape[:3], K)
+        for i in range(n):
+            g, ig = i % d, i // d
+            members = list(range(g, n, d))
+            s = min(max(ig - K // 2, 0), len(members) - K)
+            for j in range(K):
+                nb = members[s + j]
+                out[:, :, i, j] = (q[:, :, i] * k[:, :, nb]).sum(-1) + rpb[:, s + j - ig + K - 1]
+        return out
+    torch.manual_seed(0)
+    for n, K, d in [(20, 5, 1), (23, 3, 4), (30, 7, 2)]:
+        q, k, v = (torch.randn(1, 2, n, 4) for _ in range(3))
+        rpb = torch.randn(2, 2 * K - 1)
+        a = N.natten1dqkrpb(q, k, rpb, K, d)
+        assert torch.allclose(a, ref_1d(q, k, rpb, K, d), atol=1e-5)
+        p = a.softmax(-1)
+        nb, _ = N._idx(n, K, d, "cpu")
+        direct = torch.stack([(p[:, :, i, :, None] * v[:, :, nb[i]]).sum(2) for i in range(n)], 2)
+        assert torch.allclose(N.natten1dav(p, v, K, d), direct, atol=1e-5)
+    q, k = torch.randn(1, 2, 4, 9, 4), torch.randn(1, 2, 4, 9, 4)
+    rpb = torch.zeros(2, 5, 5)
+    a = N.natten2dqkrpb(q, k, rpb, 3, 1)
+    assert a.shape == (1, 2, 4, 9, 9)
+    # 2D with no bias is the product of the two 1D neighbourhoods: corner (0, 0) sees rows 0-2, columns 0-2
+    assert torch.allclose(a[0, 0, 0, 0, 4], (q[0, 0, 0, 0] * k[0, 0, 1, 1]).sum(), atol=1e-5)
+
+
+def test_song_sections_label_samples_and_steer_mining():
+    from digitalcrate.sections import of_sample, adjust
+    secs = [(0.0, 20.0, "intro"), (20.0, 50.0, "verse"), (50.0, 70.0, "chorus"), (70.0, 80.0, "outro")]
+    assert of_sample(secs, 18.0, 30.0) == "verse" and of_sample(secs, 72.0, 75.0) == "outro"
+    assert of_sample([], 1, 2) is None
+    c = adjust([dict(start=2.0, end=6.0, quality=0.5, kind="free"),       # in the intro: a little bonus
+                dict(start=30.0, end=34.0, quality=0.5, kind="free"),     # in a verse: unchanged
+                dict(start=46.0, end=54.0, quality=0.5, kind="loop"),     # a loop across verse -> chorus
+                dict(start=52.0, end=60.0, quality=0.5, kind="loop")], secs)
+    assert c[0]["quality"] > 0.5 and c[1]["quality"] == 0.5 and c[2]["quality"] < 0.5 and c[3]["quality"] == 0.5
+    assert [x["section"] for x in c] == ["intro", "verse", "verse", "chorus"]

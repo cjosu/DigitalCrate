@@ -644,3 +644,39 @@ def test_scout_groups_inbox_and_filters(site, page):
     page.wait_for_function("!document.querySelector('.ygrp.inbox')")
     page.evaluate("CRATE.setTab('S')")
     assert page.locator("aside").is_visible()
+
+
+def test_hold_a_pad_on_its_sustain_loop(page):
+    """∞ hold: a sustained sample with a seamless loop plays and holds until stopped; a sketchpad lane can hold too."""
+    i = page.evaluate("+Object.keys(CRATE.LOOPS).find(k=>S[k]&&S[k][F.kind]!=='loop')")
+    assert i == i, "the test library should have at least one loopable pad"  # not NaN
+    page.evaluate(f"select({i},'list')")
+    page.click("#holdit")
+    page.wait_for_function("players.has('hold')")
+    page.click("#holdit")
+    page.wait_for_function("!players.has('hold')")
+    page.evaluate(f"CRATE.skAdd({i})")
+    page.wait_for_function("SK.lanes.length&&SK.lanes[SK.lanes.length-1].state==='ok'", timeout=60000)
+    page.evaluate("(()=>{const l=SK.lanes[SK.lanes.length-1];l.more=true;CRATE.drawSK()})()")
+    page.locator("[data-skhold]").last.click()
+    assert page.evaluate("(()=>{const l=SK.lanes[SK.lanes.length-1];const h=CRATE.laneHold(l);return l.hold&&l.every>=2&&!!h&&h.b>h.a})()")
+
+
+def test_drum_takes_alternate(site, page):
+    """🔁 takes: other hits of the same drum from the same song; hits cycle main, take 2, take 3… deterministically."""
+    found = None
+    for i in page.evaluate("S.map((s,i)=>i).filter(i=>S[i][F.cat]==='Percussion'&&S[i][F.kind]==='oneshot')"):
+        p = page.evaluate(f"S[{i}][F.path]")
+        t = json.loads(urllib.request.urlopen(site["base"] + "api/drums/takes?path=" + urllib.parse.quote(p), timeout=30).read())
+        if t["takes"]:
+            found = i
+            break
+    assert found is not None, "the test library should have a drum hit with another take in its song"
+    page.evaluate(f"CRATE.drumAdd({found},{{quiet:true}})")
+    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=60000)
+    page.locator("[data-dtakes]").first.click()
+    page.wait_for_function("(()=>{const l=SK.lanes.find(l=>l.type==='drums');return l.pads[0].tk&&l.pads[0].tk.length>0})()", timeout=30000)
+    seq = page.evaluate("""(()=>{const l=SK.lanes.find(l=>l.type==='drums'),p=l.pads[0];p.steps=new Array(32).fill(0);[0,4,8,12].forEach(k=>p.steps[k]=1);
+      const out=[];for(let bar=0;bar<2;bar++)for(const k of [0,4,8,12]){const t=CRATE.drumTake(l,p,k,bar);out.push(t?t.path:'main')}return out})()""")
+    n = page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].tk.length") + 1
+    assert seq[0] == "main" and len(set(seq)) == n and seq[n] == "main"  # cycles through every take, then repeats

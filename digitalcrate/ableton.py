@@ -87,6 +87,64 @@ def drum_rack(pads, name, out):
     return out
 
 
+SIMPLER_DIR = Path("/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Core Library")
+
+
+def _simpler_templates():
+    """(the default Simpler, a sample part from a factory Simpler preset): Live's own XML, as for racks."""
+    roots = [SIMPLER_DIR] + sorted(Path("/Applications").glob("Ableton Live*/Contents/App-Resources/Core Library"))
+    for r in roots:
+        d = r / "Defaults" / "Instruments" / "Simpler.adv"
+        if not d.exists():
+            continue
+        for f in sorted((r / "Devices" / "Instruments" / "Simpler").glob("*/*.adv")):
+            x = gzip.open(f).read().decode("utf-8")
+            m = re.search(r"<MultiSamplePart Id=.*?</MultiSamplePart>", x, re.S)
+            if m:
+                return gzip.open(d).read().decode("utf-8"), m.group(0)
+    raise FileNotFoundError("no Ableton Live Simpler preset found to use as a template")
+
+
+def simpler(path, name, out, loop=None):
+    """A Simpler preset (.adv) playing path, with a forward sustain loop (start, end in frames) if given: the
+    sound plays from its start and holds on the loop while a key is down."""
+    path = Path(path)
+    info = sf.info(str(path))
+    x, part = _simpler_templates()
+    n = info.frames
+    fr = (f'<FileRef>\n<RelativePathType Value="0" />\n<RelativePath Value="" />\n<Path Value="{_esc(str(path))}" />\n'
+          f'<Type Value="2" />\n<LivePackName Value="" />\n<LivePackId Value="" />\n'
+          f'<OriginalFileSize Value="{path.stat().st_size}" />\n<OriginalCrc Value="0" />\n</FileRef>')
+    part = re.sub(r"<FileRef>.*?</FileRef>", lambda m: fr, part, count=1, flags=re.S)
+    part = re.sub(r'(<Name Value=")[^"]*', lambda m: m.group(1) + _esc(name), part, count=1)
+    part = re.sub(r'(<SampleEnd Value=")\d+', lambda m: m.group(1) + str(n - 1), part, count=1)
+    part = re.sub(r'(<DefaultDuration Value=")\d+', lambda m: m.group(1) + str(n), part, count=1)
+    part = re.sub(r'(<DefaultSampleRate Value=")\d+', lambda m: m.group(1) + str(info.samplerate), part, count=1)
+    part = re.sub(r'(<LastModDate Value=")\d+', lambda m: m.group(1) + str(int(path.stat().st_mtime)), part, count=1)
+    part = re.sub(r"<WarpMarkers>.*?</WarpMarkers>", "<WarpMarkers />", part, count=1, flags=re.S)
+    a, b = loop if loop else (0, n - 1)
+    sus = (f'<SustainLoop>\n<Start Value="{a}" />\n<End Value="{b}" />\n<Mode Value="{1 if loop else 0}" />\n'
+           f'<Crossfade Value="0" />\n<Detune Value="0" />\n</SustainLoop>')
+    part = re.sub(r"<SustainLoop>.*?</SustainLoop>", lambda m: sus, part, count=1, flags=re.S)
+    part = re.sub(r"(<ReleaseLoop>.*?<End Value=\")\d+", lambda m: m.group(1) + str(n - 1), part, count=1, flags=re.S)
+    x = x.replace("<SampleParts />", "<SampleParts>\n" + part + "\n</SampleParts>", 1)
+    if loop:  # Simpler's own loop controls: the region ends at the loop end; the loop is its last stretch
+        x = _set(x, "SampleLength", round((b + 1) / n, 6))
+        x = _set(x, "LoopOn", "true")
+        x = _set(x, "LoopLength", round((b - a) / max(1, b), 6))
+        x = _set(x, "LoopFade", 0)
+    else:
+        x = _set(x, "LoopOn", "false")
+    x = re.sub(r'(<UserName Value=")[^"]*', lambda m: m.group(1) + _esc(name), x, count=1)
+    x = re.sub(r"<LastPresetRef>.*?</LastPresetRef>", "<LastPresetRef>\n<Value />\n</LastPresetRef>", x, count=1,
+               flags=re.S)
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(out, "wb") as fh:
+        fh.write(x.encode("utf-8"))
+    return out
+
+
 def segments(rel, n=16, min_len=0.08):
     """Where a sample would be sliced (chops / drum-lane slices): [(start s, end s)], at most n."""
     from .edit import _load

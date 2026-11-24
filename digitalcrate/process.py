@@ -151,6 +151,15 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
     if policy == "vocals_only":  # the beat is someone else's sample: keep the original vocal only
         cands = [c for c in cands if c["group"] in ("vocal_phrase", "vocal_chop")]
     cands = [measure(c, mix, feats, masks) for c in cands]
+    if stems is not None:  # song sections (optional: All-In-One), from the stems mining already has: ~5 s
+        try:
+            from . import sections as SEC
+            if SEC.available():
+                secs = SEC.analyze(y, stems, name=f"t{row['id']}")
+                SEC.save(SEC._db(), row["id"], secs)
+                cands = SEC.adjust(cands, secs)
+        except Exception as e:
+            print("    sections failed:", str(e)[:100])
     cands = [c for c in cands if c["quality"] >= C.MIN_QUALITY * 0.75]
     # pre-cap generously before the (costly) embedding step
     cands = sorted(cands, key=lambda c: -c["quality"])

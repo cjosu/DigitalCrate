@@ -49,6 +49,10 @@ def main():
     tr.add_argument("--empty", action="store_true")
     cr = sub.add_parser("credits", help="check unmined songs' sample credits on MusicBrainz (sample-based ones are skipped)")
     cr.add_argument("--limit", type=int)
+    sc = sub.add_parser("sections", help="label songs' intro / verse / chorus / break / outro (All-In-One)")
+    sc.add_argument("--limit", type=int)
+    lo = sub.add_parser("loops", help="find seamless sustain loops in pads, drones and held chords")
+    lo.add_argument("--redo", action="store_true", help="look again at samples already done")
     sy = sub.add_parser("styles", help="tag every song with Discogs styles from its audio (genre gaps, related music)")
     sy.add_argument("--limit", type=int)
     bk = sub.add_parser("backup", help="back up your ratings, favourites, sketches, labels and edits (not regenerable)")
@@ -227,6 +231,12 @@ def main():
         from .mbz import run as credits
         credits(a.limit)
         print("TASK DONE", flush=True)
+    elif a.cmd == "sections":
+        from .sections import run as sections
+        sections(a.limit)
+    elif a.cmd == "loops":
+        from .loopfind import run as loops
+        loops(a.redo)
     elif a.cmd == "styles":
         from .styles import run as styles
         styles(a.limit)

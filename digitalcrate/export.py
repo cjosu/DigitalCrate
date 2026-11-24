@@ -81,11 +81,13 @@ def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=F
         out = dest / sub / src.name
         out.parent.mkdir(parents=True, exist_ok=True)
         cinfo = None
+        fresh = not out.exists()
         if pkey or pbpm:
             from .conform import render, conformed_name
             csrc, cinfo = render(rel, pkey, pbpm)
             out = dest / sub / conformed_name(rel, cinfo)
-            if not out.exists():
+            fresh = not out.exists()
+            if fresh:
                 shutil.copy2(csrc, out)
         elif r is not None and r["category"] == "Percussion" and r["kind"] != "loop":
             import soundfile as sf
@@ -100,6 +102,16 @@ def export(paths, name=None, reveal=True, rack=False, key=None, bpm=None, midi=F
             sf.write(str(out), y.T, C.SR, subtype="PCM_24")
         elif not out.exists():
             shutil.copy2(src, out)
+        lq = r["loop_q"] if r is not None and "loop_q" in r.keys() else None
+        if lq and fresh and r["kind"] != "loop" and not var:  # sustain loop: baked in, smpl chunk, a Simpler preset beside it
+            try:
+                from .loopfind import export_loop
+                import soundfile as sf
+                adv = export_loop(out, r, sf.info(str(src)).frames)
+                if adv:
+                    extra.append(str(adv.relative_to(dest)))
+            except Exception as e:
+                print("sustain loop export failed:", e)
         tag = (r["subtype"] if r else parts[0]) + (f" {r['camelot']}" if r and r["key_from"] != "none" else "")
         pads.append((out, f"{len(pads) + 1:02d} {tag}", int((chokes or {}).get(rel, 0))))
         if midi and r is not None and r["category"] != "Percussion" and r["key_from"] != "none" and not cinfo:

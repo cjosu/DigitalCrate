@@ -32,10 +32,25 @@ def _hits(con):
         cent = {k: E[kind == k].mean(0) for k in set(kind)}
         R = E - np.stack([cent[k] for k in kind])
         R /= np.linalg.norm(R, axis=1, keepdims=True) + 1e-9
-        _C.update(key=key, paths=[r["path"] for r in rows], pos={r["path"]: k for k, r in enumerate(rows)}, R=R,
+        _C.update(key=key, paths=[r["path"] for r in rows], pos={r["path"]: k for k, r in enumerate(rows)}, R=R, E=E,
                   kind=kind, track=np.array([r["track_id"] for r in rows]),
                   q=np.array([r["quality"] or 0.5 for r in rows]), sub=[r["subtype"] for r in rows])
     return _C
+
+
+def takes(path, n=3):
+    """Alternate takes of a hit, for round robin: the same drum from the same song (other hits of it the mining cut),
+    closest in sound first. Alternating them makes a pattern breathe instead of machine-gunning one recording."""
+    H = _hits(connect())
+    i = H["pos"].get(path)
+    if i is None:
+        return []
+    same = np.where((H["track"] == H["track"][i]) & (np.arange(len(H["paths"])) != i))[0]
+    exact = [j for j in same if H["sub"][j] == H["sub"][i]]
+    pool = exact or [j for j in same if H["kind"][j] == H["kind"][i]]
+    sim = {j: float(H["E"][j] @ H["E"][i]) for j in pool}
+    pool = [j for j in pool if 0.75 < sim[j] < 0.9995]  # the same drum, but not the very same audio
+    return [dict(path=H["paths"][j], sim=round(sim[j], 3)) for j in sorted(pool, key=lambda j: -sim[j])[:n]]
 
 
 def kind_of(subtype):
