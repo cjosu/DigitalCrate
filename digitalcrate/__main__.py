@@ -10,6 +10,40 @@ import argparse
 from . import config as C
 
 
+# Jobs that load the big audio models (CLAP, Demucs, Whisper…: several GB each) take a slot first, so clicking
+# around never runs five copies at once and fills memory. Two slots: one for what you start (mining, ingest, scout),
+# one for library passes, so a long pass never holds up your scouting. A job waiting for its slot says so in its log.
+FOREGROUND = {"process", "drums", "ingest", "ytscout", "shootout", "reclassify", "mangle", "transform"}
+BACKGROUND_PASSES = {"sections", "pads", "styles", "lyrics"}
+_SLOT = None
+
+
+def _slot(cmd):
+    import fcntl
+    import os
+    import time
+    global _SLOT
+    if os.environ.get("DIGITALCRATE_NO_SLOT") or cmd not in FOREGROUND | BACKGROUND_PASSES:
+        return
+    from . import config as C
+    C.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    f = open(C.DATA_DIR / f"slot-{'jobs' if cmd in FOREGROUND else 'passes'}.lock", "a+")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        f.seek(0)
+        who = f.read().strip() or "another job"
+        print(f"waiting for {who} to finish (one heavy job at a time keeps memory in check)…", flush=True)
+        t = time.time()
+        fcntl.flock(f, fcntl.LOCK_EX)
+        print(f"starting after {time.time() - t:.0f} s", flush=True)
+    f.seek(0)
+    f.truncate()
+    f.write(f"{cmd} (pid {os.getpid()})")
+    f.flush()
+    _SLOT = f  # held until this process exits
+
+
 def main():
     ap = argparse.ArgumentParser(prog="digitalcrate")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -116,6 +150,7 @@ def main():
     so.add_argument("--force", action="store_true"); so.add_argument("--results", action="store_true")
     so.add_argument("--tune", action="store_true", help="round 2: vocal tuning engines")
     a = ap.parse_args()
+    _slot(a.cmd)
 
     if a.cmd == "scan":
         from .scan import scan

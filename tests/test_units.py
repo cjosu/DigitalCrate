@@ -392,3 +392,24 @@ def test_a_struck_key_is_not_a_pad():
     a, b = pads.analyze(key.astype(np.float32)), pads.analyze(pad.astype(np.float32))
     assert pads.where(dict(kind="oneshot", subtype="One-Shots", instrument="strings"), a) == ("Chords & Keys", "One-Shots")
     assert pads.where(dict(kind="oneshot", subtype="One-Shots", instrument="pad"), b) == (pads.PADS, "One-Shots")
+
+
+def test_heavy_jobs_take_turns(tmp_path):
+    """Jobs that load the big models wait for a slot: one for jobs you start, one for library passes."""
+    import os, subprocess, sys, time
+    env = dict(os.environ, DIGITALCRATE_LIBRARY=str(tmp_path / "lib"), DIGITALCRATE_CONFIG=str(tmp_path / "c.toml"))
+    env.pop("DIGITALCRATE_NO_SLOT", None)
+    (tmp_path / "c.toml").write_text(f'library = "{tmp_path / "lib"}"\n')
+    hold = "from digitalcrate.__main__ import _slot;import time,sys;_slot(sys.argv[1]);print('got',flush=True);time.sleep(float(sys.argv[2]))"
+    a = subprocess.Popen([sys.executable, "-c", hold, "ytscout", "3"], env=env, stdout=subprocess.PIPE, text=True)
+    assert a.stdout.readline().strip() == "got"
+    t = time.time()
+    b = subprocess.run([sys.executable, "-c", hold, "ingest", "0"], env=env, capture_output=True, text=True)
+    assert "waiting for ytscout" in b.stdout and time.time() - t > 1.5  # another job you started: waits its turn
+    a.wait()
+    t = time.time()
+    a = subprocess.Popen([sys.executable, "-c", hold, "ytscout", "3"], env=env, stdout=subprocess.PIPE, text=True)
+    a.stdout.readline()
+    c = subprocess.run([sys.executable, "-c", hold, "pads", "0"], env=env, capture_output=True, text=True)
+    assert "waiting" not in c.stdout  # a library pass has its own slot
+    a.wait()
