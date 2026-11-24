@@ -15,6 +15,44 @@ from .ableton import BASE_NOTE
 from .export import _safe, trim_to_hit
 
 
+
+M32 = 0xFFFFFFFF
+
+
+def _hash(x):
+    x &= M32
+    x = ((x ^ (x >> 16)) * 0x45D9F3B) & M32
+    x = ((x ^ (x >> 16)) * 0x45D9F3B) & M32
+    return x ^ (x >> 16)
+
+
+def _perm(b, n, s):
+    P = list(range(n))
+    for k in range(n - 1, 0, -1):  # Fisher-Yates, seeded by the block and the pad's seed
+        j = _hash(b * 131 + k + s) % (k + 1)
+        P[k], P[j] = P[j], P[k]
+    return P
+
+
+def take_idx(p, h, j, n):
+    """Which take plays hit h (step j) of pad p: pinned, in turn or shuffled (a shuffle bag: every take once in a
+    random order, then a new order, never the same take twice running). Same as takeIdx in studio.js."""
+    pins = p.get("pins") or []
+    if j < len(pins) and pins[j]:
+        return min(int(pins[j]) - 1, n - 1)
+    if p.get("order") != "shuffle" or n < 2:
+        return h % n
+    s = int(p.get("seed") or 1) * 7919
+    if n == 2:  # two takes can't avoid repeats and still be random
+        return _hash(h + s) % 2
+    b, i = divmod(h, n)
+    P = _perm(b, n, s)
+    if b > 0 and P[0] == _perm(b - 1, n, s)[-1]:
+        P[0], P[1] = P[1], P[0]
+    return P[i]
+
+
+
 def drum_export(name, bpm, bars, swing, pads, reveal=True):
     import pretty_midi
     import soundfile as sf
@@ -58,6 +96,8 @@ def drum_export(name, bpm, bars, swing, pads, reveal=True):
         if act and len(notes[k]) > 1:
             m = len(notes[k]) // gcd(act, len(notes[k]))
             passes = passes * m // gcd(passes, m)
+        if act and len(notes[k]) > 1 and p.get("order") == "shuffle":  # never lines up: four passes of it
+            passes = passes * 4 // gcd(passes, 4)
     passes = min(passes, 6)
     pm = pretty_midi.PrettyMIDI(initial_tempo=float(bpm))
     inst = pretty_midi.Instrument(program=0, name=_safe(name))
@@ -69,7 +109,7 @@ def drum_export(name, bpm, bars, swing, pads, reveal=True):
                 v = steps[j] if j < len(steps) else 0
                 if not v:
                     continue
-                note = notes[k][hit % len(notes[k])]
+                note = notes[k][take_idx(p, hit, j, len(notes[k]))]
                 hit += 1
                 t = (ps * n + j) * step + (swing * step if j % 2 else 0)
                 vel = max(1, min(127, round(v * 127)))

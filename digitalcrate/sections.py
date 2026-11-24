@@ -56,7 +56,7 @@ def analyze(y, stems=None, name="track"):
         for k in ("bass", "drums", "other", "vocals"):
             sf.write(str(d / f"{k}.wav"), stems[k].T, C.SR, subtype="PCM_16")
         r = allin1.analyze(str(mix), demix_dir=str(tmp / "demix"), spec_dir=str(tmp / "spec"), device="cpu",
-                           model=MODEL, keep_byproducts=True)
+                           model=MODEL, keep_byproducts=True, multiprocess=False)  # its process pool deadlocks inside the app
     out = [(round(float(s.start), 2), round(float(s.end), 2), s.label) for s in r.segments]
     return [s for s in out if s[2] in LABELS]  # 'start' / 'end' are the silence either side
 

@@ -49,7 +49,13 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
 - **Steps:** click for on → soft → off; scroll for exact velocity; ⌥-click for a flam.
 - **Feel:** swing, humanize, and choke groups (closed hat cuts off open hat).
 - **🔁 takes** (round robin): a pad alternates between other hits of the same drum from the same song, so repeated
-  hits sound played rather than copied. The rack export puts each take on its own pad and the MIDI alternates.
+  hits sound played rather than copied. The rack export puts each take on its own pad and the MIDI follows the
+  same order.
+  - By default the takes play **in turn** (main, 2, 3, main…). **Shuffled** plays every take once in a random order,
+    then a new order, never the same take twice running; 🎲 gives a different shuffle. Both play the same way every
+    time, so bounces and exports match what you heard.
+  - **⇧-click a step** to pin it to one take (the step shows its number); ⇧-click again to move on, back to auto.
+  - Open the pad (click its name) to hear each take, and **★** to make one the main hit.
 - **✨ starter** writes a pattern from the pad types.
 - **🔎 complete the kit** suggests hits for the kinds you're missing that sound recorded alike (it compares the
   recording's character, not the drum type; AUC 0.83 at picking a song's own drums). **↻ more**, **✕** next,

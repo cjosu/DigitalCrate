@@ -680,3 +680,44 @@ def test_drum_takes_alternate(site, page):
       const out=[];for(let bar=0;bar<2;bar++)for(const k of [0,4,8,12]){const t=CRATE.drumTake(l,p,k,bar);out.push(t?t.path:'main')}return out})()""")
     n = page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].tk.length") + 1
     assert seq[0] == "main" and len(set(seq)) == n and seq[n] == "main"  # cycles through every take, then repeats
+
+
+def test_drum_takes_pin_shuffle_and_make_main(site, page):
+    """Takes: ⇧-click pins a step to one take, "shuffled" is a seeded shuffle bag the export reproduces exactly, and ★
+    makes a take the main hit."""
+    from digitalcrate.drumexport import take_idx
+    for n in (2, 3, 4):  # the page and the exporter pick the same take for every hit
+        js = page.evaluate(f"[...Array(60).keys()].map(h=>CRATE.takeIdx({{order:'shuffle',seed:777}},h,0,{n}))")
+        assert js == [take_idx(dict(order="shuffle", seed=777), h, 0, n) for h in range(60)]
+        if n > 2:
+            assert all(a != b for a, b in zip(js, js[1:])) and set(js) == set(range(n))
+    found = None
+    for i in page.evaluate("S.map((s,i)=>i).filter(i=>S[i][F.cat]==='Percussion'&&S[i][F.kind]==='oneshot')"):
+        p = page.evaluate(f"S[{i}][F.path]")
+        t = json.loads(urllib.request.urlopen(site["base"] + "api/drums/takes?path=" + urllib.parse.quote(p), timeout=30).read())
+        if t["takes"]:
+            found = i
+            break
+    assert found is not None
+    page.evaluate(f"CRATE.drumAdd({found},{{quiet:true}})")
+    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=60000)
+    page.locator("[data-dtakes]").first.click()
+    page.wait_for_function("(()=>{const l=SK.lanes.find(l=>l.type==='drums');return l.pads[0].tk&&l.pads[0].tk.length>0})()", timeout=30000)
+    page.evaluate("(()=>{const p=SK.lanes.find(l=>l.type==='drums').pads[0];p.steps=new Array(32).fill(0);[0,4,8,12].forEach(k=>p.steps[k]=1);CRATE.drawSK()})()")
+    st = page.locator('[data-dstep$=":0:4"]').first
+    st.click(modifiers=["Shift"])
+    st.click(modifiers=["Shift"])  # auto -> main -> take 2
+    assert page.locator('[data-dstep$=":0:4"]').first.get_attribute("data-pin") == "2"
+    seq = page.evaluate("""(()=>{const l=SK.lanes.find(l=>l.type==='drums'),p=l.pads[0];const out=[];for(let bar=0;bar<3;bar++){const t=CRATE.drumTake(l,p,4,bar);out.push(t?t.path:'main')}return out})()""")
+    t2 = page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].takes[0]")
+    assert seq == [t2] * 3  # pinned: every pass
+    # ★ make take 2 the main hit
+    old = page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].path")
+    page.locator("[data-dedit]").first.click()
+    page.locator("[data-dtkmain]").first.click()
+    page.wait_for_function(f"(()=>{{const p=SK.lanes.find(l=>l.type==='drums').pads[0];return p.path==={json.dumps(t2)}&&p.buf}})()", timeout=30000)
+    p = page.evaluate("(()=>{const p=SK.lanes.find(l=>l.type==='drums').pads[0];return {takes:p.takes,pin:p.pins[4]}})()")
+    assert p["takes"][0] == old and p["pin"] == 1  # the pin follows its recording, now the main one
+    # shuffled is in the saved state
+    page.select_option("[data-dtkord]", "shuffle")
+    assert page.evaluate("JSON.parse(CRATE.skSnap()).lanes.find(l=>l.type==='drums').pads[0].order") == "shuffle"

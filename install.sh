@@ -56,6 +56,8 @@ cd "$DIR"
 echo "installing packages (a few GB the first time; a few minutes)…"
 uv pip install --quiet --python .venv/bin/python --no-deps -r requirements.lock
 uv pip install --quiet --python .venv/bin/python --no-deps -e .
+# song sections (All-In-One) need madmom, built against the numpy above
+uv pip install --quiet --python .venv/bin/python --no-deps --no-build-isolation "madmom @ git+https://github.com/CPJKU/madmom@27f032e8947204902c675e5e341a3faf5dc86dae" || echo "(madmom didn't build: song sections stay off)"
 
 bold "5/5  DigitalCrate.app"
 .venv/bin/python -m digitalcrate app --dest "$APP_DIR"

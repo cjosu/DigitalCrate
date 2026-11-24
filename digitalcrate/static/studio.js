@@ -566,8 +566,15 @@ async function drumTakesLoad(p){const T=p.takes||[];if(!T.length){p.tk=[];return
   const buf=await PADBUF.get(path);return {path,buf,norm:skNorm(buf),start:padAttack(buf)}}catch(e){return null}}))).filter(Boolean)}
 // which recording plays this hit: the n-th hit of the pad in the song cycles main, take 2, take 3… (the same every
 // pass, so playback, bounce and the exported MIDI agree)
+// ⇧-click pins a step to one take; "shuffled" is a seeded shuffle bag, so it
+// still plays the same every time and the export matches (drumexport.take_idx is the same function)
+function takeHash(x){x=Math.imul(x^(x>>>16),0x45d9f3b)>>>0;x=Math.imul(x^(x>>>16),0x45d9f3b)>>>0;return (x^(x>>>16))>>>0}
+function takePerm(b,n,s){const P=[...Array(n).keys()];for(let k=n-1;k>0;k--){const j=takeHash(b*131+k+s)%(k+1);[P[k],P[j]]=[P[j],P[k]]}return P}
+function takeIdx(p,h,j,nT){const pin=p.pins&&p.pins[j];if(pin)return Math.min(pin-1,nT-1);if(p.order!=='shuffle'||nT<2)return h%nT;
+ const s=(p.seed||1)*7919;if(nT===2)return takeHash(h+s)%2;  // a shuffle bag: each take once in a random order, then a new order
+ const b=Math.floor(h/nT),P=takePerm(b,nT,s);if(b>0&&P[0]===takePerm(b-1,nT,s)[nT-1])[P[0],P[1]]=[P[1],P[0]];return P[h%nT]}
 function drumTake(l,p,idx,bar){const T=p.tk||[];if(!T.length||bar==null)return null;const n=16*l.bars,act=[];for(let k=0;k<n;k++)if(p.steps[k])act.push(k);
- const h=Math.floor(bar/l.bars)*act.length+Math.max(0,act.indexOf(idx)),w=h%(T.length+1);return w?T[w-1]:null}  // pads start on the hit, not on silence before it
+ const h=Math.floor(bar/l.bars)*act.length+Math.max(0,act.indexOf(idx)),w=takeIdx(p,h,idx,T.length+1);return w?T[w-1]:null}  // pads start on the hit, not on silence before it
 async function drumLoad(l){l.state='loading';await Promise.all(l.pads.map(drumPadLoad));
  l.buf=l.pads.map(p=>p.buf).filter(Boolean).sort((a,b)=>b.duration-a.duration)[0]||AC.createBuffer(1,1,44100);l.state='ok'}  // buf: so "is it loaded" checks pass
 async function drumAdd(i,{quiet=false,starter=true}={}){const l=drumLane(true);if(!l){toast('the sketchpad holds 8 lanes');return}
@@ -628,8 +635,8 @@ function drumLaneHTML(l,k){const n=16*l.bars;
  <button class="tbtn${l.solo?' on':''}" data-sks="${k}" title="solo">S</button><button class="tbtn" data-skx="${k}" title="remove the drum lane">✕</button>
  <div class="dgrid" data-dgrid="${k}" style="--n:${n}">${l.pads.map((p,r)=>{const s=S[p.i]||[];return `<div class="drow${p.mute?' muted':''}">
   <button class="tbtn" data-dpad="${k}:${r}" title="hear it">▶</button><button class="dlab dedit${p.open?' on':''}" data-dedit="${k}:${r}" title="${esc(s[F.artist]||'')} — ${esc(s[F.title]||'')} · click to ${p.open?'close':'open'} this pad's editor (start, end, tune, decay)"><span class="dtri">${p.open?'▾':'▸'}</span>${esc(p.label||s[F.sub]||'hit')}${p.tune||p.decay||p.end||(p.start>0.003&&!p.auto)?' ✎':''}</button>
-  <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}${p.flams&&p.flams[j]?' flam':''}" data-dstep="${k}:${r}:${j}" ${v?`style="--v:${Math.round(v*100)}%"`:''} title="${v?`velocity ${Math.round(v*100)}%${p.flams&&p.flams[j]?' · flam':''}`:'off'}"></button>`).join('')}</div>
-  <button class="tbtn${(p.takes||[]).length?' on':''}" data-dtakes="${k}:${r}" title="${(p.takes||[]).length?`alternating ${p.takes.length+1} takes of this hit (round robin): click to go back to one`:'alternate takes (round robin): cycle through other hits of this drum from the same song, so repeated hits sound played, not copied'}">🔁${(p.takes||[]).length?' '+(p.takes.length+1):''}</button>
+  <div class="dsteps">${p.steps.slice(0,n).map((v,j)=>`<button class="dstep${v?' on':''}${j%4===0?' beat':''}${p.flams&&p.flams[j]?' flam':''}${p.pins&&p.pins[j]&&(p.takes||[]).length?' pin':''}" data-dstep="${k}:${r}:${j}" ${p.pins&&p.pins[j]?`data-pin="${p.pins[j]}"`:''} ${v?`style="--v:${Math.round(v*100)}%"`:''} title="${v?`velocity ${Math.round(v*100)}%${p.flams&&p.flams[j]?' · flam':''}`:'off'}"></button>`).join('')}</div>
+  <button class="tbtn${(p.takes||[]).length?' on':''}" data-dtakes="${k}:${r}" title="${(p.takes||[]).length?`alternating ${p.takes.length+1} takes of this hit (round robin) · ⇧-click a step to pin it to one take · open the pad (its name) to hear each, pick the main one or shuffle · click to go back to one`:'alternate takes (round robin): cycle through other hits of this drum from the same song, so repeated hits sound played, not copied'}">🔁${(p.takes||[]).length?' '+(p.takes.length+1):''}</button>
   <select class="dchoke" data-dchoke="${k}:${r}" title="choke group: a hit cuts off the others in its group that are still ringing (closed hat chokes open hat)"><option value="0">—</option>${[1,2,3].map(g=>`<option value="${g}" ${p.choke===g?'selected':''}>choke ${g}</option>`).join('')}</select>
   <span class="dvol" title="this pad's volume against the other pads (every pad starts equally loud at 0 dB) · double-click for 0 dB"><input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-dpv="${k}:${r}"><output>${dbTxt(p.db||0)}</output></span>
   <button class="tbtn${p.mute?' on':''}" data-dmute="${k}:${r}" title="mute this pad">M</button><button class="tbtn" data-dpx="${k}:${r}" title="remove this pad">✕</button></div>${p.open?padEditHTML(l,k,p,r):''}`}).join('')||'<div class="sub">add drum one-shots with ＋, or send a song\'s drum rack here</div>'}${drumFindHTML(l,k)}</div></div>`}
@@ -658,6 +665,7 @@ $('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dstep
  if(t.dataset.dfplay!=null){stopAll();const a=new Audio(url(t.dataset.dfplay));a.play();players.set('df',a);a.onended=()=>players.delete('df');return}
  if(t.dataset.dfadd!=null){const l=drumLane();await drumAdd(+t.dataset.dfadd);if(l&&l.find)drumFind(l,true);return}
  if(t.dataset.dstep){const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r],v=p.steps[j];
+  if(e.shiftKey&&(p.takes||[]).length){p.pins=p.pins||new Array(DSTEPS).fill(0);p.pins[j]=((p.pins[j]||0)+1)%(p.takes.length+2);if(!v)p.steps[j]=1;drawSK();return}
   if(e.altKey){p.flams=p.flams||new Array(DSTEPS).fill(0);p.flams[j]=p.flams[j]?0:1;if(!v)p.steps[j]=1;drawSK();return}
   p.steps[j]=!v?1:v>0.7?0.55:0;
   t.classList.toggle('on',!!p.steps[j]);t.style.setProperty('--v',Math.round(p.steps[j]*100)+'%');
@@ -688,7 +696,7 @@ $('sk').addEventListener('wheel',e=>{const t=e.target.closest&&e.target.closest(
  const [k,r,j]=t.dataset.dstep.split(':').map(Number),p=SK.lanes[k].pads[r];let v=p.steps[j]||0;v=Math.round(Math.max(0,Math.min(1,v+(e.deltaY<0?0.1:-0.1)))*10)/10;
  p.steps[j]=v;t.classList.toggle('on',!!v);t.style.setProperty('--v',Math.round(v*100)+'%');t.title=v?`velocity ${Math.round(v*100)}%`:'off'},{passive:false});
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-dtakes]');if(!b)return;e.stopPropagation();const [k,r]=b.dataset.dtakes.split(':').map(Number),p=SK.lanes[k]&&SK.lanes[k].pads[r];if(!p)return;
- if((p.takes||[]).length){p.takes=[];p.tk=[];drawSK();return}
+ if((p.takes||[]).length){p.takes=[];p.tk=[];p.pins=null;p.order=null;drawSK();return}
  b.disabled=true;let T=[];try{T=(await api('api/drums/takes?path='+encodeURIComponent(p.path))).takes.map(t=>t.path).filter(x=>byPath.has(x)&&!GONE.has(byPath.get(x)))}catch(err){}
  if(!T.length){b.disabled=false;toast('no other takes of this hit in its song');return}p.takes=T;await drumTakesLoad(p);drawSK();toast(`${T.length+1} takes: hits now cycle through them`)},true);
 $('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.dchoke!=null){const [k,r]=t.dataset.dchoke.split(':').map(Number);SK.lanes[k].pads[r].choke=+t.value||0}},true);
@@ -696,7 +704,7 @@ $('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dhuman!=null)
 $('sk').addEventListener('click',async e=>{const b=e.target.closest('[data-dmidi]');if(!b)return;e.stopPropagation();const l=SK.lanes[+b.dataset.dmidi];
  const name=(($('skname').value||'').trim()||SK.name||'Drums '+new Date().toISOString().slice(0,10))+' drums';b.textContent='exporting…';
  try{const r=await api('api/drums/export',{name,bpm:PROJ.bpm||120,bars:l.bars,swing:l.swing,
-   pads:l.pads.map(p=>({path:p.path,label:p.label||(S[p.i]||[])[F.sub]||'',steps:p.steps.slice(0,16*l.bars),flams:(p.flams||[]).slice(0,16*l.bars),choke:p.choke||0,mute:!!p.mute,start:p.start||0,end:p.end||null,tune:p.tune||0,decay:p.decay||0,takes:(p.takes||[]).slice()}))});
+   pads:l.pads.map(p=>({path:p.path,label:p.label||(S[p.i]||[])[F.sub]||'',steps:p.steps.slice(0,16*l.bars),flams:(p.flams||[]).slice(0,16*l.bars),choke:p.choke||0,mute:!!p.mute,start:p.start||0,end:p.end||null,tune:p.tune||0,decay:p.decay||0,takes:(p.takes||[]).slice(),pins:(p.pins||[]).slice(0,16*l.bars),order:p.order||'cycle',seed:p.seed||1}))});
   b.textContent='⇩ MIDI + rack';toast(`rack + MIDI clip → ${r.dest.split('/').slice(-2).join('/')} · drop the rack on a track, then the clip`)}catch(err){b.textContent='⇩ MIDI + rack';toast('export failed: '+err.message)}},true);
 $('sk').addEventListener('input',e=>{const t=e.target;if(t.dataset.dswing!=null)SK.lanes[+t.dataset.dswing].swing=+t.value},true);
 // ---------- editing pads inside the drum lane: start on the hit, end, tune, decay (all live, no rendering)
@@ -716,7 +724,23 @@ function padEditHTML(l,k,p,r){const ms=Math.round((p.start||0)*1000),dec=p.decay
   <button class="tbtn" data-dpend="${k}:${r}" title="let it ring to the end of the file">full length</button>
   <label>tune <input type="range" min="-12" max="12" step="1" value="${p.tune||0}" data-dptune="${k}:${r}"><output>${p.tune>0?'+':''}${p.tune||0} st</output></label>
   <label title="shortens the tail with a natural fade">decay <input type="range" min="0" max="100" step="1" value="${decayVal(dec)}" data-dpdec="${k}:${r}"><output>${dec?dec.toFixed(2)+' s':'natural'}</output></label>
-  <button class="tbtn" data-dpad="${k}:${r}">▶</button><button class="tbtn" data-dpfull="${k}:${r}" title="open it in the full editor (punch, drive, low cut…); save as new and the pad switches to your edit">↗ full editor</button></div></div>`}
+  <button class="tbtn" data-dpad="${k}:${r}">▶</button><button class="tbtn" data-dpfull="${k}:${r}" title="open it in the full editor (punch, drive, low cut…); save as new and the pad switches to your edit">↗ full editor</button></div>${takesHTML(k,p,r)}</div>`}
+function takesHTML(k,p,r){const T=p.takes||[];if(!T.length)return'';
+ return `<div class="ctl dtk"><span class="sub">takes</span>${[p.path,...T].map((x,w)=>`<span class="dtkb"><button class="tbtn" data-dtkplay="${k}:${r}:${w}" title="hear take ${w+1}">▶ ${w+1}${w?'':' main'}</button>${w?`<button class="tbtn" data-dtkmain="${k}:${r}:${w}" title="make take ${w+1} the main hit (the others stay as takes)">★</button>`:''}</span>`).join('')}
+  <select data-dtkord="${k}:${r}" title="in turn: main, 2, 3, main… · shuffled: every take once in a random order, then a new order (never the same twice running), the same every play"><option value="cycle">in turn</option><option value="shuffle" ${p.order==='shuffle'?'selected':''}>shuffled</option></select>
+  ${p.order==='shuffle'?`<button class="tbtn" data-dtkseed="${k}:${r}" title="a different shuffle">🎲</button>`:''}
+  <span class="sub">⇧-click a step to pin it to one take${(p.pins||[]).some(Boolean)?` · <a href="#" data-dtkunpin="${k}:${r}">unpin all</a>`:''}</span></div>`}
+$('sk').addEventListener('click',async e=>{const t=e.target.closest('[data-dtkplay],[data-dtkmain],[data-dtkseed],[data-dtkunpin]');if(!t)return;e.preventDefault();e.stopPropagation();
+ const [k,r,w]=(t.dataset.dtkplay||t.dataset.dtkmain||t.dataset.dtkseed||t.dataset.dtkunpin).split(':').map(Number),l=SK.lanes[k],p=l.pads[r];
+ if(t.dataset.dtkplay!=null){if(!p.buf)return;AC.resume();const one={...l,pads:[{...p,steps:[1],pins:[w+1],order:'cycle',mute:false,solo:false}],bars:1,swing:0};drumBar(AC,AC.destination,one,0,AC.currentTime+0.01,barLen(),null);return}
+ if(t.dataset.dtkseed!=null){p.seed=1+Math.floor(Math.random()*99999);drawSK();return}
+ if(t.dataset.dtkunpin!=null){p.pins=null;drawSK();return}
+ // make take w the main hit: swap it with the main one (pins follow their recording), keep the pad's length
+ const span=p.end?p.end-(p.start||0):null,nw=p.takes[w-1];p.takes[w-1]=p.path;p.path=nw;p.i=byPath.get(nw);p.buf=null;p.start=null;p.end=null;p.tk=null;
+ if(p.label)p.label=null;if(p.pins)p.pins=p.pins.map(x=>x===1?w+1:x===w+1?1:x);
+ await drumPadLoad(p);if(span&&p.buf)p.end=Math.min(p.buf.duration,p.start+span);drawSK();toast(`take ${w+1} is now the main hit`)},true);
+$('sk').addEventListener('change',e=>{const t=e.target;if(t.dataset.dtkord==null)return;const [k,r]=t.dataset.dtkord.split(':').map(Number),p=SK.lanes[k].pads[r];
+ p.order=t.value;if(p.order==='shuffle'&&!p.seed)p.seed=1+Math.floor(Math.random()*99999);drawSK()},true);
 // drag the start / end lines
 document.addEventListener('mousedown',e=>{const c=e.target.closest&&e.target.closest('[data-dpc]');if(!c)return;e.preventDefault();
  const [k,r]=c.dataset.dpc.split(':').map(Number),p=SK.lanes[k].pads[r],t0=()=>((e.offsetX)/c.clientWidth)*c._view;
@@ -755,7 +779,7 @@ $('sk').addEventListener('change',e=>{if(e.target.id==='skbpm')skTempo(+e.target
 $('sk').addEventListener('keydown',e=>{if(e.target.id==='skbpm'&&e.key==='Enter')e.target.blur()},true);
 // ---------- sketch state: one definition, used by save, bounce provenance, undo/redo, "unsaved" and the draft
 function skLanesState(){return SK.lanes.map(l=>l.type==='drums'?{type:'drums',secs:l.secs||null,bars:l.bars,swing:l.swing,db:l.db||0,mute:!!l.mute,solo:!!l.solo,
-  human:l.human||0,pads:l.pads.map(p=>({path:p.path,label:p.label||null,db:p.db||0,mute:!!p.mute,steps:p.steps.slice(),flams:(p.flams||[]).slice(),choke:p.choke||0,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto,takes:(p.takes||[]).slice()}))}
+  human:l.human||0,pads:l.pads.map(p=>({path:p.path,label:p.label||null,db:p.db||0,mute:!!p.mute,steps:p.steps.slice(),flams:(p.flams||[]).slice(),choke:p.choke||0,start:p.start,end:p.end||null,tune:p.tune||0,decay:p.decay||0,auto:!!p.auto,takes:(p.takes||[]).slice(),pins:(p.pins||[]).slice(),order:p.order||'cycle',seed:p.seed||1}))}
  :({path:l.path,secs:l.secs||null,db:l.db||0,vol:+(0.8*Math.pow(10,(l.db||0)/20)).toFixed(3),mute:!!l.mute,solo:!!l.solo,every:l.every,offset:l.offset,trim:l.trim||null,fin:l.fin||0,fout:l.fout||0,nudge:l.nudge||0,src:l.src||null,nat:!!l.nat,hold:!!l.hold}))}
 const skSnap=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:SK.name||'',arr:SK.arr||'',sec:SK.sec||4,lanes:skLanesState()});
 const EMPTY_SNAP=()=>JSON.stringify({key:PROJ.key||null,bpm:PROJ.bpm||null,name:'',arr:'',sec:4,lanes:[]});
@@ -1302,7 +1326,7 @@ $('expbtn').onclick=()=>{if(!SERVED){toast('needs the local server');return}
 // ================= stop everything =================
 $('stop').onclick=()=>{stopAll();skStop();padsStopLoop()};
 
-window.CRATE={setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd,sliceLoop,skSnap,LOOPS,laneHold,drumTake};  // hooks for tools/screenshots.py and the console
+window.CRATE={takeIdx,setTab,skAdd,skStop,drawSK,openPads,openMidi,PROJ,skBar,barLen,drumAdd,sliceLoop,skSnap,LOOPS,laneHold,drumTake};  // hooks for tools/screenshots.py and the console
 drawProj();if(PROJ.link)linkPoll();render();
 })();
 
