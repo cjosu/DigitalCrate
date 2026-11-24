@@ -301,6 +301,9 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
              json.dumps(dict(zip(TYPE_KEYS, np.round(c["probs"], 3).tolist()))),
              json.dumps(dict(zip(MOOD_PROMPTS, np.round(c["moods"], 4).tolist()))),
              c.get("instrument"), str(path.relative_to(C.LIB_ROOT)), json.dumps(env)))
+        if c["group"] == "pad":  # found by the pad finder: "new from the pad finder" in the app
+            _via(con)
+            con.execute("UPDATE samples SET via='pads' WHERE id=?", (sid,))
         if c.get("grain") is not None:
             from .grain import _db as _gdb
             _gdb()
@@ -458,6 +461,18 @@ def reclassify():
     print(f"reclassified {moved}, dropped {dropped}")
 
 
+def _via(con):
+    """samples.via = 'pads' for what the pad finder added: marked as it mines, and found again here for what it added to
+    old songs (samples newer than their song's mining, not drums or edits), so a pass started before this still counts."""
+    if "via" not in {r[1] for r in con.execute("PRAGMA table_info(samples)")}:
+        con.execute("ALTER TABLE samples ADD COLUMN via TEXT")
+    if "pads_done" in {r[1] for r in con.execute("PRAGMA table_info(tracks)")}:
+        con.execute("""UPDATE samples SET via='pads' WHERE via IS NULL AND parent_id IS NULL AND category != 'Percussion'
+                       AND track_id IN (SELECT id FROM tracks WHERE pads_done=1)
+                       AND created_at > (SELECT processed_at FROM tracks t WHERE t.id = samples.track_id)""")
+    con.commit()
+
+
 def repads(limit=None):
     """Look at every already-mined song again for pads only (pads.find): new pads are added, nothing is removed.
     Songs mined with stems are separated again (their pads sit under drums); the rest use the mix. Resumable."""
@@ -483,4 +498,12 @@ def repads(limit=None):
             con.execute("UPDATE tracks SET pads_done=0 WHERE id=?", (row["id"],))
             con.commit()
         print(f"repads: {k}/{len(rows)} [{total} new pads]", flush=True)
+        if k % 150 == 0:  # so the new pads show up in the app as they come in, not only at the end
+            try:
+                from .build import build
+                print("BUILDING", flush=True)
+                build()
+                print("BUILD DONE", flush=True)
+            except Exception as e:
+                print(f"    build failed: {str(e)[:100]}", flush=True)
     print(f"TASK DONE {total} new pads from {len(rows)} songs", flush=True)
