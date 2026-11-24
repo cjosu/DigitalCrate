@@ -50,18 +50,23 @@ def log_event(path, type_, value=None, sample_id=None, context=None):
 PASSED_OVER = 0.2  # weight of "short, played once, passed over while you starred others" (0.15-0.3 tested best)
 
 
-def item_labels(con, recent_hours=None, durs=None):
-    """Aggregate events into (path -> (y, weight)). Explicit signals dominate implicit ones."""
-    now = time.time()
+def item_labels(con, recent_hours=None, durs=None, until=None):
+    """Aggregate events into (path -> (y, weight)). Explicit signals dominate implicit ones. until: only what you'd
+    told it before this time (unix seconds), as the model knew you then (for the time-forward accuracy test)."""
+    now = time.time() if until is None else until
     lab = {}
-    fav = {r["path"] for r in con.execute("SELECT path FROM favorites")}
+    if until is None:
+        fav = {r["path"] for r in con.execute("SELECT path FROM favorites")}
+    else:
+        fav = {r["path"] for r in con.execute("SELECT path FROM favorites WHERE strftime('%s', added_at) < ?",
+                                              (str(int(until)),))}
     if durs is None:
         durs = {r["path"]: r["dur"] or 0 for r in con.execute("SELECT path, dur FROM samples")}
     # short samples you passed over: played once and never again, in a session (events < 10 min apart) where you
     # starred something else. A 1-second clip can't be skipped, so this is the only "not this one" it can get.
     # Held-out test (every heard sample's labels hidden in its own fold): AUC 0.765 -> 0.775, better in 13 of 15 folds.
     session, starred, plays, sess_of, last = 0, {}, {}, {}, None
-    for r in con.execute("SELECT * FROM events ORDER BY ts"):
+    for r in con.execute("SELECT * FROM events WHERE ts < ? ORDER BY ts", (now + 1,)):
         if last is not None and r["ts"] - last > 600:
             session += 1
         last = r["ts"]
@@ -70,7 +75,7 @@ def item_labels(con, recent_hours=None, durs=None):
         elif r["type"] == "listen":
             plays[r["path"]] = plays.get(r["path"], 0) + 1
             sess_of.setdefault(r["path"], set()).add(session)
-    for r in con.execute("SELECT * FROM events ORDER BY ts"):
+    for r in con.execute("SELECT * FROM events WHERE ts < ? ORDER BY ts", (now + 1,)):
         age_d = (now - r["ts"]) / 86400
         w_time = np.exp(-age_d / 60)  # slow decay: taste drifts over months
         if recent_hours and (now - r["ts"]) < recent_hours * 3600:

@@ -803,3 +803,13 @@ def test_now_playing_does_not_move_the_page(page):
     page.wait_for_function("document.querySelector('#np').hidden", timeout=10000)
     y2 = row.bounding_box()["y"]
     assert abs(y1 - y0) < 1 and abs(y2 - y0) < 1, (y0, y1, y2)
+
+
+def test_recommendations_updated_only_when_the_list_changes(page):
+    """Fresh taste scores that don't change the top of the list don't show "recommendations updated"."""
+    page.evaluate("CRATE.setTab('S')")
+    page.wait_for_function("TASTE.loaded", timeout=30000)
+    page.evaluate("$('refresh').hidden=true")
+    page.evaluate("loadTaste()")
+    page.wait_for_timeout(1500)
+    assert page.evaluate("$('refresh').hidden") is True

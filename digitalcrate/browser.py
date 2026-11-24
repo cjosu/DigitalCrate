@@ -330,8 +330,10 @@ let TASTE={score:{},discover:{},vibe:{},disliked:new Set(),n:0};
 const byIds=(r,k)=>{const o={};if(!r.ids)return r[k]||{};r.ids.forEach((id,j)=>{const i=BYID.get(id);if(i!=null)o[S[i][F.path]]=r[k][j]});return o};
 async function loadTaste(){if(!SERVED)return;try{const [a,b]=await Promise.all([fetch('api/taste?ids=1').then(r=>r.json()),fetch('api/taste?recent=1&ids=1').then(r=>r.json())]);
  const first=!TASTE.loaded;
+ // what you're looking at, ranked before and after: "updated" only when the top of the list would really change
+ const top=()=>{try{return st.tab==='S'?filtered().slice(0,30).join(','):''}catch(e){return''}},before=first?'':top();
  TASTE={loaded:true,score:byIds(a,'score'),discover:byIds(a,'discover'),vibe:byIds(b,'score'),disliked:new Set([...(a.disliked||[]),...TASTE.disliked]),n:a.n_labels||0};
- if(first)render();else{$('refresh').hidden=false;const c=$('count');if(c&&!c.textContent.includes('taste'))render.countOnly&&render.countOnly()}}catch(e){}}
+ if(first)render();else if(before&&top()!==before){$('refresh').hidden=false;const c=$('count');if(c&&!c.textContent.includes('taste'))render.countOnly&&render.countOnly()}}catch(e){}}
 // ---------- deleting samples (served only): files go to _data/trash, undo brings them back
 let GONE=new Set();
 const trashBtn=i=>SERVED?`<button class="xp" data-del="${i}" title="delete this sample (you can undo)">🗑</button>`:'';

@@ -234,3 +234,47 @@ def explain():
                        "plus a lift for songs you've starred samples from")
     _CACHE.update(key=key, value=value)
     return value
+
+
+def forward(con=None, min_fav=18):
+    """Time-forward accuracy: how well the model, as it knew you at a moment, ranks what you heard *next*.
+
+    The cross-validated AUC above shuffles all your history, and it drifts down for reasons that aren't the model
+    getting worse: as recommendations improve you mostly hear samples the model already likes, so telling your stars
+    from the rest gets harder (the test gets harder, not the model worse), and older ratings describe older taste.
+    This replays your history instead: train on everything before a cutoff, then test on the samples you first heard
+    after it (★ vs heard and not starred). Cutoffs fall where about min_fav new favourites have come in."""
+    con = con or _db()
+    L = _library(con)
+    pos = L["pos"]
+    favs = {r[0] for r in con.execute("SELECT path FROM favorites") if r[0] in pos}
+    first = {}
+    for r in con.execute("SELECT path, MIN(ts) t FROM events WHERE type IN ('listen','star') GROUP BY path"):
+        if r["path"] in pos:
+            first[r["path"]] = r["t"]
+    q = np.zeros(len(L["paths"]))
+    for r in con.execute("SELECT path, quality FROM samples"):
+        if r[0] in pos:
+            q[pos[r[0]]] = r[1] or 0
+    order = sorted(first, key=first.get)
+    out, chunk, start = [], [], None
+    for p in order:
+        chunk.append(p)
+        if sum(q in favs for q in chunk) >= min_fav:
+            out.append(chunk)
+            chunk = []
+    res = []
+    for k, ch in enumerate(out[1:], 1):  # the first chunk has nothing before it to learn from
+        cut = first[ch[0]]
+        lab = item_labels(con, None, L["durs"], until=cut)
+        if sum(1 for v in lab.values() if v[0] == 1) < 10:
+            continue
+        r = fit(None, labels=lab)
+        y = np.array([p in favs for p in ch])
+        idx = [pos[p] for p in ch]
+        a = _auc(y, np.asarray(r["score"])[idx])
+        b = _auc(y, q[idx])
+        if a is not None:
+            res.append(dict(t=cut, n_test=len(ch), n_fav=int(y.sum()), n_train=len(lab), auc=round(a, 3),
+                            quality_auc=round(b, 3)))
+    return res
