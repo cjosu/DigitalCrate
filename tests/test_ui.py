@@ -766,3 +766,13 @@ def test_tab_survives_refresh(page):
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='C'", timeout=30000)
     assert "on" in page.locator("#tabC").get_attribute("class").split()
     page.click("#tabS")  # leave it where the other tests expect it
+
+
+def test_playback_progress_shows(page):
+    """While a sample plays: a thin bar on the now-playing strip and a playhead on its waveform."""
+    page.evaluate("CRATE.setTab('S')")
+    page.locator(".row [data-play]").first.click()
+    page.wait_for_function("document.querySelector('#npbar')&&parseFloat(document.querySelector('#npbar').style.width)>0", timeout=20000)
+    page.wait_for_function("document.querySelector('.row svg.wave .phl')", timeout=10000)
+    page.evaluate("stopAll()")
+    page.wait_for_function("!document.querySelector('svg.wave .phl')", timeout=10000)

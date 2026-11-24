@@ -82,3 +82,7 @@ body.wide .top>:not(.tabs){display:none}
 .dstep.pin::after{content:attr(data-pin);font:600 10px/16px system-ui;color:#fff;text-shadow:0 0 2px #000}.dstep.pin{border-color:#fff}
 .dtk{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0 0 4px 34px;padding:3px 6px;border-left:2px solid var(--acc)}.dtk .tbtn{padding:1px 6px}.dtk select{padding:1px 4px}.dtkb{display:inline-flex;gap:1px}
 .dsm{display:inline-flex;gap:2px}
+/* playback progress */
+.dock .np{position:relative}
+#npbar{position:absolute;left:0;top:0;height:2px;width:0;background:var(--acc);opacity:.75;pointer-events:none}
+svg.wave .phs{fill:var(--acc);opacity:.18}svg.wave .phl{fill:var(--acc);opacity:.9}

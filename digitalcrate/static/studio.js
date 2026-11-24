@@ -1383,3 +1383,19 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
 {const _rTab=render;render=function(...a){try{localStorage.setItem('dcTab',st.tab)}catch(e){}return _rTab.apply(this,a)};
  let t=null;try{t=localStorage.getItem('dcTab')}catch(e){}
  if(t&&t!=='S'&&/^[A-Z]$/.test(t)&&$('tab'+t))window.CRATE.setTab(t)}
+// ---------- playback progress: a thin bar along the now-playing strip, and a playhead over the sample's waveform
+// (its row and the sample panel). One animation loop, only while something plays.
+{const NS='http://www.w3.org/2000/svg';let raf=0;const marked=new Set();
+ const head=svg=>{if(svg._ph)return svg._ph;const W=+svg.getAttribute('width'),H=+svg.getAttribute('height');
+  const sh=document.createElementNS(NS,'rect'),ln=document.createElementNS(NS,'rect');sh.setAttribute('class','phs');ln.setAttribute('class','phl');
+  sh.setAttribute('height',H);ln.setAttribute('height',H);ln.setAttribute('width',1.5);svg.append(sh,ln);return svg._ph={sh,ln,W}};
+ const clear=()=>{marked.forEach(svg=>{if(svg._ph){svg._ph.sh.remove();svg._ph.ln.remove();svg._ph=null}});marked.clear();const b=$('npbar');if(b)b.style.width='0'};
+ function tick(){raf=0;let any=false;const seen=new Set();
+  players.forEach((a,i)=>{if(typeof i!=='number'||!a||!(a.duration>0)||!isFinite(a.duration))return;any=true;const p=Math.min(1,a.currentTime/a.duration);
+   document.querySelectorAll(`.row[data-i="${i}"] svg.wave${st.sel===i?',#detail svg.wave':''}`).forEach(svg=>{const h=head(svg),x=p*h.W;
+    h.sh.setAttribute('width',x);h.ln.setAttribute('x',Math.max(0,x-0.75));seen.add(svg);marked.add(svg)});
+   if(NP&&NP.i===i){const np=$('np');if(np&&!np.hidden){let b=$('npbar');if(!b){np.insertAdjacentHTML('afterbegin','<div id="npbar"></div>');b=$('npbar')}b.style.width=(p*100).toFixed(2)+'%'}}});
+  marked.forEach(svg=>{if(!seen.has(svg)&&svg._ph){svg._ph.sh.remove();svg._ph.ln.remove();svg._ph=null;marked.delete(svg)}});
+  if(players.size)raf=requestAnimationFrame(tick);else clear()}  // keeps going while anything plays (length known or not yet)
+ const _drawNPp=drawNP;drawNP=function(...a){const r=_drawNPp.apply(this,a);if(!raf)raf=requestAnimationFrame(tick);return r};
+ window.CRATE.progressTick=()=>tick()}
