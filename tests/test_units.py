@@ -413,3 +413,18 @@ def test_heavy_jobs_take_turns(tmp_path):
     c = subprocess.run([sys.executable, "-c", hold, "pads", "0"], env=env, capture_output=True, text=True)
     assert "waiting" not in c.stdout  # a library pass has its own slot
     a.wait()
+
+
+def test_separation_grain_is_measured():
+    """A stem that is the mix has no grain; one whose mask flickers frame to frame (musical noise) does."""
+    from digitalcrate import grain
+    rng = np.random.default_rng(0)
+    t = np.arange(3 * SR) / SR
+    music = (np.sin(2 * np.pi * 1500 * t) + 0.5 * np.sin(2 * np.pi * 3000 * t) + 0.1 * rng.standard_normal(len(t))).astype(np.float32)
+    assert grain.score(music, music) < 0.02
+    # musical noise: a separator's mask flickering per frequency, frame to frame
+    import librosa
+    X = librosa.stft(music, n_fft=2048, hop_length=512)
+    noisy = librosa.istft(X * (rng.random(X.shape) > 0.5), hop_length=512, length=len(music))
+    assert grain.score(noisy, music) > 0.1  # (the 0.28 line for "grainy" was set by ear on real music)
+    assert grain.penalty(0.03) == 1.0 and abs(grain.penalty(0.1) - 0.8) < 1e-6 and abs(grain.penalty(0.5) - 0.6) < 1e-6

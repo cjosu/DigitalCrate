@@ -40,7 +40,7 @@ N_FFT = 2048
 HOP = 1024            # ~46 ms analysis frames
 FPS = SR_F / HOP
 
-DEMUCS_MODEL = "htdemucs"
+DEMUCS_MODEL = "htdemucs_ft"  # fine-tuned: much less separation grain than htdemucs (blind listening, 2026-11)
 MODELS_DIR = PROJECT_DIR / "models"
 ROFORMER_MODELS = {  # --vocals choices -> audio-separator checkpoints
     "roformer": "vocals_mel_band_roformer.ckpt",                       # Kim MelBand RoFormer, SDR ~12.6

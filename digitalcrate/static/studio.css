@@ -86,3 +86,4 @@ body.wide .top>:not(.tabs){display:none}
 .dock .np{position:relative}
 #npbar{position:absolute;left:0;top:0;height:2px;width:0;background:var(--acc);opacity:.75;pointer-events:none}
 svg.wave .phs{fill:var(--acc);opacity:.18}svg.wave .phl{fill:var(--acc);opacity:.9}
+.tag.grainy,.badge.grb{background:#5a3b2a;color:#f0c9a8}

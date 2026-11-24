@@ -214,10 +214,17 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
         probs /= probs.sum(1, keepdims=True)
         moods = embs @ M.T
         kept = []
+        from .grain import score as grain_score, penalty as grain_penalty
         for c, e, pr, md in zip(cands, embs, probs, moods):
             cat = classify(c, pr, stems is not None)
             if cat is None:
                 continue
+            if stems is not None and c["rendered_from"] == "other":  # separation grain: a grainy cut sinks
+                try:
+                    c["grain"] = grain_score(audio_of(c), audio_of(c, "mix"))
+                    c["quality"] *= grain_penalty(c["grain"])
+                except Exception:
+                    pass
             c["category"], c["subtype"] = cat
             c["emb"], c["probs"], c["moods"] = e, pr, md
             c["quality"] *= 1 - 0.8 * float(pr[TYPE_KEYS.index("drums")])
@@ -294,6 +301,12 @@ def process_track(con, row, separate_mode="auto", verbose=False, vocals="demucs"
              json.dumps(dict(zip(TYPE_KEYS, np.round(c["probs"], 3).tolist()))),
              json.dumps(dict(zip(MOOD_PROMPTS, np.round(c["moods"], 4).tolist()))),
              c.get("instrument"), str(path.relative_to(C.LIB_ROOT)), json.dumps(env)))
+        if c.get("grain") is not None:
+            from .grain import _db as _gdb
+            _gdb()
+            from .grain import penalty as _gp
+            con.execute("UPDATE samples SET grain=?, quality_raw=? WHERE id=?",
+                        (c["grain"], round(c["quality"] / _gp(c["grain"]), 3), sid))
         if c.get("chords"):
             from .pads import _db as _pdb
             _pdb()

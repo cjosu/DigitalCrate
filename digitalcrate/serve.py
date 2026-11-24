@@ -35,7 +35,7 @@ def _saved_jobs():
         return {}
 
 
-BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pads"}
+BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pads", "grain"}
 _SLOW = {}
 
 
@@ -132,6 +132,9 @@ TASKS = {  # library-wide analyses the Processing page can start: (label, SQL fo
              "AND category IN ('Pads & Atmospheres','Strings & Orchestral','Chords & Keys')",
              "SELECT COUNT(*) FROM samples WHERE kind != 'oneshot' AND (category IN ('Pads & Atmospheres',"
              "'Strings & Orchestral') OR chords IS NOT NULL)"),
+    "grain": ("Check stem samples for separation grain (grainy ones rank lower)",
+              "SELECT COUNT(*) FROM samples WHERE grain IS NOT NULL AND rendered_from = 'other'",
+              "SELECT COUNT(*) FROM samples WHERE rendered_from = 'other' AND parent_id IS NULL AND category != 'Percussion'"),
     "loops": ("Find sustain loops (pads, drones, held chords)", "SELECT COUNT(*) FROM samples WHERE loop_q IS NOT NULL "
               "AND category IN ('Pads & Atmospheres','Strings & Orchestral','Textures & Field','Chords & Keys','Vocal Atmospheres') "
               "AND kind != 'loop' AND dur >= 1.5",

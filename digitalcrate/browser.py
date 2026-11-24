@@ -97,6 +97,13 @@ def write_browser(d, tags, parts, kits):
                     chs[pos[r["id"]]] = names[:8]
     except Exception:
         pass
+    grainy = []
+    try:  # samples with audible separation grain (grain.py)
+        from .grain import line
+        grainy = [pos[r["id"]] for r in connect().execute("SELECT id, grain, recut FROM samples WHERE grain IS NOT NULL")
+                  if r["id"] in pos and r["grain"] >= line(r["recut"])]
+    except Exception:
+        pass
     secs = {}
     try:  # song sections: index -> the section a sample mostly comes from (only once sections have been found)
         from .sections import by_track, of_sample
@@ -108,7 +115,7 @@ def write_browser(d, tags, parts, kits):
                     secs[i] = lab
     except Exception:
         pass
-    data = dict(tracks=tracks, samples=S, born=born, loops=loops, chords=chs, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+    data = dict(tracks=tracks, samples=S, born=born, loops=loops, chords=chs, grainy=grainy, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
     write_page(data)
 

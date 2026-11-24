@@ -93,7 +93,8 @@ def render(rel, key=None, bpm=None, src=None):
     if semis == 0 and abs(time - 1) < 1e-3:
         return C.LIB_ROOT / rel, dict(info, semis=0, time=1, length=1)
     CACHE.mkdir(parents=True, exist_ok=True)
-    h = hashlib.sha1(f"{rel}|{semis}|{time:.5f}|v3".encode()).hexdigest()[:14]
+    mt = (C.LIB_ROOT / rel).stat().st_mtime if (C.LIB_ROOT / rel).exists() else 0  # a re-cut file renders anew
+    h = hashlib.sha1(f"{rel}|{mt}|{semis}|{time:.5f}|v3".encode()).hexdigest()[:14]
     out = CACHE / f"{h}.wav"
     if not out.exists():
         from .edit import _load

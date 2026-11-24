@@ -145,7 +145,9 @@ def render(rel, p):
 def preview(rel, params):
     y, p = render(rel, params)
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    h = hashlib.sha1((rel + json.dumps(p, sort_keys=True)).encode()).hexdigest()[:10]
+    src = C.LIB_ROOT / rel
+    mt = str(src.stat().st_mtime) if src.exists() else ""  # a re-cut file renders anew
+    h = hashlib.sha1((rel + mt + json.dumps(p, sort_keys=True)).encode()).hexdigest()[:10]
     out = PREVIEW_DIR / f"{h}.wav"
     sf.write(str(out), y.T, SR, subtype="PCM_24")
     return str(out.relative_to(C.LIB_ROOT))

@@ -1399,3 +1399,15 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(players.size)raf=requestAnimationFrame(tick);else clear()}  // keeps going while anything plays (length known or not yet)
  const _drawNPp=drawNP;drawNP=function(...a){const r=_drawNPp.apply(this,a);if(!raf)raf=requestAnimationFrame(tick);return r};
  window.CRATE.progressTick=()=>tick()}
+// ---------- search: typing from another tab shows the results; a sample's id always finds it, whatever the filters
+{const BYSID=new Map(S.map((s,i)=>[s[F.id],i]));
+ $('search').addEventListener('input',()=>{if($('search').value.trim()&&!$('sndbtn').classList.contains('on')&&st.tab!=='S'&&st.tab!=='G')window.CRATE.setTab('S')});
+ const _fId=filtered;filtered=function(...a){const q=$('search').value.trim().toLowerCase();
+  if(!$('sndbtn').classList.contains('on')&&/^[0-9a-z]{6}$/.test(q)&&BYSID.has(q)&&!GONE.has(BYSID.get(q)))return [BYSID.get(q)];return _fId.apply(this,a)}}
+// ---------- separation grain: a "grainy" tag on rows and in the sample panel (they also rank lower by quality)
+{const GR=new Set(D.grainy||[]),TIP='watery, flickering artifacts from stem separation (louder vocals or drums were pulled out of the same frequencies): it ranks lower';
+ const _rowG=rowHTML;rowHTML=function(i){const h=_rowG(i);if(!GR.has(i))return h;const a=h.indexOf('<div class="name">'),b=h.indexOf('</div>',a);
+  return a<0||b<0?h:h.slice(0,b)+`<span class="tag grainy" title="${TIP}">grainy</span>`+h.slice(b)};
+ const _selG=select;select=function(i,from){_selG(i,from);if(!GR.has(i))return;const m=document.querySelector('#detail .meta');
+  if(m&&!m.querySelector('.grb'))m.insertAdjacentHTML('afterbegin',`<span class="badge grb" title="${TIP}">grainy</span> `)};
+ window.CRATE.GRAINY=GR}

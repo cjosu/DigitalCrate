@@ -776,3 +776,16 @@ def test_playback_progress_shows(page):
     page.wait_for_function("document.querySelector('.row svg.wave .phl')", timeout=10000)
     page.evaluate("stopAll()")
     page.wait_for_function("!document.querySelector('svg.wave .phl')", timeout=10000)
+
+
+def test_search_from_crate_and_by_id(page):
+    """Typing in search on another tab shows the samples; an id finds its sample even if filters would hide it."""
+    sid, cat = page.evaluate("[S[3][F.id],S[3][F.cat]]")
+    other = page.evaluate(f"CATS.find(c=>c!=={json.dumps(cat)})")
+    page.click("#tabC")
+    page.fill("#search", sid)
+    page.wait_for_function("st.tab==='S'", timeout=5000)
+    page.evaluate(f"st.cats=new Set([{json.dumps(other)}]);render()")  # a category filter that would hide it
+    page.wait_for_function(f"document.querySelectorAll('#list .row').length===1&&document.querySelector('#list .row').dataset.i==='3'", timeout=5000)
+    page.fill("#search", "")
+    page.evaluate("st.cats=new Set();render()")

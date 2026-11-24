@@ -202,6 +202,10 @@ flowchart LR
 - **Sustain loops:** inside the steady part of a sound, the loop end's waveform is matched against every earlier
   position (normalized cross-correlation), checked for level and timbre, and the seam's spectral jump is measured;
   a short crossfade is baked in when needed. About 55% of sustained samples loop cleanly.
+- **Separation grain:** a sample cut from a stem is compared with the original mix at the same spot; a separation
+  mask that flickers from frame to frame between 1 and 8 kHz is the watery "musical noise" separators leave. Grainy cuts
+  are tagged and rank lower, and `grain --recut` cuts them again with Demucs's fine-tuned model (`htdemucs_ft`, which
+  mining now uses: far less grainy in blind listening) in place, keeping favorites and sketches pointing at them.
 - **Pads:** chords from [madmom](https://github.com/CPJKU/madmom)'s deep-chroma chord recognizer. A pad holds at
   most 2 distinct chords, with its chroma close to its average throughout and a steady level. Mining also looks for
   pads on purpose: stretches of the instrument stem that hold 1–2 chords, cut into 2, 4 or 8 bars starting on the
@@ -230,6 +234,7 @@ styles · lyrics · credits          whole-library passes
 loops [--redo]                     find sustain loops in pads, drones and held chords
 pads [--redo] [--no-move]          label chords of sustained samples; move non-pads to Strings & Orchestral
 pads --mine [--limit N]            look at mined songs again for pads only (adds, removes nothing)
+grain [--recut]                    score stem samples for separation grain; --recut: cut grainy ones again
 sections [--limit N]               song sections (needs All-In-One)
 reloop [--fix]                     re-cut older loops onto downbeats
 ```

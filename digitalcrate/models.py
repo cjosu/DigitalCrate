@@ -15,13 +15,15 @@ _demucs = None
 _clap = None
 
 
-def separate(y):
+def separate(y, model=None):
     """y: (2, n) float32 @44.1k -> dict of stems (2, n): drums, bass, other, vocals."""
     global _demucs
     from demucs.pretrained import get_model
     from demucs.apply import apply_model
-    if _demucs is None:
-        _demucs = get_model(DEMUCS_MODEL).eval().to(DEVICE)
+    name = model or DEMUCS_MODEL
+    if _demucs is None or getattr(_demucs, "_dc_name", None) != name:
+        _demucs = get_model(name).eval().to(DEVICE)
+        _demucs._dc_name = name
     x = torch.from_numpy(y)
     ref = x.mean(0)
     mu, sd = ref.mean(), ref.std() + 1e-8
