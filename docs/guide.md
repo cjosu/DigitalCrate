@@ -20,6 +20,9 @@ Everything the [README](../README.md) skips. The small **?** buttons in the app 
 - **🕘 Recent actions** lists every ★, ✕, category move, collection change and delete, each with undo.
 - **Added recently** narrows any sort to the latest run, day or week.
 - **∞ hold** on a pad, drone or held chord plays it and holds it on its seamless loop until you stop it.
+- **🔁 takes:** a sample that comes round again in its song (the same drum hit, the same sung words, the same chord)
+  is grouped with its other takes. Click the tag on a row to hear them back to back; the sample panel lists them with
+  **▶ play all**, and **T** steps to the next take.
 - **Pads** are sounds that hold one or two chords and keep still, so they loop and can be played. Sustained samples
   that move through more chords live in **Strings & Orchestral** (orchestral passages) or **Chords & Keys** (synth
   progressions); one-shots that die away (a struck key, a pluck) are in Chords & Keys. The panel shows a sample's own
@@ -206,6 +209,9 @@ flowchart LR
   mask that flickers from frame to frame between 1 and 8 kHz is the watery "musical noise" separators leave. Grainy cuts
   are tagged and rank lower, and `grain --recut` cuts them again with Demucs's fine-tuned model (`htdemucs_ft`, which
   mining now uses: far less grainy in blind listening) in place, keeping favorites and sketches pointing at them.
+- **Takes:** samples of one song and category that don't overlap and are of similar length group when they are the
+  same drum type and close in sound (drums), share at least half their sung words (vocals), or sound nearly alike
+  and play the same notes (everything else).
 - **Pads:** chords from [madmom](https://github.com/CPJKU/madmom)'s deep-chroma chord recognizer. A pad holds at
   most 2 distinct chords, with its chroma close to its average throughout and a steady level. Mining also looks for
   pads on purpose: stretches of the instrument stem that hold 1–2 chords, cut into 2, 4 or 8 bars starting on the

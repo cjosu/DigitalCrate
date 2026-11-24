@@ -428,3 +428,19 @@ def test_separation_grain_is_measured():
     noisy = librosa.istft(X * (rng.random(X.shape) > 0.5), hop_length=512, length=len(music))
     assert grain.score(noisy, music) > 0.1  # (the 0.28 line for "grainy" was set by ear on real music)
     assert grain.penalty(0.03) == 1.0 and abs(grain.penalty(0.1) - 0.8) < 1e-6 and abs(grain.penalty(0.5) - 0.6) < 1e-6
+
+
+def test_alternate_takes_grouping_rules():
+    from digitalcrate.takes import same_take, _toks
+    s = lambda cat, sub, start, dur: dict(category=cat, subtype=sub, start=start, dur=dur)
+    kick1, kick2, snare = s("Percussion", "Kick", 1.0, 0.3), s("Percussion", "Kick", 9.0, 0.3), s("Percussion", "Snare", 5.0, 0.3)
+    assert same_take(kick1, kick2, 0.9, 0, set(), set())            # the same drum again
+    assert not same_take(kick1, snare, 0.95, 0, set(), set())       # another drum
+    assert not same_take(kick1, kick2, 0.99999, 0, set(), set())    # the very same audio
+    v1, v2 = s("Vocals", "Phrases", 10, 2.0), s("Vocals", "Phrases", 60, 2.2)
+    assert same_take(v1, v2, 0.8, 0.3, _toks("my love"), _toks("oh my love"))        # the same words, pitch differs
+    assert not same_take(v1, v2, 0.8, 0.9, _toks("my love"), _toks("don't go now"))  # other words
+    p1, p2 = s("Chords & Keys", "Free", 10, 8.0), s("Chords & Keys", "Free", 40, 8.5)
+    assert same_take(p1, p2, 0.95, 0.95, set(), set()) and not same_take(p1, p2, 0.95, 0.6, set(), set())  # same notes
+    assert not same_take(p1, s("Chords & Keys", "Free", 12, 8.0), 0.95, 0.95, set(), set())  # overlapping cuts
+    assert not same_take(p1, s("Chords & Keys", "Free", 40, 2.0), 0.95, 0.95, set(), set())  # very different lengths

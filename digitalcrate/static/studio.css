@@ -88,3 +88,4 @@ body.wide .top>:not(.tabs){display:none}
 #npbar{position:absolute;left:0;top:0;height:2px;width:0;background:var(--acc);opacity:.75;pointer-events:none}
 svg.wave .phs{fill:var(--acc);opacity:.18}svg.wave .phl{fill:var(--acc);opacity:.9}
 .tag.grainy,.badge.grb{background:#5a3b2a;color:#f0c9a8}
+.tag.takes{cursor:pointer;background:#22323f;color:#bfe0f5}.tag.takes:hover{background:#2c4254}#tkbox .prow.cur .name{color:var(--ink);font-weight:600}

@@ -97,6 +97,15 @@ def write_browser(d, tags, parts, kits):
                     chs[pos[r["id"]]] = names[:8]
     except Exception:
         pass
+    takes = []
+    try:  # alternate takes: groups of samples that are the same thing again in their song (takes.py)
+        from .takes import groups as take_groups
+        for g in take_groups(connect()):
+            g = [pos[i] for i in g if i in pos]
+            if len(g) > 1:
+                takes.append(g)
+    except Exception as e:
+        print("takes:", str(e)[:100])
     padfound = []
     try:  # what the pad finder added ("new from the pad finder")
         from .process import _via
@@ -123,7 +132,8 @@ def write_browser(d, tags, parts, kits):
                     secs[i] = lab
     except Exception:
         pass
-    data = dict(tracks=tracks, samples=S, born=born, loops=loops, chords=chs, grainy=grainy, padfound=padfound, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
+    data = dict(tracks=tracks, samples=S, born=born, loops=loops, chords=chs, grainy=grainy, padfound=padfound,
+                takes=takes, sections=secs, words=words, wordless=wordless, partners=pack_partners(parts, len(S)), variants=V, subtypes=SUBTYPES, overridden=[i for i, r in enumerate(d["rows"]) if r["id"] in ov], kits=[dict(name=k["name"], m=k["members"]) for k in kits],
                 abbr=ABBR)
     write_page(data)
 

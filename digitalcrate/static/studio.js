@@ -302,7 +302,7 @@ function kMove(d){const rows=[...document.querySelectorAll('#list .row[data-i]')
  let k=rows.findIndex(r=>+r.dataset.i===st.sel);k=k<0?(d>0?0:rows.length-1):Math.max(0,Math.min(rows.length-1,k+d));
  const i=+rows[k].dataset.i;select(i,'list');rows[k].scrollIntoView({block:'nearest'});if(KPREVIEW)toggle(i,null,{loop:false})}
 function kHelp(){let p=$('khelp');if(p){p.hidden=!p.hidden;return}p=document.createElement('div');p.id='khelp';p.className='colpop';p.style.cssText+=';left:50%;top:80px;transform:translateX(-50%);width:420px;position:fixed';
- const rows=[['↓ ↑ or J K','next / previous sample (with a preview)'],['P','preview while moving: '+(KPREVIEW?'on':'off')],['Enter','edit the selected sample'],['Space','stop'],['F','★ favourite'],['X','✕ not for me'],['C','📁 add to your last collection'],['A','＋ add to the sketchpad'],['/','search'],['Esc','unselect · close'],['Backspace','back to the previous sample'],['← →','variations (when shown)'],['⌘Z  ⌘⇧Z','undo / redo (the sketch when the sketchpad is open)'],['⌘S','save the sketch'],['?','this list']];
+ const rows=[['↓ ↑ or J K','next / previous sample (with a preview)'],['P','preview while moving: '+(KPREVIEW?'on':'off')],['Enter','edit the selected sample'],['Space','stop'],['F','★ favourite'],['X','✕ not for me'],['C','📁 add to your last collection'],['A','＋ add to the sketchpad'],['/','search'],['Esc','unselect · close'],['Backspace','back to the previous sample'],['← →','variations (when shown)'],['T','next take (when a sample has takes)'],['⌘Z  ⌘⇧Z','undo / redo (the sketch when the sketchpad is open)'],['⌘S','save the sketch'],['?','this list']];
  p.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>Keyboard</b><button id="khclose">✕</button></div><div style="display:grid;grid-template-columns:110px 1fr;gap:4px 10px">${rows.map(([k,v])=>`<code>${k}</code><span>${v}</span>`).join('')}</div>`;
  document.body.appendChild(p);$('khclose').onclick=()=>p.hidden=true}
 document.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey||typing(e))return;
@@ -1425,3 +1425,26 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const _sendSrc=sendEvent;sendEvent=function(path,type,value,id,ctx){if(!SERVED)return;
   const src=SRC.get(path)||here(null);fetch('api/event',{method:'POST',body:JSON.stringify({path,type,value,id,context:Object.assign({src},ctx||{})})}).catch(()=>{});scheduleRefit()};
  window.CRATE.playSource=p=>SRC.get(p)}
+// ---------- alternate takes: samples that are the same thing again in their song (the same drum hit, the same sung
+// words, the same chord). A 🔁 tag on rows plays through them; the sample panel lists them; T steps to the next one.
+{const TG=new Map();(D.takes||[]).forEach(g=>g.forEach(i=>TG.set(i,g)));
+ const live=i=>(TG.get(i)||[]).filter(j=>S[j]&&!GONE.has(j)&&!TASTE.disliked.has(S[j][F.path]));
+ const at=j=>{const t=S[j][F.start]||0;return `${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`};
+ let seq=0;
+ // play every take once, back to back, starting at `from`; stopping (or playing anything else) ends it
+ function playTakes(i,from){const g=live(i);if(g.length<2)return;const my=++seq;let k=Math.max(0,g.indexOf(from??g[0]));stopAll();
+  const next=()=>{if(my!==seq||k>=g.length)return;const j=g[k++];toggle(j,null,{loop:false});const a=players.get(j);if(!a)return;
+   const prev=a.onended;a.onended=()=>{if(prev)prev();if(my===seq)setTimeout(next,160)}};next()}
+ const TIP='other takes of this in the same song (the same hit, words or chord again): click to play through them all';
+ const _rowT=rowHTML;rowHTML=function(i){const h=_rowT(i),n=live(i).length;if(n<2)return h;const a=h.indexOf('<div class="name">'),b=h.indexOf('</div>',a);
+  return a<0||b<0?h:h.slice(0,b)+`<span class="tag takes" data-takes="${i}" title="${TIP}">🔁 ${n} takes</span>`+h.slice(b)};
+ document.addEventListener('click',e=>{const t=e.target.closest('[data-takes]');if(t){e.stopPropagation();e.preventDefault();playTakes(+t.dataset.takes);return}
+  const all=e.target.closest('#tkall');if(all){e.stopPropagation();playTakes(+all.dataset.i)}},true);
+ const _selT=select;select=function(i,from){_selT(i,from);const g=live(i);if(g.length<2)return;const m=document.querySelector('#detail .meta');if(!m||$('tkbox'))return;
+  m.insertAdjacentHTML('afterend',`<div class="prov" id="tkbox"><b>🔁 ${g.length} takes</b> <span class="sub">the same thing again in this song</span>
+   <button id="tkall" data-i="${i}" title="play every take once, back to back">▶ play all</button> <span class="sub">T: next take</span>
+   ${g.map(j=>`<div class="prow${j===i?' cur':''}"><button class="play" data-play="${j}">▶</button><div class="name">@ ${at(j)} · ${S[j][F.dur]}s${S[j][F.cam]?' · '+S[j][F.cam]:''}${(typeof WORDS!=='undefined'&&WORDS[j])?` · <span class="sub">“${esc(String(WORDS[j]).slice(0,40))}”</span>`:''}${j===i?' · <span class="sub">this one</span>':''}</div><div style="display:flex;gap:6px">${star(S[j][F.path],S[j][F.id],lbl(j))}${j===i?'':`<button data-go="${j}" title="open this take">→</button>`}</div></div>`).join('')}</div>`);mark()};
+ document.addEventListener('keydown',e=>{if(e.key!=='t'&&e.key!=='T')return;if(e.metaKey||e.ctrlKey||e.altKey)return;const el=document.activeElement;if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))return;
+  if(st.sel==null)return;const g=live(st.sel);if(g.length<2){toast('no other takes of this one');return}e.preventDefault();seq++;
+  const j=g[(g.indexOf(st.sel)+1)%g.length];stopAll();select(j,'go');toggle(j,null,{loop:false})});
+ window.CRATE.takesOf=live;window.CRATE.playTakes=playTakes}

@@ -835,3 +835,25 @@ def test_plays_record_where_they_came_from(site, page):
         page.wait_for_timeout(250)
     page.click("#tabS")
     assert any(json.loads(c).get("src") == want for c in ctx), ctx
+
+
+def test_alternate_takes_play_through(page):
+    """🔁 takes: a tag on the row, the list in the sample panel, play all, and T for the next take."""
+    page.evaluate("CRATE.setTab('S')")
+    i = page.evaluate("S.findIndex((s,i)=>CRATE.takesOf(i).length>1)")
+    assert i >= 0, "the test library's drum hits (three of each kind in one song) should group as takes"
+    g = page.evaluate(f"CRATE.takesOf({i})")
+    page.fill("#search", page.evaluate(f"S[{i}][F.id]"))
+    page.wait_for_selector(f'#list .row[data-i="{i}"] [data-takes]')
+    page.click(f'#list .row[data-i="{i}"] [data-takes]')   # plays through the takes, the first one first
+    page.wait_for_function(f"players.has({g[0]})", timeout=10000)
+    page.wait_for_function(f"players.has({g[1]})", timeout=20000)   # ... then the next, on its own
+    page.evaluate("stopAll()")
+    page.evaluate(f"select({i},'list')")
+    page.wait_for_selector("#tkbox")
+    assert page.locator("#tkbox .prow").count() == len(g)
+    page.keyboard.press("t")
+    nxt = g[(g.index(i) + 1) % len(g)]
+    page.wait_for_function(f"st.sel==={nxt}", timeout=5000)
+    page.evaluate("stopAll()")
+    page.fill("#search", "")
