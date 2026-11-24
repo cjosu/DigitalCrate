@@ -85,10 +85,16 @@ all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md]
   (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used; hip-hop
   gives vocals only.
 - **🎲** on a slot pulls another part that fits what's playing; **🎲 all** deals every unlocked slot; **🔒** keeps a
-  part. A slot avoids songs that are already playing in another slot.
+  part; **✕** takes one out; **clear all** empties the mixer. A slot avoids songs already playing in another slot.
+- **🔍** on a slot lets you choose the song: the mixer takes its best-fitting bars.
+- **Slots:** each slot's menu sets what it plays (drums, bass, vocals, other); **＋ add slot** adds more, up to 8 (a
+  second vocal, two drum layers); an empty slot can be removed.
+- **💾 save** keeps a named combination (open it again from the menu next to it).
+- Each slot shows its waveform with bar lines and a play line. A song near twice or half the tempo plays half-time or
+  double-time.
 - **Per slot:** where the loop starts (◀ ▶), its length (1–8 bars), your own pitch offset (− ＋; drums keep their
-  pitch), volume, solo and mute, a 3-band EQ and a tempo-synced delay. Everything but pitch, position and length is
-  live.
+  pitch), volume, solo and mute, a 3-band EQ and a tempo-synced delay, each with an on/off switch (**FX** switches them all).
+  Everything but pitch, position and length is live.
 - **Tempo and key** are the mixer's own. *Auto* key follows the "other" slot. Parts are stretched to the tempo and
   shifted by the smallest interval to the key.
 - **Harmony fit** compares the pitched parts' notes bar by bar after shifting (100% = the same notes). New parts are

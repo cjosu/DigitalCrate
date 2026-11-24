@@ -964,9 +964,52 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
     page.click("#mxup")
     page.wait_for_function("CRATE.MX.rated>0", timeout=10000)
+    # the waveform and its play line
+    page.wait_for_function(f"(()=>{{const b=document.querySelector('[data-mxwave=\"{stem}\"]');return b&&b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'}})()", timeout=10000)
+    # ✕ takes a part out; 🔍 puts a chosen song in
+    page.click(f'[data-mxdel="{stem}"]')
+    page.wait_for_function(f"!CRATE.MX.slots['{stem}']", timeout=10000)
+    page.click(f'[data-mxfind="{stem}"]')
+    page.fill("#mxq", "Stem Artist 902")
+    page.wait_for_selector(f'[data-mxsong="{stem}:902"]')
+    page.keyboard.press("Enter")
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
+    # save, clear all, open it again
+    page.fill("#mxname", "ui mix")
+    page.click("#mxsave")
+    page.wait_for_selector("#mxload")
+    page.click("#mxclear")
+    assert page.evaluate("Object.keys(CRATE.MX.slots).length") == 0
+    page.select_option("#mxload", "ui mix")
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
+    page.select_option(f'[data-mxlen="{stem}"]', "2")
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
+    # another slot (a second "other"), then its role changed to vocals: a part of the new kind comes in
+    page.select_option("#mxaddrole", "other")
+    page.click("#mxadd")
+    page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.slots[CRATE.MX.order[4]]&&CRATE.MX.slots[CRATE.MX.order[4]].buf", timeout=60000)
+    new = page.evaluate("CRATE.MX.order[4]")
+    assert page.evaluate(f"CRATE.MX.slots['{new}'].stem") == "other"
+    page.select_option(f'[data-mxrole="{new}"]', "vocals")
+    page.wait_for_function(f"CRATE.MX.roles['{new}']==='vocals'&&CRATE.MX.slots['{new}']&&CRATE.MX.slots['{new}'].stem==='vocals'&&CRATE.MX.slots['{new}'].buf", timeout=60000)
     page.click("#mxplay")
     assert page.evaluate("CRATE.MX.on") is False
     page.reload()                                   # the tab and the combination come back
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'", timeout=30000)
     page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].n===2", timeout=10000)
+    assert page.evaluate("CRATE.MX.order.length") == 5 and page.evaluate(f"CRATE.MX.roles['{new}']") == "vocals"
+    page.evaluate("localStorage.removeItem('dcStems')")   # the next tests start with the default four slots
     page.click("#tabS")
+
+
+def test_sliders_look_off_at_their_minimum(page):
+    """Every slider's fill starts at its minimum (or at zero for ranges that span it): nothing shows when it's off."""
+    page.evaluate("""(()=>{const d=document.createElement('div');d.id='sltest';d.innerHTML='<input type="range" id="sl1" min="0" max="10" value="0"><input type="range" id="sl2" min="-12" max="12" value="0"><input type="range" id="sl3" min="0" max="10" value="5">';document.body.appendChild(d)})()""")
+    page.wait_for_function("getComputedStyle(document.querySelector('#sl3')).getPropertyValue('--b').trim()!==''", timeout=5000)
+    v = lambda i, k: float(page.evaluate(f"getComputedStyle(document.querySelector('#{i}')).getPropertyValue('--{k}')"))
+    assert v("sl1", "a") == 0 and v("sl1", "b") == 0            # at the minimum: no fill
+    assert v("sl2", "a") == 0.5 and v("sl2", "b") == 0.5        # at zero in a ± range: no fill
+    assert v("sl3", "a") == 0 and v("sl3", "b") == 0.5
+    page.evaluate("(()=>{const e=document.querySelector('#sl2');e.value=-6;e.dispatchEvent(new Event('input',{bubbles:true}))})()")
+    assert v("sl2", "a") == 0.25 and v("sl2", "b") == 0.5       # below zero: the fill runs from the value up to zero
+    page.evaluate("document.querySelector('#sltest').remove()")

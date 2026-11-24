@@ -597,12 +597,23 @@ class Handler(SimpleHTTPRequestHandler):
                         for t, m in lib.items()]))
                 if what == "pick":
                     return self._json(dict(part=SM.pick(req["stem"], state, avoid=set(req.get("avoid") or []),
-                                                        n=req.get("n")), info=SM.info(state)))
+                                                        n=req.get("n"), track=req.get("track"),
+                                                        slot=req.get("slot")), info=SM.info(state)))
                 if what == "render":
-                    f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0)
+                    f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
+                                  req.get("k") or 1)
                     return self._json(dict(url=str(f.relative_to(C.LIB_ROOT))))
                 if what == "info":
                     return self._json(SM.info(state))
+                if what == "save":
+                    SM.save_mix(req["name"], req["mix"])
+                    SM.log("save", state)
+                    return self._json(dict(ok=True, rated=SM.weights()[1]))
+                if what == "saved":
+                    return self._json(dict(mixes=SM.mixes()))
+                if what == "delete":
+                    SM.delete_mix(req["name"])
+                    return self._json(dict(ok=True))
                 if what == "event":
                     n = SM.log(req["kind"], state, req.get("stem"))
                     return self._json(dict(logged=n, rated=SM.weights()[1]))

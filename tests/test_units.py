@@ -482,9 +482,10 @@ def test_stem_mixer_renders_fits_and_learns(tmp_path, monkeypatch):
     _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)    # C major, playing C
     _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)    # D major, playing D
     _fake_stem_song(tmp_path, 3, 100, 0, "major", 6)    # says C major but plays F#: a wrong key on file
-    _fake_stem_song(tmp_path, 4, 160, 0, "major", 0)    # far too fast
+    _fake_stem_song(tmp_path, 4, 140, 0, "major", 0)    # too fast for drums at 100, and too slow for half-time
+    _fake_stem_song(tmp_path, 5, 200, 0, "major", 0)    # twice the tempo: fits half-time (two of its bars per bar)
     lib = stems.library()
-    assert set(lib) == {1, 2, 3, 4}
+    assert set(lib) == {1, 2, 3, 4, 5}
     # a part is exactly n bars at the mixer's tempo, whatever the song's own tempo
     f = stems.render(2, "other", 4, 2, 100, semis=-2)
     info = sf.info(str(f))
@@ -499,9 +500,27 @@ def test_stem_mixer_renders_fits_and_learns(tmp_path, monkeypatch):
     con = stems._db()
     state = dict(bpm=100, key=None, slots=dict(other=dict(track=1, bar0=0, n=4, off=0)))
     picks = [stems.pick("bass", state, rng=np.random.default_rng(k)) for k in range(12)]
-    assert all(p["track"] not in (1, 4) for p in picks)  # not the song already playing, not the too-fast one
-    assert sum(p["track"] == 2 for p in picks) >= 9
+    assert all(p["track"] != 1 for p in picks)             # not the song already playing
+    assert sum(p["track"] == 3 for p in picks) <= 1        # the one that clashes loses
+    # tempo: drums stretch well only within about -20% / +25%, at the song's tempo, half or double
+    assert stems.best_k(lib[4], 100, "drums") is None and stems.best_k(lib[5], 100, "drums")[0] == 2
+    drums = [stems.pick("drums", state, rng=np.random.default_rng(k)) for k in range(12)]
+    assert all(p["track"] != 4 for p in drums) and any(p["track"] == 5 and p["k"] == 2 for p in drums)
+    f2 = stems.render(5, "drums", 0, 2, 100, k=2)          # 2 mixer bars = 4 of its bars, still exactly 2 bars long
+    assert sf.info(str(f2)).frames == round(2 * 240 / 100 * SR)
+    # you chose the song: its best bars, even at a tempo the dice would skip
+    assert stems.pick("drums", state, track=4)["track"] == 4
+    # one chord throughout is as still as it gets
+    assert stems.still(lib[1], 0, 4) > 0.99
     assert stems.info(dict(state, slots=dict(state["slots"], bass=dict(track=2, bar0=0, n=4, off=0))))["fit"] > 0.98
+    # any number of slots, several of one stem: slots have ids and carry their stem
+    two = dict(bpm=100, key=None, slots=dict(a=dict(stem="other", track=1, bar0=0, n=4, off=0),
+                                             b=dict(stem="other", track=2, bar0=0, n=4, off=0)))
+    assert set(stems.info(two)["slots"]) == {"a", "b"} and stems.info(two)["fit"] > 0.98
+    p = stems.pick("other", two, slot="b", rng=np.random.default_rng(0))
+    assert p["stem"] == "other" and p["track"] not in (1, 2)   # not what a plays, not what b had
+    assert stems.log("like", two) == 2 and stems.log("kept", two, "b") == 1
+    stems._db().execute("DELETE FROM stem_events").connection.commit()
     # learning: the guesses until a dozen ratings; then the weights move toward what you rated
     w0, n0 = stems.weights(con)
     assert n0 == 0 and np.allclose(w0, stems.W0)

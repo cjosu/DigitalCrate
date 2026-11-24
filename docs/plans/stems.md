@@ -1,10 +1,12 @@
 # Plan: Stem mixer (recombine drums, bass, vocals and the rest from different songs)
 
-Status: prototype (phase 1) built; phases 2 and 3 planned.
+Status: phase 1 built, and from phase 2: half/double time, bar rotation, the still-harmony preference, choosing a song
+yourself, saving combinations. Still to do: per-bar warping, grain- and section-aware picking, export.
 
 ## The idea
 
-Four slots: **drums**, **bass**, **vocals**, **other**. Each pulls a few bars of that stem from a different song.
+Slots that each play one stem (**drums**, **bass**, **vocals** or **other**): four to start with, up to eight, and
+any slot's role can be changed. Each pulls a few bars of that stem from a different song.
 Everything is stretched to one tempo and shifted to one key, loops in sync, and has its own loop position and
 length, pitch, volume, EQ and delay. **🎲** on a slot pulls a new part that fits what's playing; **🎲 all** deals a
 whole new combination. The mixer recommends parts, and learns from what you keep, rate and throw away.
@@ -36,18 +38,23 @@ mute, solo, a 3-band EQ, and a tempo-synced delay.
 - *Fit:* two parts are compared bar by bar: the cosine of their chromas after transposition, looped to a common
   length. 1.0 means the same notes in every bar. The mixer shows the fit of what's playing.
 - *Picking:* a new part for a pitched slot is chosen to fit the pitched parts already playing.
-- Phase 2: prefer stretches that sit on one or two chords (the pad finder's test), chord-aware alignment (try
-  rotating a part by a bar or two for a better fit), and an option to keep bass and other from one song.
+- *Rotation:* a candidate is also tried starting 1-3 bars later, and the start whose chords line up best wins.
+- *Still harmony:* bass and other parts that sit on one or two chords score higher (they clash less).
+- *Tempo:* a song near twice or half the mixer's tempo plays half-time or double-time (two of its bars per bar, or
+  one over two), which greatly widens what can combine.
+- To do: an option to keep bass and other from one song.
 
 **5. Recommendations that learn.** Every candidate part gets a score:
 - how active the stem is in those bars;
 - how little it has to be stretched and shifted (drums smear beyond about ±15%; voices beyond about ±3 semitones);
 - harmony fit with the pitched parts already playing;
-- how close its sound is to parts you liked, minus parts you disliked (CLAP).
+- how close its sound is to parts you liked, minus parts you disliked (CLAP);
+- how still its own harmony is (bass and other).
 
 🎲 draws from the best-scoring parts with some randomness, so it explores. What teaches it:
 - **👍 / 👎** on the whole combination (strong, every slot);
-- **re-rolling** a slot within a few seconds (weak "not this");
+- **saving** a combination (the strongest yes);
+- **re-rolling** a slot within a few seconds, or **removing** a part (weak "not this");
 - **keeping** a part playing for a while, and **locking** it (weak "yes").
 
 The weights start as sensible guesses and are refitted (ridge logistic regression, pulled toward the guesses) once
