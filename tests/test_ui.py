@@ -813,3 +813,25 @@ def test_recommendations_updated_only_when_the_list_changes(page):
     page.evaluate("loadTaste()")
     page.wait_for_timeout(1500)
     assert page.evaluate("$('refresh').hidden") is True
+
+
+def test_plays_record_where_they_came_from(site, page):
+    """A play from the crate's wildcards is logged with that source (for "where your stars come from")."""
+    import sqlite3
+    page.click("#tabC")
+    page.wait_for_selector("#list .kit")
+    b = page.locator("#list .kit").nth(1).locator("[data-play]").first
+    if not b.count():
+        b = page.locator("#list .kit").first.locator("[data-play]").first
+    want = "crate · wildcards" if page.locator("#list .kit").nth(1).locator("[data-play]").count() else "crate · for you"
+    b.click()
+    page.wait_for_timeout(600)
+    page.evaluate("stopAll()")
+    db = sqlite3.connect(site["lib"] / "_data" / "samples.sqlite")
+    for _ in range(20):  # the event is sent in the background
+        ctx = [r[0] for r in db.execute("SELECT context FROM events WHERE type='listen' AND context IS NOT NULL")]
+        if any(json.loads(c).get("src") == want for c in ctx):
+            break
+        page.wait_for_timeout(250)
+    page.click("#tabS")
+    assert any(json.loads(c).get("src") == want for c in ctx), ctx

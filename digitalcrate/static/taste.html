@@ -51,7 +51,9 @@ function render(){if(!D.ready){$('app').innerHTML='<div class="card">No samples 
   ${A.auc_trees!=null?`<div class="sub" style="margin-bottom:6px">Your model averages two learners: a <b>regression</b> (steady, and it knows how unsure it is, which picks "teach it the most") and <b>gradient-boosted trees</b> (more flexible; they may pull ahead as you rate more). Both are measured each time, so the chart shows which is doing better.</div>`:''}
   <div class="sub">"Quality" is how clean and isolated a sample is. Near 50% means what you star isn't about cleanliness: it's about sound and mood, which is what the model learns.</div>`}
   ${chart()}
+  ${forwardHTML()}
  </section>
+ ${sourcesHTML()}
  <section class="card"><h2>What it learns from</h2>
   <div class="stats"><div class="stat"><b>${S.favourites}</b><span>★ favourites (strongest signal)</span></div><div class="stat"><b>${S.dislikes}</b><span>✕ not for me (strong)</span></div>
   <div class="stat"><b>${S.liked_by_listening}</b><span>liked by listening</span></div><div class="stat"><b>${S.skipped}</b><span>skipped</span></div><div class="stat"><b>${S.listens.toLocaleString()}</b><span>plays in total</span></div></div>
@@ -100,6 +102,29 @@ function editsHTML(E){if(!E)return'';const sl=E.slots||{},r=E.ratings||{},m=E.mo
  ${row('critic','the model\'s picks')}${row('wildcard','the random wildcard')}${r['your edits']?`<span>your own edits</span><span>—</span><span>—</span><span>${r['your edits'].up} 👍 · ${r['your edits'].down} 👎</span><span>${pc(r['your edits'].up,r['your edits'].up+r['your edits'].down)}</span>`:''}</div>
  <div class="sub" style="margin-top:8px">If the model's picks are used and liked more often than the wildcard, it's helping. Every 👍/👎 (and why) teaches it which edits you like and how strong.
  ${m.on?`Its edit model, learned from your ${m.n} ratings, ${m.auc!=null?`predicts a rating it hasn't seen ${Math.round(m.auc*100)}% of the time.`:'is on (its accuracy shows after about 12 ratings).'}`:`Its edit model starts after about 8 ratings with a few of each (${m.n||0} so far).`}</div></section>`}
+function forwardHTML(){const F=D.forward,R=F&&F.results||[];
+ if(!F)return '<div class="sub" style="margin-top:14px">Measuring how well it predicts what you hear next…</div>';if(R.length<2)return '';
+ const last=R.slice(-3),w=last.map(r=>1/Math.max(1e-4,r.se*r.se)),sw=w.reduce((a,b)=>a+b,0),m=last.reduce((a,r,k)=>a+r.auc*w[k],0)/sw,se=Math.sqrt(1/sw);
+ const qb=last.reduce((a,r)=>a+r.quality_auc,0)/last.length;
+ const W=520,Ht=170,L=44,Rr=14,T=12,B=26,xs=R.map((r,i)=>L+i*(W-L-Rr)/(R.length-1)),y=v=>T+(1-v)/0.7*(Ht-T-B);  // 30%..100%
+ const grid=[0.3,0.5,0.7,0.9,1];
+ return `<h3 style="margin:18px 0 4px;font-size:14px">Predicting what you'll like next</h3>
+ <div class="big" style="font-size:26px">${pct(m)}<small> ± ${Math.round(se*100)} · the last ${last.length} stretches</small></div>
+ <div class="sub" style="margin-top:6px">A stricter test that replays your history: the model learns only what you'd told it up to a moment, then ranks the samples you heard for the first time after it (each stretch holds about 18 new favourites). This is the real job, guessing what you'll like next, so it reads lower than the score above, and older ratings can't flatter it. Both scores are shaped by what you choose to listen to; <b>Where your stars come from</b> (below) compares against random picks, so it isn't. Sample quality alone scores ${pct(qb)} on the same stretches.</div>
+ <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${Ht}" width="100%" style="max-width:${W}px">
+ ${grid.map(g=>`<line x1="${L}" x2="${W-Rr}" y1="${y(g)}" y2="${y(g)}" stroke="${g===0.5?'#3a414c':'#242932'}"/><text x="${L-6}" y="${y(g)+3}" text-anchor="end">${Math.round(g*100)}%</text>`).join('')}
+ ${R.map((r,i)=>`<line x1="${xs[i]}" x2="${xs[i]}" y1="${y(Math.min(1,r.auc+r.se))}" y2="${y(Math.max(0.3,r.auc-r.se))}" stroke="var(--acc)" stroke-opacity=".45" stroke-width="2"/>`).join('')}
+ <path d="${R.map((r,i)=>`${i?'L':'M'}${xs[i].toFixed(1)},${y(r.quality_auc).toFixed(1)}`).join('')}" fill="none" stroke="var(--acc2)" stroke-width="1.5" stroke-dasharray="4 3"/>
+ <path d="${R.map((r,i)=>`${i?'L':'M'}${xs[i].toFixed(1)},${y(r.auc).toFixed(1)}`).join('')}" fill="none" stroke="var(--acc)" stroke-width="2"/>
+ ${R.map((r,i)=>`<circle cx="${xs[i]}" cy="${y(r.auc)}" r="3.5" fill="var(--acc)"><title>${new Date(r.t*1000).toLocaleString()} · learned from ${r.n_train} ratings · ranked the next ${r.n_test} samples you heard: ${pct(r.auc)} ± ${Math.round(r.se*100)} (quality alone ${pct(r.quality_auc)})</title></circle>`).join('')}
+ <text x="${L}" y="${Ht-6}">${new Date(R[0].t*1000).toLocaleDateString()}</text><text x="${W-Rr}" y="${Ht-6}" text-anchor="end">${new Date(R[R.length-1].t*1000).toLocaleDateString()}</text></svg></div>
+ <div class="sub">— your model, with how much each stretch could wobble by chance &nbsp; <span style="color:var(--acc2)">- - quality alone</span> &nbsp; · 50% is a coin flip</div>`}
+function sourcesHTML(){const R=D.sources||[];
+ const head=`<section class="card"><h2>Where your stars come from</h2><div class="sub">Every play is now logged with where you played it from. This is the plainest test of the recommendations: of the samples you first heard from each place, how many you starred. <b>For you</b> and the crate's picks should beat <b>best quality</b>, <b>random</b> and the wildcards (which are there to teach the model, not to please you).</div>`;
+ if(!R.length)return head+'<div class="sub" style="margin-top:10px">Collecting: this fills in as you listen. Give it a few sessions.</div></section>';
+ const mx=Math.max(...R.map(r=>r[2]),0.01);
+ return head+`<div class="w" style="grid-template-columns:200px 1fr 120px;margin-top:10px">${R.map(r=>`<span>${esc(r[0])} <span class="sub">${r[1]} heard</span></span><div class="hb"><i style="width:${r[2]/mx*100}%;background:var(--ok)"></i></div><span>${Math.round(r[2]*100)}% ★ <span class="sub">${Math.round(r[3]*100)}% ✕</span></span>`).join('')}</div>
+ <div class="sub" style="margin-top:6px">Under about 30 heard, a row is mostly chance.</div></section>`}
 function chart(){const H=D.history||[];if(H.length<2)return H.length?'<div class="sub" style="margin-top:10px">The trend appears here after the next change to your ratings.</div>':'';
  // the vertical scale fits the data (not 0-100%), so a change of a point or two is visible; gridlines say where it is
  const keys=['auc','auc_regression','auc_trees'],vals=H.flatMap(h=>keys.map(k=>h[k]).filter(v=>v!=null));
@@ -108,10 +133,12 @@ function chart(){const H=D.history||[];if(H.length<2)return H.length?'<div class
  const step=(hi-lo)>0.2?0.05:(hi-lo)>0.08?0.02:0.01,grid=[];for(let g=Math.ceil(lo/step)*step;g<=hi+1e-9;g+=step)grid.push(+g.toFixed(3));
  const line=k=>{const pts=H.map((h,i)=>h[k]!=null?[xs[i],y(h[k])]:null).filter(Boolean);return pts.length>1?pts.map((q,i)=>`${i?'L':'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(''):''};
  const path=line('auc'),pr=line('auc_regression'),pt=line('auc_trees'),last=H[H.length-1];
+ const band=()=>{const P=H.map((h,i)=>h.se!=null?i:-1).filter(i=>i>=0);if(P.length<2)return '';  // ± the measurement's own wobble
+  return `<path d="${P.map((i,k)=>`${k?'L':'M'}${xs[i].toFixed(1)},${y(H[i].auc+H[i].se).toFixed(1)}`).join('')}${P.slice().reverse().map(i=>`L${xs[i].toFixed(1)},${y(H[i].auc-H[i].se).toFixed(1)}`).join('')}Z" fill="var(--acc)" fill-opacity=".12"/>`};
  return `<div class="sub" style="margin:12px 0 2px">Over time (each point is a measurement after your ratings changed)</div><div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${Ht}" width="100%" style="max-width:${W}px">
  ${grid.map(g=>`<line x1="${L}" x2="${W-R}" y1="${y(g)}" y2="${y(g)}" stroke="#242932"/><text x="${L-6}" y="${y(g)+3}" text-anchor="end">${Math.round(g*100)}%</text>`).join('')}
  ${pr?`<path d="${pr}" fill="none" stroke="#c9a36b" stroke-width="1.5" stroke-dasharray="4 3"/>`:''}${pt?`<path d="${pt}" fill="none" stroke="#8fc98f" stroke-width="1.5" stroke-dasharray="4 3"/>`:''}
- <path d="${path}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${H.map((h,i)=>`<circle cx="${xs[i]}" cy="${y(h.auc)}" r="3.5" fill="var(--acc)"><title>${new Date(h.ts*1000).toLocaleString()} · ${pct(h.auc)}${h.auc_regression!=null?` (regression ${pct(h.auc_regression)}, trees ${pct(h.auc_trees)})`:''} · ${h.n_fav} favourites</title></circle>`).join('')}
+ ${band()}<path d="${path}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${H.map((h,i)=>`<circle cx="${xs[i]}" cy="${y(h.auc)}" r="3.5" fill="var(--acc)"><title>${new Date(h.ts*1000).toLocaleString()} · ${pct(h.auc)}${h.auc_regression!=null?` (regression ${pct(h.auc_regression)}, trees ${pct(h.auc_trees)})`:''} · ${h.n_fav} favourites</title></circle>`).join('')}
  <text x="${xs[xs.length-1]}" y="${y(last.auc)-8}" text-anchor="end" style="fill:var(--ink);font-size:11px">${pct(last.auc)}</text>
  <text x="${L}" y="${Ht-8}">${H[0].n_fav} ★</text><text x="${W-R}" y="${Ht-8}" text-anchor="end">${last.n_fav} ★</text></svg></div>
  <div class="sub">${pr||pt?'— your model &nbsp; <span style="color:#c9a36b">- - regression alone</span> &nbsp; <span style="color:#8fc98f">- - trees alone</span> &nbsp; · ':''}the scale is zoomed in to the range measured (a coin flip would be 50%)</div>`}

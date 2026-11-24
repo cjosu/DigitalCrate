@@ -14,9 +14,12 @@ and random. Each result is kept in `taste_history`, so the page can show the tre
     and scored by the model, so its taste can be read in plain language. Approximate: text and audio embeddings
     aren't identical, so treat the order as a hint, not a measurement.
 """
+import json
 import time
 
 import numpy as np
+
+from . import config as C
 
 from .taste import CATS, KINDS, N_PCA, _db, _library, fit, item_labels, scores_payload
 
@@ -86,13 +89,14 @@ def _history(con):
     con.execute("""CREATE TABLE IF NOT EXISTS taste_history (ts REAL, n_labels INTEGER, n_pos INTEGER, n_fav INTEGER,
                    n_dislike INTEGER, auc REAL, quality_auc REAL)""")
     have = {r[1] for r in con.execute("PRAGMA table_info(taste_history)")}
-    for c in ("auc_regression", "auc_trees"):  # the two models measured on their own, to compare over time
+    for c in ("auc_regression", "auc_trees", "se"):  # the two models on their own; se: the measurement's own wobble
         if c not in have:
             con.execute(f"ALTER TABLE taste_history ADD COLUMN {c} REAL")
     return con
 
 
 _CACHE = {}
+FORWARD = C.DATA_DIR / "taste_forward.json"
 import threading
 _MEASURING = threading.Event()
 
@@ -109,10 +113,14 @@ def measure_soon(sig):
             acc = accuracy(con)
             if acc.get("auc") is not None:
                 con.execute("""INSERT INTO taste_history (ts, n_labels, n_pos, n_fav, n_dislike, auc, quality_auc,
-                               auc_regression, auc_trees) VALUES (?,?,?,?,?,?,?,?,?)""",
+                               auc_regression, auc_trees, se) VALUES (?,?,?,?,?,?,?,?,?,?)""",
                             (time.time(), *sig, acc["auc"], acc["quality_auc"], acc.get("auc_regression"),
-                             acc.get("auc_trees")))
+                             acc.get("auc_trees"), acc.get("se")))
                 con.commit()
+            try:  # the time-forward test, kept with the signature it was measured at
+                FORWARD.write_text(json.dumps(dict(sig=list(sig), when=time.time(), results=forward(con))))
+            except Exception as e:
+                print("forward accuracy failed:", e)
             _CACHE.clear()
         finally:
             _MEASURING.clear()
@@ -164,6 +172,22 @@ def explain():
                auc_trees=last["auc_trees"]) if last else dict(auc=None)
     acc.update(measuring=_MEASURING.is_set(), n_fav=len(fav))
     hist = [dict(r) for r in con.execute("SELECT * FROM taste_history ORDER BY ts")]
+    fwd = None
+    try:
+        fwd = json.loads(FORWARD.read_text())
+    except Exception:
+        if not _MEASURING.is_set():  # never measured yet: once, in the background
+            def go():
+                try:
+                    FORWARD.write_text(json.dumps(dict(sig=list(sig), when=time.time(), results=forward(_db()))))
+                    _CACHE.clear()
+                except Exception as e:
+                    print("forward accuracy failed:", e)
+            threading.Thread(target=go, daemon=True).start()
+    try:
+        src = sources(con)
+    except Exception:
+        src = []
 
     learned = {}
     if "beta" in res:
@@ -224,7 +248,7 @@ def explain():
         if m.get("kind"):
             by_kind.setdefault(m["kind"], []).append(pct[i] * 100)
     edits = _edits()
-    value = dict(ready=True, accuracy=acc, edits=edits, history=hist, signals=dict(kinds, listens=n_listen,
+    value = dict(ready=True, accuracy=acc, edits=edits, history=hist, forward=fwd, sources=src, signals=dict(kinds, listens=n_listen,
                  labelled=res.get("n_labels"), positive=res.get("n_pos")), learned=learned, examples=examples,
                  by_category=sorted([[c, round(float(np.mean(v))), len(v)] for c, v in by_cat.items()],
                                     key=lambda x: -x[1]),
@@ -243,7 +267,8 @@ def forward(con=None, min_fav=18):
     getting worse: as recommendations improve you mostly hear samples the model already likes, so telling your stars
     from the rest gets harder (the test gets harder, not the model worse), and older ratings describe older taste.
     This replays your history instead: train on everything before a cutoff, then test on the samples you first heard
-    after it (★ vs heard and not starred). Cutoffs fall where about min_fav new favourites have come in."""
+    after it (★ vs heard and not starred). It is still shaped by what you chose to hear; sources() is the test that
+    isn't (star rates by where a sample was played from, against random). Cutoffs fall where about min_fav new favourites have come in."""
     con = con or _db()
     L = _library(con)
     pos = L["pos"]
@@ -275,6 +300,35 @@ def forward(con=None, min_fav=18):
         a = _auc(y, np.asarray(r["score"])[idx])
         b = _auc(y, q[idx])
         if a is not None:
-            res.append(dict(t=cut, n_test=len(ch), n_fav=int(y.sum()), n_train=len(lab), auc=round(a, 3),
-                            quality_auc=round(b, 3)))
+            n1, n0 = int(y.sum()), int(len(y) - y.sum())  # Hanley & McNeil (1982): how much an AUC this size wobbles
+            q1, q2 = a / (2 - a), 2 * a * a / (1 + a)
+            se = np.sqrt(max(0.0, (a * (1 - a) + (n1 - 1) * (q1 - a * a) + (n0 - 1) * (q2 - a * a)) / (n1 * n0)))
+            res.append(dict(t=cut, n_test=len(ch), n_fav=n1, n_train=len(lab), auc=round(a, 3),
+                            quality_auc=round(b, 3), se=round(float(se), 3)))
     return res
+
+
+def sources(con=None):
+    """Where your stars come from: for every sample whose first play was logged with where it was played from (a crate
+    pick, a crate wildcard, the list under a sort, galaxy, search…), the share you then starred or ✕'d. The direct
+    measure of whether recommendations help: "for you" and crate picks should beat best quality, random and wildcards."""
+    con = con or _db()
+    fav = {r[0] for r in con.execute("SELECT path FROM favorites")}
+    nope = {r[0] for r in con.execute("SELECT path FROM events WHERE type='dislike' AND value=1")}
+    first = {}
+    for r in con.execute("SELECT path, context FROM events WHERE type='listen' AND context IS NOT NULL ORDER BY ts"):
+        if r["path"] in first:
+            continue
+        try:
+            src = json.loads(r["context"]).get("src")
+        except Exception:
+            src = None
+        if src:
+            first[r["path"]] = src
+    by = {}
+    for p, src in first.items():
+        d = by.setdefault(src, [0, 0, 0])
+        d[0] += 1
+        d[1] += p in fav
+        d[2] += p in nope
+    return sorted(([k, n, round(st / n, 3), round(no / n, 3)] for k, (n, st, no) in by.items()), key=lambda x: -x[1])

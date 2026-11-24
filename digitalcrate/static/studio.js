@@ -1411,3 +1411,17 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const _selG=select;select=function(i,from){_selG(i,from);if(!GR.has(i))return;const m=document.querySelector('#detail .meta');
   if(m&&!m.querySelector('.grb'))m.insertAdjacentHTML('afterbegin',`<span class="badge grb" title="${TIP}">grainy</span> `)};
  window.CRATE.GRAINY=GR}
+// ---------- where a play came from (crate pick or wildcard, the list under a sort, search, galaxy…), sent with its
+// events so the Taste page can show which sources your stars come from: the direct test of the recommendations
+{const SRC=new Map(),SORTS={div:'list · diverse',you:'list · for you',vibe:"list · today's vibe",disc:'list · discover',q:'list · best quality',rnd:'list · random'};
+ const here=el=>{if(el&&el.closest('#detail'))return 'sample panel (goes well with, edits)';
+  if(st.tab==='C'){const k=el&&el.closest('.kit');if(k){const ks=[...document.querySelectorAll('#list .kit')];return ks.indexOf(k)===0?'crate · for you':'crate · wildcards'}return 'crate'}
+  if(st.tab==='G')return 'galaxy';if(st.tab==='K')return 'kits';if(st.tab==='F')return 'favourites';if(st.tab==='A')return 'artists';if(st.tab==='Y')return 'scout';
+  if(st.tab==='S'){const snd=$('sndbtn')&&$('sndbtn').classList.contains('on');if(snd||(typeof SOUND!=='undefined'&&SOUND))return 'sound search';
+   if($('search').value.trim())return 'search';const v=$('sort').value;return SORTS[v]||('list · '+v)}
+  return 'tab '+st.tab};
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-play]');if(!b)return;const i=+b.dataset.play;if(S[i])SRC.set(S[i][F.path],here(b))},true);
+ const _selSrc=select;select=function(i,from){if(S[i]&&!SRC.has(S[i][F.path]))SRC.set(S[i][F.path],here(document.querySelector(`#list .row[data-i="${i}"]`)));return _selSrc(i,from)};  // arrow keys
+ const _sendSrc=sendEvent;sendEvent=function(path,type,value,id,ctx){if(!SERVED)return;
+  const src=SRC.get(path)||here(null);fetch('api/event',{method:'POST',body:JSON.stringify({path,type,value,id,context:Object.assign({src},ctx||{})})}).catch(()=>{});scheduleRefit()};
+ window.CRATE.playSource=p=>SRC.get(p)}
