@@ -887,3 +887,47 @@ def test_tops_pass_retries_if_the_song_metadata_was_left_unfinished(tmp_path, mo
     assert not stems.tops_ready(1)
     assert stems.top_up(split=split, embed=embed) == 1
     assert "tops" in stems.library()[1]["stems"]
+
+
+def _bass(kind, secs=4.8, sr=SR):
+    """Three basses and a near-silence, each a stereo loop."""
+    t = np.arange(int(secs * sr)) / sr
+    note = (np.modf(t / 0.6)[0] < 0.8) * np.exp(-3 * np.modf(t / 0.6)[0])            # a note every 0.6 s
+    if kind == "sub":      x = 0.3 * np.sin(2 * np.pi * 45 * t) * note
+    elif kind == "mid":    x = 0.3 * (np.sin(2 * np.pi * 110 * t) + 0.5 * np.sin(2 * np.pi * 220 * t)) * note
+    elif kind == "both":   x = (0.3 * np.sin(2 * np.pi * 45 * t) + 0.04 * np.sin(2 * np.pi * 110 * t)) * note
+    elif kind == "spiky":  x = 0.1 * np.sin(2 * np.pi * 80 * t) * note; x[::int(0.6 * sr)] += 0.9
+    else:                  x = 1e-5 * np.sin(2 * np.pi * 80 * t)
+    return np.stack([x, x]).astype(np.float32)
+
+
+def test_bass_parts_are_evened_out():
+    import time
+    from digitalcrate import basscond as BC
+    db = lambda v: 20 * np.log10(v + 1e-12)
+    rms = lambda y: float(np.sqrt(np.mean(y ** 2)))
+    crest = lambda y: db(np.abs(y).max()) - db(rms(y))
+    flat = lambda y: y * min(0.08 / (rms(y) + 1e-12), 0.9 / (np.abs(y).max() + 1e-9), 60.0)     # the level every part gets today
+    share = lambda y: (lambda X, f: X[(f >= 30) & (f < 60)].sum() / X.sum())(np.abs(np.fft.rfft(y[0])) ** 2, np.fft.rfftfreq(y.shape[1], 1 / SR))
+    out = {k: BC.condition(_bass(k), SR) for k in ("sub", "mid", "both", "spiky", "quiet")}
+    for k, y in out.items():
+        assert y.shape == _bass(k).shape and y.dtype == np.float32 and np.isfinite(y).all() and np.abs(y).max() <= 0.9, k
+    heard = lambda y: db(BC.heard(y[0], SR))
+    apart0 = heard(flat(_bass("mid"))) - heard(flat(_bass("sub")))
+    apart1 = heard(out["mid"]) - heard(out["sub"])
+    assert apart0 > 6 and apart1 < apart0 * 0.65                                    # closer by ear: about half the gap is made up
+    for k in ("sub", "mid", "both"):
+        assert abs(db(rms(out[k])) - db(0.08)) <= 4.1, k                            # and never more than 4 dB from the energy match
+    assert db(rms(out["sub"])) > db(0.08) + 2                                       # 1. a pure sub comes up, and is not shelved away
+    assert share(out["sub"]) > 0.95 and share(out["both"]) < share(_bass("both")) - 0.02
+    assert crest(_bass("spiky")) > 18 and crest(out["spiky"]) < 12.6                # stray peaks held
+    assert abs(crest(out["mid"]) - crest(flat(_bass("mid")))) < 3.5                 # a plain bass keeps its shape
+    assert rms(out["quiet"]) <= rms(flat(_bass("quiet"))) * 1.6                     # 2. near-silence is not pulled up
+    # 3. seamless: a loop twice over comes out as the loop twice over; a one-bar and a sixteen-bar loop both work
+    y = _bass("mid"); twice = BC.condition(np.tile(y, 2), SR)
+    assert np.abs(twice[:, :y.shape[1]] - twice[:, y.shape[1]:]).max() < 2e-3
+    assert np.abs(twice[:, :y.shape[1]] - out["mid"]).max() < 0.02
+    for secs in (1.2, 38.4):
+        z = _bass("both", secs); assert BC.condition(z, SR).shape == z.shape
+    t0 = time.perf_counter(); BC.condition(_bass("spiky", 19.2), SR)
+    assert time.perf_counter() - t0 < 1.0                                           # (8 bars at 100 bpm; the aim is 0.25 s)
