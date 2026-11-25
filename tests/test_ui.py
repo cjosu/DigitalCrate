@@ -1438,6 +1438,19 @@ def test_snapshot_says_when_the_mixer_has_moved_on(site, page):
     page.click("#snrep")
     page.wait_for_function("!document.querySelector('#snrep').classList.contains('dirty')", timeout=5000)
     assert page.evaluate(f"CRATE.MX.snaps[0].slots['{sid}'].mute") is True       # ↻ wrote the change into it
+    # a snapshot click replaces the mixer: when what was there isn't in any snapshot, it can be undone
+    page.click(f'[data-mxdel="{sid}"]')
+    page.wait_for_function(f"!CRATE.MX.slots['{sid}']", timeout=10000)
+    page.click('[data-sn="0"]')
+    page.wait_for_function(f"CRATE.MX.snapSel===0&&CRATE.MX.slots['{sid}']&&CRATE.MX.slots['{sid}'].buf", timeout=60000)
+    page.wait_for_selector("#snundo")
+    page.click("#snundo")
+    page.wait_for_function(f"!CRATE.MX.slots['{sid}']&&CRATE.MX.snapSel===null", timeout=30000)
+    # clear all is a clean slate: the strip goes too (asked once more first), so it can't tag along into the next one
+    page.click("#mxclear")
+    assert page.evaluate("CRATE.MX.snaps.length") == 1 and "click again" in page.inner_text("#mxclear")
+    page.click("#mxclear")
+    assert page.evaluate("CRATE.MX.snaps.length") == 0 and page.evaluate("Object.keys(CRATE.MX.slots).length") == 0
     page.evaluate("CRATE.mxPlay(false)")
     page.evaluate("localStorage.removeItem('dcStems')")
     page.click("#tabS")

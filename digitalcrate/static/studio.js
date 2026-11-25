@@ -1683,12 +1683,27 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // bring a snapshot back into the mixer, as opening a saved combination does
   BL.recall = async i => {
     const MX = H.MX, s = MX.snaps[i]; if (!s) return;
+    // what's in the mixer now is replaced: if it isn't kept in any snapshot, it would be gone, so it can be undone
+    const before = BL.snapNow(), sigB = BL.snapSig(before),
+      lost = before.order.some(id => (before.slots[id] || {}).track != null) && !MX.snaps.some(x => BL.snapSig(x) === sigB);
     const was = MX.on; if (was) H.play(false);
-    MX.order = copy(s.order); MX.roles = copy(s.roles); MX.slots = copy(s.slots); MX.duck = copy(s.duck || {});
-    MX.info = null; MX.snapSel = i;
-    await H.sync();
-    MX.order.forEach(H.apply);
+    const put = async (st, sel) => {
+      MX.order = copy(st.order); MX.roles = copy(st.roles); MX.slots = copy(st.slots); MX.duck = copy(st.duck || {});
+      MX.info = null; MX.snapSel = sel;
+      await H.sync();
+      MX.order.forEach(H.apply);
+    };
+    await put(s, i);
     if (was) H.play(true);
+    if (lost) {
+      const t = document.getElementById('toast');
+      t.innerHTML = `snapshot ${BL.LETTERS[i]} is back in the mixer; what was there wasn't in any snapshot <button id="snundo">undo</button>`;
+      t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 15000);
+      document.getElementById('snundo').onclick = async () => {
+        t.hidden = true; const on = MX.on; if (on) H.play(false);
+        await put(before, null); if (on) H.play(true); H.draw();
+      };
+    }
   };
 
   BL.replace = i => { const MX = H.MX; if (!MX.snaps[i]) return; MX.snaps[i] = BL.snapNow(); H.save(); H.draw(); };
@@ -2342,7 +2357,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     <label>key <select id="mxkey"><option value="">auto${!MX.key&&I.key?` (${I.key})`:''}</option>${KEYS.map(k=>`<option ${MX.key===k?'selected':''}>${k}</option>`).join('')}</select></label>
     <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">🎲 all</button>
     <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ and delay on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
-    <button id="mxclear" title="empty every slot (locked ones too)">clear all</button>
+    <button id="mxclear" title="a clean slate: empties every slot (locked ones too) and the snapshot strip. Saved combinations are not touched">clear all</button>
     <button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button>
     <span class="mxfit" title="how well the pitched parts' notes agree, bar by bar, after shifting to the key (100% = the same notes)">${fit==null?'':`harmony fit <b style="color:${fit>=0.8?'var(--ok,#8fc98f)':fit>=0.65?'var(--acc)':'#d96c6c'}">${Math.round(fit*100)}%</b>`}</span></div>
    <div class="mxtop mxsave"><input id="mxname" placeholder="name this combination" value="${esc(MX.name||'')}" style="width:220px"><button id="mxsave">💾 save</button>
@@ -2364,7 +2379,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxharm){const p=MX.slots[ds.mxharm];p.harm=!p.harm;apply(ds.mxharm);save();draw();return}
   if(ds.mxhist){const [id,d]=ds.mxhist.split(':');hgo(id,+d);return}
   if(ds.mxdlyon){const p=MX.slots[ds.mxdlyon];p.dlyOn=p.dlyOn===false;apply(ds.mxdlyon);save();draw();return}
-  if(t.id==='mxclear'){MX.order.forEach(s=>{stopSrc(s);delete MX.slots[s]});  // the slots stay, emptied
+  if(t.id==='mxclear'){const ns=(MX.snaps||[]).length;  // a clean slate: the snapshot strip goes too (it used to stay, and tag along into the next combination)
+   if(ns&&t.dataset.armed!=='1'){t.dataset.armed='1';t.textContent=`clear all, and ${ns===1?'its snapshot':'its '+ns+' snapshots'}? click again`;setTimeout(()=>{if(t.isConnected){t.dataset.armed='';t.textContent='clear all'}},3500);return}
+   MX.order.forEach(s=>{stopSrc(s);delete MX.slots[s]});MX.snaps=[];MX.trans=[];MX.snapSel=null;MX.duck={};
    MX.info=null;MX.name='';MX.savedSig=null;save();draw();return}
   if(ds.mxalt){const id=ds.mxalt,p=MX.slots[id],key=[p.track,p.n,role(id),MX.bpm].join('|');
    if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('stem mixer: '+err.message);return}}
