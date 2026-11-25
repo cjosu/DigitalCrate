@@ -1823,3 +1823,41 @@ def test_a_half_time_loop_snaps_to_every_second_bar(site, page):
     page.wait_for_timeout(300); assert page.evaluate("CRATE.MX.slots.drums.n") == 2          # one of the song's bars: not a step
     e = _edge(page, "drums"); _drag(page, e["xb"], e["xb"] + 2 * e["bar"], e["y"])
     page.wait_for_function("CRATE.MX.slots.drums.n===3")
+
+
+def test_tracks_fit_the_window(site, page):
+    _mixer(site, page)
+    page.select_option("#mxaddrole", "other"); page.click("#mxadd")
+    page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.order.every(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id].buf)", timeout=60000)
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
+    for w, h in ((1512, 857), (1280, 800)):
+        page.set_viewport_size({"width": w, "height": h}); page.wait_for_timeout(200)
+        assert page.evaluate("document.documentElement.scrollWidth<=innerWidth&&[...document.querySelectorAll('.mx,.mx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+        assert page.evaluate("[...document.querySelectorAll('.trwave')].map(e=>Math.round(e.getBoundingClientRect().height))") == [58] * 5, w
+        tk = page.evaluate("[...document.querySelectorAll('.trk')].map(e=>Math.round(e.getBoundingClientRect().height))")
+        assert all(x <= 122 for x in tk), (w, tk)                     # no taller than a slot is on main
+    page.set_viewport_size({"width": 1512, "height": 857}); page.wait_for_timeout(200)
+    last = f'[data-mxrow="{page.evaluate("CRATE.MX.order[4]")}"] .trfx'
+    for sel in (".mxtop", "#snbar", last):                         # the top bar, the strip and all five tracks, without scrolling
+        b = _box(page, sel); assert b["t"] >= 0 and b["b"] <= 858, (sel, b)
+
+def test_zoom_and_the_view_switch(site, page):
+    _mixer(site, page)
+    page.wait_for_function("['drums','bass','vocals','other'].every(s=>CRATE.TR.has(s))", timeout=20000)
+    bar = page.evaluate("(()=>{const p=CRATE.MX.slots.drums,g=CRATE.TR.song(p.track,'drums');return g.bars[1]-g.bars[0]})()")
+    r = page.evaluate("(()=>{const b=document.querySelector('[data-mxwave=\"drums\"]').getBoundingClientRect();return [b.left,b.top,b.width,b.height]})()")
+    x, y = r[0] + r[2] * 0.25, r[1] + r[3] / 2
+    t0 = page.evaluate("(()=>{const v=CRATE.MX.slots.drums._v;return v[0]+0.25*(v[1]-v[0])})()")
+    page.evaluate("([x,y])=>document.querySelector('[data-mxwave=\"drums\"] canvas').dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,ctrlKey:true,deltaY:-120,clientX:x,clientY:y}))", [x, y])
+    v = page.evaluate("CRATE.MX.slots.drums._v")
+    assert v[1] - v[0] < 16 * bar * 0.5 and abs(v[0] + 0.25 * (v[1] - v[0]) - t0) < 0.2          # tighter, and the same moment under the pointer
+    for _ in range(20):
+        page.evaluate("([x,y])=>document.querySelector('[data-mxwave=\"drums\"] canvas').dispatchEvent(new WheelEvent('wheel',{bubbles:true,cancelable:true,ctrlKey:true,deltaY:-300,clientX:x,clientY:y}))", [x, y])
+    v = page.evaluate("CRATE.MX.slots.drums._v"); assert abs((v[1] - v[0]) - 2 * bar) < 0.01    # never tighter than two bars
+    page.click('[data-trview="loop"]'); page.wait_for_timeout(400)
+    assert page.evaluate("""['drums','bass','vocals','other'].every(s=>{const p=CRATE.MX.slots[s],g=CRATE.TR.song(p.track,s),e=p.bar0+CRATE.TR.srcBars(p.n,p.k||1),
+      w=CRATE.TR.loopView(g.bars[p.bar0],g.bars[e],g.bars[1]-g.bars[0],g.dur);return Math.abs(p._v[0]-w[0])<0.01&&Math.abs(p._v[1]-w[1])<0.01})""")
+    page.click('[data-trview="song"]'); page.wait_for_timeout(400)
+    assert page.evaluate("CRATE.MX.slots.bass._v[0]===0&&Math.abs(CRATE.MX.slots.bass._v[1]-CRATE.TR.song(CRATE.MX.slots.bass.track,'bass').dur)<0.01")
+    page.click("#tabS"); page.click("#tabM"); page.wait_for_selector(".trfx")                 # away and back: still there, nothing stuck
+    assert page.locator(".trfx").count() == 4

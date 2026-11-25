@@ -181,3 +181,8 @@ body.mash .projbar{display:none}
 .trwave.busy::before,.trwave.busy::after{content:"";position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;animation:trloading .65s ease-in-out infinite alternate}
 .trwave.busy::before{left:var(--loop-left)}.trwave.busy::after{left:var(--loop-right)}
 @keyframes trloading{from{opacity:.2}to{opacity:1}}
+#trview,.trzoom{display:inline-flex;gap:2px;align-items:center}
+#trview .tbtn,.trzoom .tbtn{padding:2px 5px;font-size:11px}
+#trview [aria-pressed=true]{color:var(--acc);border-color:var(--acc)}
+.trzoom{position:absolute;top:4px;right:4px;visibility:hidden}
+.trwave:hover .trzoom,.trwave:focus-within .trzoom{visibility:visible}

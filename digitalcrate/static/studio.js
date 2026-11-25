@@ -2441,6 +2441,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const list = $('list');
     menus(list);
     loopControls(list);
+    viewControls(list);
     let drag;
     const number = e => e.target.closest('[data-v]');
     list.addEventListener('pointerdown', e => {
@@ -2698,7 +2699,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const canvas = box.querySelector('canvas'), col = getComputedStyle(box).getPropertyValue('--trcol').trim();
     const song = slotSong(id);
     if (song) {
-      const [v0, v1] = p._v ||= [0, song.dur];
+      ensureView(id, song);
+      const [v0, v1] = p._v;
       TR.drawWave(canvas, { ...song, bar0: p._d?.bar0 ?? p.bar0, n: p._d?.n ?? p.n, k: p.k, v0, v1, col, busy: p._busy });
     } else if (p.buf) {
       fallbackWave(canvas, p.buf, col);
@@ -2768,7 +2770,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       list.setPointerCapture(e.pointerId);
       drag = {
         ...g, x, mode, pointer: e.pointerId, moved: false,
-        loop: { bar0: p.bar0, n: p.n, k: p.k },
+        loop: { bar0: p.bar0, n: p.n, k: p.k }, view: p._v.slice(),
         offset: TR.floorBar(song.bars, tAt(x)) - p.bar0,
       };
     });
@@ -2783,7 +2785,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       const d = drag;
       if (e.pointerId !== d.pointer || H.part(d.id) !== d.p) return;
       d.moved ||= Math.abs(x - d.x) > 3;
-      if (!d.moved || d.mode === 'out') return;
+      if (!d.moved) return;
+      if (d.mode === 'out') {
+        const [v0, v1] = d.view;
+        if (v1 - v0 < d.song.dur) TR.view(d.id, ...TR.pan(v0, v1, d.tAt(d.x) - d.tAt(x), d.song.dur));
+        return;
+      }
       const bars = d.song.bars, nb = bars.length - 1, t = d.tAt(x);
       if (d.mode === 'move') d.p._d = TR.moveTo(d.loop, TR.floorBar(bars, t) - d.offset, nb);
       else {
@@ -2825,6 +2832,90 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       const next = edit(g.p, d, g.song.bars.length - 1);
       TR.setLoop(g.id, next.bar0, next.n);
     });
+  };
+
+  const firstBar = song => song.bars[1] - song.bars[0];
+  const ensureView = (id, song) => {
+    const p = H.part(id), key = pictureKey(p.track, H.role(id));
+    if (p._viewKey === key && !p._preset) return;
+    const preset = p._preset || (!p._v ? H.MX._viewPreset || 'song' : null);
+    const [a, b] = loopTimes(song.bars, p);
+    if (preset === 'loop') {
+      p._v = TR.loopView(a, b, firstBar(song), song.dur);
+      p._viewMode = 'loop';
+    } else if (preset === 'song' || p._viewMode === 'song') {
+      p._v = [0, song.dur];
+      p._viewMode = 'song';
+    } else {
+      const half = (p._v[1] - p._v[0]) / 2, mid = (a + b) / 2;
+      p._v = TR.pan(mid - half, mid + half, 0, song.dur);
+      p._viewMode = 'custom';
+    }
+    delete p._preset;
+    p._viewKey = key;
+  };
+  const viewActive = mode => {
+    const tracks = H.MX.order.filter(id => H.part(id)?.track != null);
+    if (!tracks.length) return mode === (H.MX._viewPreset || 'song');
+    return tracks.every(id => {
+      const p = H.part(id);
+      return (p._preset || p._viewMode || H.MX._viewPreset || 'song') === mode;
+    });
+  };
+  const paintViewSwitch = () => {
+    document.querySelectorAll('#trview button').forEach(b => {
+      const on = viewActive(b.dataset.trview);
+      b.setAttribute('aria-pressed', on);
+    });
+  };
+  TR.view = (id, v0, v1) => {
+    const p = H.part(id), song = slotSong(id);
+    if (!song || !(v1 > v0)) return;
+    ensureView(id, song);
+    p._v = TR.pan(v0, v1, 0, song.dur);
+    p._viewMode = 'custom';
+    TR.paintWave(id);
+    paintViewSwitch();
+  };
+  const presetView = (id, mode) => {
+    const p = H.part(id);
+    if (p?.track == null) return;
+    p._preset = mode;
+    TR.paintWave(id);
+  };
+  const viewButton = (attr, mode, label, pressed = '') =>
+    `<button type="button" class="tbtn" data-${attr}="${mode}" ${pressed}>${label}</button>`;
+  TR.viewSwitch = () => `<span class="seg" id="trview" aria-label="Track views">
+    ${viewButton('trview', 'song', 'Whole song', `aria-pressed="${viewActive('song')}"`)}
+    ${viewButton('trview', 'loop', 'Loops', `aria-pressed="${viewActive('loop')}"`)}
+    </span>`;
+  TR.zoomButtons = `<span class="trzoom" aria-label="Waveform view">
+    ${viewButton('trz', 'loop', 'Loop')}${viewButton('trz', 'song', 'Whole song')}
+    </span>`;
+  const viewControls = list => {
+    list.addEventListener('click', e => {
+      const global = e.target.closest('[data-trview]'), local = e.target.closest('[data-trz]');
+      if (global) {
+        H.MX._viewPreset = global.dataset.trview;
+        H.MX.order.forEach(id => presetView(id, H.MX._viewPreset));
+      } else if (local) presetView(local.closest('.trwave').dataset.mxwave, local.dataset.trz);
+      else return;
+      paintViewSwitch();
+    });
+    list.addEventListener('wheel', e => {
+      const box = e.target.closest('.trwave'), g = box && geometry(box);
+      if (!g) return;
+      const [v0, v1] = g.p._v, span = v1 - v0, dur = g.song.dur;
+      let next;
+      if (e.ctrlKey || e.metaKey) {
+        const at = clamp((g.tAt(e.clientX) - v0) / span, 0, 1);
+        next = TR.zoom(v0, v1, at, Math.exp(e.deltaY * 0.01), dur, 2 * firstBar(g.song));
+      } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        next = TR.pan(v0, v1, e.deltaX * span / box.clientWidth, dur);
+      } else return;
+      e.preventDefault();
+      TR.view(g.id, ...next);
+    }, { passive: false });
   };
 
   window.TRACKS = TR;
@@ -2968,7 +3059,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function hpush(id){const p=MX.slots[id];if(!has(p))return;const H=MX.hist[id]||(MX.hist[id]=[]),at=MX.hpos[id]??-1,sn=snap(p),top=H[at];
   if(top&&top.track===sn.track&&top.sample===sn.sample&&top.bar0===sn.bar0&&top.n===sn.n&&top.k===sn.k)return;H.length=at+1;H.push(sn);if(H.length>40)H.shift();MX.hpos[id]=H.length-1}
  async function hgo(id,d){const H=MX.hist[id]||[],at=(MX.hpos[id]??-1)+d;if(at<0||at>=H.length)return;const p=MX.slots[id]||(MX.slots[id]={db:-2});
-  MX.hpos[id]=at;Object.assign(p,H[at],{since:performance.now(),harm:null,buf:null,_key:null,_next:null});if(MX.roles[id]!==H[at].stem&&H[at].stem)MX.roles[id]=H[at].stem;await sync()}
+  MX.hpos[id]=at;delete p._viewKey;Object.assign(p,H[at],{since:performance.now(),harm:null,buf:null,_key:null,_next:null});if(MX.roles[id]!==H[at].stem&&H[at].stem)MX.roles[id]=H[at].stem;await sync()}
  // 🎲 without the wait: once the mixer settles, each unlocked stem slot's next part is picked, rendered and decoded in
  // the background. A click then swaps it in at once, if nothing it was chosen against has changed since (the other
  // slots' parts, the tempo, the key); otherwise the click asks the server as before.
@@ -2987,7 +3078,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   let r;try{r=hit?{part:hit.part}:isOS(stem)?await api('api/stems/oneshot',Object.assign({state:state(),n:old&&old.sample?old.n:1,avoid:rec.slice(-12)},track==null?{}:{path:track})):await api('api/stems/pick',{stem:role(stem),slot:stem,state:state(),avoid:rec.slice(-8),n:old?old.n:null,track:track==null?null:track})}catch(e){toast('mashup: '+e.message);return}
   if(!r.part){if(!quiet)toast(isOS(stem)?'no one-shot found: the library has no short samples that fit':`no ${role(stem)} part fits this tempo${PITCHED.has(role(stem))?' and key':''}: try another tempo, or prepare more songs`);return}
   if(has(old)&&!(MX.hist[stem]||[]).length)hpush(stem);  // what was there before the first roll can be gone back to as well
-  stopSrc(stem);const keep=old?{db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,fb:old.fb,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c}  /* (harmonics follow the part: a new one decides again) */:{db:role(stem)==='vocals'?0:-2};
+  stopSrc(stem);const keep=old?{db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,fb:old.fb,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c,_v:old._v,_viewMode:old._viewMode,_preset:old._preset}  /* (harmonics follow the part: a new one decides again) */:{db:role(stem)==='vocals'?0:-2};
   if(isOS(stem)&&old&&old.sample&&track==null){r.part.n=old.n;r.part.every=old.every;if((old.steps||[]).length)r.part.steps=old.steps.slice()}  // 🎲 swaps the sound, your placement stays
   MX.slots[stem]=Object.assign(keep,r.part,{ct:0,since:performance.now(),buf:null,_key:null,_next:null});rec.push(isOS(stem)?r.part.sample:r.part.track);hpush(stem);
   if(hit){const p=MX.slots[stem];p.buf=hit.buf;p.sub=hit.sub;if(p.sub>=0.85&&p.harm==null)p.harm=true;p._key=renderKey(p,MX.bpm,TR.semis(p.semis||0,p));p._playingLoop={track:p.track,bar0:p.bar0,n:p.n,k:p.k};startSrc(stem);draw()}  // it's playing already; sync only confirms
@@ -3069,7 +3160,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     <input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${id}" aria-label="Volume" title="${dbv(p.db)} · double-click for 0 dB">`;
    const part=os?`<div class="mxwave mxsteps" data-mxwave="${id}" style="--n:${n*16};--b:${n}"><div class="mxsg">${Array.from({length:n*16},(_,j)=>`<button class="mxst${on.has(j)?' on':''}${j%16===0?' bar':j%4===0?' beat':''}" data-mxstep="${id}:${j}" title="bar ${Math.floor(j/16)+1}, beat ${Math.floor(j%16/4)+1}${j%4?' + '+(j%4)+'/16':''}"></button>`).join('')}</div>
     <canvas class="mxosw"></canvas><div class="mxsax">${Array.from({length:n},(_,j)=>`<span style="--f:${fit[j]!=null?Math.max(0,Math.min(1,(fit[j]-0.5)*2)).toFixed(2):0}" title="${fit[j]!=null?`fits this bar's harmony ${Math.round(fit[j]*100)}%`:''}">${j+1}</span>`).join('')}</div><i></i></div>`
-    :`<div class="mxwave trwave" data-mxwave="${id}" tabindex="0" aria-label="${TR.name(R)} waveform"><canvas></canvas><i></i><span class="trtip" hidden></span></div>`;
+    :`<div class="mxwave trwave" data-mxwave="${id}" tabindex="0" aria-label="${TR.name(R)} waveform"><canvas></canvas><i></i><span class="trtip" hidden></span>${TR.zoomButtons}</div>`;
    return `${open}<div class="trh">${name}${src}<div class="trbars">${os?cycle:TR.barsText(p)}</div>
     <span class="trgroup">${TR.num(id,'st')}${TR.num(id,'ct')}</span><span class="trgroup">${die}${audition}${history}</span><span class="trgroup">${mix}</span>${more}</div>
     ${part}${TR.fxHTML(id)}</div>${find}`;
@@ -3082,6 +3173,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     <span class="mxrate"><button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button></span>
     <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ, delay and harmonics on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
     <span class="mxrvb" title="the reverb every slot's REVERB send goes to"><span class="mxlab">reverb</span><select id="mxrvtype">${Object.keys(BLEND.REVERBS).map(k=>`<option ${k===MX.reverb.type?'selected':''}>${k}</option>`).join('')}</select><input type="range" id="mxrvdecay" min="0.3" max="6" step="0.1" value="${MX.reverb.decay}" title="decay time"><output>${(+MX.reverb.decay).toFixed(1)} s</output></span>
+    ${TR.viewSwitch()}
     <span class="mxfit" title="how well the pitched parts' notes agree, bar by bar, after shifting to the key (100% = the same notes)">${fit==null?'':`harmony fit <b style="color:${fit>=0.8?'var(--ok,#8fc98f)':fit>=0.65?'var(--acc)':'#d96c6c'}">${Math.round(fit*100)}%</b>`}</span>
     <span class="mxsaveg"><input id="mxname" placeholder="name this combination" value="${esc(MX.name||'')}" style="width:150px"><button id="mxsave">💾 save</button>
     ${MX.saved&&MX.saved.length?`<select id="mxload"><option value="">open a saved one…</option>${MX.saved.map(m=>`<option ${m.name===MX.name?'selected':''}>${esc(m.name)}</option>`).join('')}</select>${MX.name&&MX.saved.some(m=>m.name===MX.name)?`<button id="mxrevert" title="back to “${esc(MX.name)}” as it was last saved: drops the changes made since">↺ revert</button><button id="mxdelsaved" title="delete the saved combination “${esc(MX.name)}”">🗑</button>`:''}`:''}</span>
@@ -3112,7 +3204,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxalt){const id=ds.mxalt,p=MX.slots[id],key=[p.track,p.n,role(id),MX.bpm].join('|');
    if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('mashup: '+err.message);return}}
    const A=p._alts||[];if(A.length<2){toast('no other good stretch of this in the song');return}
-   const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];p.ct=0;p.since=performance.now();p.harm=null;hpush(id);await sync();return}
+   const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];delete p._viewKey;p.ct=0;p.since=performance.now();p.harm=null;hpush(id);await sync();return}
   if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);stopSrc(s);delete MX.slots[s];await sync();return}
   if(ds.mxfind){if(MX.find&&MX.find.stem===ds.mxfind){MX.find=null;draw();return}MX.find={stem:ds.mxfind,q:''};await refreshSongs();draw();return}  // (songs still being prepared show up as they finish)
   if(ds.mxdup){const id=ds.mxdup,p=MX.slots[id];if(!has(p))return;if(MX.order.length>=8){toast('the mashup is full (8 slots)');return}
