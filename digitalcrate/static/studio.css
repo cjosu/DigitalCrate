@@ -111,3 +111,4 @@ input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#2a2
 .mxoff input[type=range]{opacity:.35}.mxtg{font-size:10px;padding:1px 5px}
 .mxlab{font-size:10px;color:var(--mute);margin-right:3px}.mxgrp output{min-width:38px}.mxsl{display:inline-flex;align-items:center}
 .mxname select{font-weight:600;text-transform:capitalize;padding:2px 4px;font-size:12px;max-width:100%}.mxname{width:104px}.mxadd{display:flex;gap:6px;align-items:center;margin:2px 0 6px}
+.mxsongs{margin-top:12px}.mxsongs summary{cursor:pointer;color:var(--mute);font-size:12px}.mxsl2{margin-top:8px;display:grid;gap:4px}.mxsong{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:10px;align-items:center;padding:3px 6px;border-radius:6px}.mxsong:hover{background:#171a20}.mxsn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mxsong .tbtn{padding:1px 5px}

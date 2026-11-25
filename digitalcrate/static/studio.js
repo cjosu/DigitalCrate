@@ -1507,6 +1507,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  async function rollAll(){const pr={drums:0,other:1,bass:2,vocals:3};  // 'other' before bass and vocals: it sets the key they fit to
   for(const s of MX.order.slice().sort((a,b)=>pr[role(a)]-pr[role(b)]))if(!(MX.slots[s]&&MX.slots[s].lock))await roll(s,true);if(!MX.on&&MX.order.some(s=>MX.slots[s]))play(true)}
  const why=p=>{const w=p.why;if(!w)return'';return `\n\nwhy this part: active ${Math.round(w.active*100)}% · stretched ${Math.round((Math.exp(-w.stretch)-1)*100)}% · shifted ${-w.shift} st · fits the harmony ${Math.round(w.fit*100)}% · harmony still ${Math.round((w.still??0.5)*100)}%${w.sound?` · like your liked sounds ${w.sound>0?'+':''}${w.sound.toFixed(2)}`:''}`};
+ // every prepared song, with a button per stem to put it in a slot
+ function songsHTML(){const L=(MX.songs||[]).slice().sort((a,b)=>(a.artist+a.title).localeCompare(b.artist+b.title));
+  return `<div class="mxsl2">${L.map(x=>`<div class="mxsong"><span class="mxsn" title="${esc(x.artist)} — ${esc(x.title)}"><b>${esc(x.artist)}</b> — ${esc(x.title)}</span><span class="sub">${Math.round(x.bpm)} bpm · ${x.key} · ${x.bars} bars</span><span>${STEMS.map(k=>x.stems.includes(k)?`<button class="tbtn" data-mxput="${k}:${x.track}" title="put its ${k} in a ${k} slot (its best-fitting bars)">${ICON[k]}</button>`:`<button class="tbtn" disabled title="no ${k} to speak of in this song">${ICON[k]}</button>`).join('')}</span></div>`).join('')||'<span class="sub">none yet: run “digitalcrate stems”</span>'}</div>`}
  function findHTML(stem){const F=MX.find;if(!F||F.stem!==stem)return'';const q=(F.q||'').toLowerCase(),rows=(MX.songs||[]).filter(x=>x.stems.includes(role(stem))&&(!q||(x.artist+' '+x.title).toLowerCase().includes(q))).slice(0,14);
   return `<div class="mxfind"><input id="mxq" placeholder="search the ${MX.songs?MX.songs.length:''} prepared songs…" value="${esc(F.q||'')}">${rows.map(x=>`<button class="tbtn" data-mxsong="${stem}:${x.track}" title="${x.bpm} bpm · ${x.key}">${esc(x.artist)} — ${esc(x.title)} <span class="sub">${Math.round(x.bpm)} · ${x.key}</span></button>`).join('')||'<span class="sub">no prepared song matches</span>'}</div>`}
  function waves(){MX.order.forEach(stem=>{const p=MX.slots[stem],box=document.querySelector(`[data-mxwave="${stem}"]`);if(!p||!p.buf||!box)return;const c=box.querySelector('canvas'),dpr=devicePixelRatio||1,W=Math.round(box.clientWidth*dpr),H=Math.round(34*dpr);
@@ -1548,7 +1551,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     ${MX.saved&&MX.saved.length?`<select id="mxload"><option value="">open a saved one…</option>${MX.saved.map(m=>`<option ${m.name===MX.name?'selected':''}>${esc(m.name)}</option>`).join('')}</select>${MX.name&&MX.saved.some(m=>m.name===MX.name)?`<button id="mxdelsaved" title="delete the saved combination “${esc(MX.name)}”">🗑</button>`:''}`:''}</div>
    ${MX.order.map(row).join('')}
    ${MX.order.length<8?`<div class="mxadd"><select id="mxaddrole">${STEMS.map(x=>`<option value="${x}">${ICON[x]} ${x}</option>`).join('')}</select><button id="mxadd" title="another slot (up to 8): a second vocal, two drum layers, a pad under the keys…">＋ add slot</button></div>`:''}
-   <div class="sub" style="margin-top:10px"><span id="mxrated">${ratedTxt()}</span> · ${MX.n==null?'':MX.n+' songs prepared · '}everything is stretched to the tempo and shifted to the key; drums keep their pitch</div></div>`;
+   <div class="sub" style="margin-top:10px"><span id="mxrated">${ratedTxt()}</span> · everything is stretched to the tempo and shifted to the key; drums keep their pitch</div>
+   <details class="mxsongs" id="mxsongs" ${MX.showSongs?'open':''}><summary>${MX.n==null?'':MX.n+' '}songs prepared for the mixer</summary>${songsHTML()}</details></div>`;
+  const dt=$('mxsongs');if(dt)dt.ontoggle=async()=>{MX.showSongs=dt.open;if(dt.open){await refreshSongs();const el=dt.querySelector('.mxsl2');if(el)el.outerHTML=songsHTML();const sm=dt.querySelector('summary');if(sm)sm.textContent=`${MX.n} songs prepared for the mixer`}};
   waves();if(MX.on&&!phRaf)phRaf=requestAnimationFrame(playheads);if(MX.find&&$('mxq')){const q=$('mxq');q.focus();q.setSelectionRange(q.value.length,q.value.length)}}
  const L=$('list');
  L.addEventListener('click',async e=>{if(st.tab!=='M')return;const t=e.target.closest('button');if(!t)return;const ds=t.dataset;
@@ -1566,6 +1571,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];p.since=performance.now();await sync();return}
   if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);stopSrc(s);delete MX.slots[s];await sync();return}
   if(ds.mxfind){if(MX.find&&MX.find.stem===ds.mxfind){MX.find=null;draw();return}MX.find={stem:ds.mxfind,q:''};await refreshSongs();draw();return}  // (songs still being prepared show up as they finish)
+  if(ds.mxput){const [k,tid]=ds.mxput.split(':'),ids=MX.order.filter(id=>role(id)===k);  // an empty slot of that kind, else an unlocked one, else a new slot
+   let id=ids.find(x=>!MX.slots[x])||ids.find(x=>!MX.slots[x].lock);
+   if(!id){if(MX.order.length>=8){toast(`every ${k} slot is locked and the mixer is full`);return}id='s'+Date.now().toString(36);MX.order.push(id);MX.roles[id]=k}
+   await roll(id,false,+tid);if(!MX.on)play(true);return}
   if(ds.mxsong){const [s,tid]=ds.mxsong.split(':');MX.find=null;await roll(s,false,+tid);if(!MX.on)play(true);return}
   if(t.id==='mxsave'){const name=($('mxname').value||'').trim()||`Mix ${new Date().toLocaleString()}`;MX.name=name;save();
    const mix=JSON.parse(localStorage.getItem('dcStems')||'{}');try{const r=await api('api/stems/save',{name,mix,state:state()});MX.rated=r.rated;await refreshSaved();toast(`saved “${name}”`)}catch(err){toast('save failed: '+err.message)}draw();return}
