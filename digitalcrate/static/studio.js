@@ -307,7 +307,7 @@ function kMove(d){clearTimeout(kPreviewT);const rows=[...document.querySelectorA
  if(PROJ.on&&SERVED&&(PROJ.key||PROJ.bpm))kPreviewT=setTimeout(()=>{if(st.sel===i)toggle(i,null,{loop:false})},120);
  else toggle(i,null,{loop:false})}
 function kHelp(){let p=$('khelp');if(p){p.hidden=!p.hidden;return}p=document.createElement('div');p.id='khelp';p.className='colpop';p.style.cssText+=';left:50%;top:80px;transform:translateX(-50%);width:420px;position:fixed';
- const rows=[['↓ ↑ or J K','next / previous sample (with a preview)'],['P','preview while moving: '+(KPREVIEW?'on':'off')],['Enter','edit the selected sample'],['Space','stop'],['F','★ favourite'],['X','✕ not for me'],['C','📁 add to your last collection'],['A','＋ add to the sketchpad'],['/','search'],['Esc','unselect · close'],['Backspace','back to the previous sample'],['← →','variations (when shown)'],['T','next take (when a sample has takes)'],['⌘Z  ⌘⇧Z','undo / redo (the sketch when the sketchpad is open)'],['⌘S','save the sketch'],['?','this list']];
+ const rows=[['↓ ↑ or J K','next / previous sample (with a preview)'],['P','preview while moving: '+(KPREVIEW?'on':'off')],['Enter','edit the selected sample'],['Space','stop · on Mashup: play / stop'],['F','★ favourite'],['X','✕ not for me'],['C','📁 add to your last collection'],['A','＋ add to the sketchpad'],['/','search'],['Esc','unselect · close'],['Backspace','back to the previous sample'],['← →','variations (when shown)'],['T','next take (when a sample has takes)'],['⌘Z  ⌘⇧Z','undo / redo (the sketch when the sketchpad is open)'],['⌘S','save the sketch'],['?','this list']];
  p.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:6px"><b>Keyboard</b><button id="khclose">✕</button></div><div style="display:grid;grid-template-columns:110px 1fr;gap:4px 10px">${rows.map(([k,v])=>`<code>${k}</code><span>${v}</span>`).join('')}</div>`;
  document.body.appendChild(p);$('khclose').onclick=()=>p.hidden=true}
 document.addEventListener('keydown',e=>{if(e.metaKey||e.ctrlKey||e.altKey||typing(e))return;
@@ -3067,7 +3067,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return `<div class="trfx">${eq}${dly}${rev}${tail}</div>`;
   };
 
-  TR.DIE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="none" stroke="currentColor"/><circle cx="5" cy="5" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="11" r="1"/></svg>';
+  // the die: a solid face in the button's colour, five pips cut out of it
+  TR.DIE = '<svg class="die" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><rect x="1.5" y="1.5" width="17" height="17" rx="4.2" fill="currentColor"/><g fill="#12151a"><circle cx="6.2" cy="6.2" r="1.7"/><circle cx="13.8" cy="6.2" r="1.7"/><circle cx="10" cy="10" r="1.7"/><circle cx="6.2" cy="13.8" r="1.7"/><circle cx="13.8" cy="13.8" r="1.7"/></g></svg>';
   TR.name = role => ({ drums: 'Drums', tops: 'Tops', bass: 'Bass', vocals: 'Vocals', other: 'Other', oneshot: 'One-shot' })[role];
   let menuId = null;
   TR.isOpen = id => menuId === id;
@@ -3147,7 +3148,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
         } catch (e) {
           return null;
         }
-      })();
+      })().then(song => {
+        if (!song) pictures.delete(key);
+        return song;
+      });
       pictures.set(key, entry);
     }
     return pictures.get(key).pending;
@@ -3230,6 +3234,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     if (!p || !box) return;
     const canvas = box.querySelector('canvas'), col = getComputedStyle(box).getPropertyValue('--trcol').trim();
     const song = slotSong(id);
+    box.classList.toggle('has-picture', !!song);
     if (song) {
       ensureView(id, song);
       const [v0, v1] = p._v;
@@ -3929,11 +3934,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   const row=id=>{
    const p=MX.slots[id],R=role(id),os=isOS(id),filled=has(p),color=BLEND.STEMVAR[R]||'--VOX';
    const name=`<div class="trname">${TR.name(R)}</div>`;
-   const die=`<button class="tbtn" data-mxroll="${id}" aria-label="New part" title="pull a part that fits" ${p?.lock?'disabled':''}>${TR.DIE}</button>`;
+   const die=`<button class="tbtn trdie" data-mxroll="${id}" aria-label="New part" title="pull a part that fits" ${p?.lock?'disabled':''}>${TR.DIE}</button>`;
    const more=TR.more(id,ROLES,(MX.hist[id]||[]).length);
    const open=`<div class="trk${p?.mute?' muted':''}${TR.isOpen(id)?' open':''}" data-mxrow="${id}" style="--trcol:var(${color})">`;
    const find=findHTML(id);
-   if(!filled)return `${open}<div class="trh">${name}<div class="trsrc sub">empty</div>${die}${more}</div></div>${find}`;
+   if(!filled)return `${open}<div class="trh">${name}<div class="trsrc sub">empty</div><span class="trgroup trpick">${die}</span>${more}</div></div>${find}`;
 
    const n=p.n||1,k=p.k||1,on=new Set(p.steps||[]),fit=p.fit||[],i=I.slots?.[id];
    const shift=TR.semis(p.semis||0,p);
@@ -3956,8 +3961,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    const part=os?`<div class="mxwave mxsteps" data-mxwave="${id}" style="--n:${n*16};--b:${n}"><div class="mxsg">${Array.from({length:n*16},(_,j)=>`<button class="mxst${on.has(j)?' on':''}${j%16===0?' bar':j%4===0?' beat':''}" data-mxstep="${id}:${j}" title="bar ${Math.floor(j/16)+1}, beat ${Math.floor(j%16/4)+1}${j%4?' + '+(j%4)+'/16':''}"></button>`).join('')}</div>
     <canvas class="mxosw"></canvas><div class="mxsax">${Array.from({length:n},(_,j)=>`<span style="--f:${fit[j]!=null?Math.max(0,Math.min(1,(fit[j]-0.5)*2)).toFixed(2):0}" title="${fit[j]!=null?`fits this bar's harmony ${Math.round(fit[j]*100)}%`:''}">${j+1}</span>`).join('')}</div><i></i></div>`
     :`<div class="mxwave trwave" data-mxwave="${id}" tabindex="0" aria-label="${TR.name(R)} waveform"><canvas></canvas><i></i><span class="trtip" hidden></span>${TR.zoomButtons}</div>`;
-   return `${open}<div class="trh">${name}${src}<div class="trbars">${os?cycle:TR.barsText(p)}</div>
-    <span class="trgroup">${TR.num(id,'st')}${TR.num(id,'ct')}</span><span class="trgroup">${die}${audition}${history}</span><span class="trgroup">${mix}</span>${more}</div>
+   return `${open}<div class="trh">${name}${src}<span class="trgroup trpick">${die}${audition}${history}</span><div class="trbars">${os?cycle:TR.barsText(p)}</div>
+    <span class="trgroup">${TR.num(id,'st')}${TR.num(id,'ct')}</span><span class="trgroup">${mix}</span>${more}</div>
     ${part}${TR.fxHTML(id)}</div>${trimHTML(id)}${find}`;
   };
   L.innerHTML=`<div class="mx"><div class="mxtop">
@@ -4145,11 +4150,6 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(xb&&!$('mxosadd'))xb.insertAdjacentHTML('afterend',`<button id="mxosadd" data-i="${i}" title="put it in the Mashup as a one-shot: it plays at the steps you choose, shifted to the mashup's key">✦ Mashup</button>`)};
  document.addEventListener('click',e=>{const b=e.target.closest('#mxosadd');if(b)addOneShot(+b.dataset.i)});
  if(typeof scheduleRefit==='function'){const _sr=scheduleRefit;scheduleRefit=function(){if(st.tab==='M'){MX._refit=true;return}_sr()}}
- // space on this tab starts / stops the mashup (also with a button focused: a click leaves focus on it); not while typing
- window.addEventListener('keydown',e=>{if(st.tab!=='M'||e.key!==' '||e.metaKey||e.ctrlKey||e.altKey)return;const t=e.target,tag=t.tagName;
-  if(tag==='TEXTAREA'||tag==='SELECT'||t.isContentEditable||(tag==='INPUT'&&!['range','checkbox','button'].includes(t.type)))return;
-  const b=$('mxplay');if(!b)return;e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)b.click()},true);
- window.addEventListener('keyup',e=>{if(st.tab==='M'&&e.key===' '&&e.target.tagName==='BUTTON')e.preventDefault()},true);
  const partId=p=>p?[p.stem,p.track,p.sample,p.bar0,p.n,p.k||1,p.off||0,p.ct||0,!!p.legacyLoop,!!p.kit,p.cond||0,p.hk||'',p.hup||''].join('|'):'';
  async function undoGo(d){save();const from=d<0?UN.u:UN.r,to=d<0?UN.r:UN.u;if(!from.length){toast(d<0?'nothing to undo':'nothing to redo');return}
   to.push(UN.cur);UN.cur=from.pop();UN.busy=true;
@@ -4167,6 +4167,15 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  window.CRATE.mxUndo=undoGo;save();
  // ⌘S on this tab saves the mashup (not the sketch)
  window.addEventListener('keydown',e=>{if(st.tab!=='M'||!(e.metaKey||e.ctrlKey)||e.key.toLowerCase()!=='s')return;e.preventDefault();e.stopImmediatePropagation();const b=$('mxsave');if(b&&!b.disabled)b.click()},true);
+ // space starts and stops the mashup (the strip while it is open), whatever control has the focus: it presses the play
+ // button and nothing else. In a text or number box it is typed as usual.
+ const textBox=el=>!!el&&(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT'&&!['range','checkbox','radio','button'].includes(el.type));
+ let spaceDown=false;
+ window.addEventListener('keydown',e=>{if(e.key!==' '||st.tab!=='M'||e.metaKey||e.ctrlKey||e.altKey||textBox(e.target))return;
+  const b=$('pbplay')||$('mxplay');if(!b)return;
+  e.preventDefault();e.stopImmediatePropagation();spaceDown=true;if(!e.repeat)b.click()},true);
+ // a focused button, switch or list would act on the key's release
+ window.addEventListener('keyup',e=>{if(e.key!==' '||!spaceDown)return;spaceDown=false;e.preventDefault();e.stopImmediatePropagation()},true);
  window.CRATE.TR=TRACKS;window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync;window.CRATE.mxRefreshSongs=refreshSongs}
 // ---------- sliders: keep each one's fill (--a .. --b, see studio.css) in step with its value. The fill runs from the
 // minimum, or from zero when the range spans it (EQ, tune, dB), so "all the way down" and "0" both look off.

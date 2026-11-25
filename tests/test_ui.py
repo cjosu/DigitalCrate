@@ -1876,11 +1876,23 @@ def test_track_plays_without_its_picture(site, page):
     """The picture can't be had: the track still shows its loop and plays."""
     r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
     assert "STEMS OK" in r.stdout
-    page.evaluate("(()=>{const a=CRATE.api;CRATE.api=(p,b)=>p==='api/stems/peaks'?Promise.reject(new Error('no picture')):a(p,b)})()")
+    page.evaluate("""() => {
+        const api = CRATE.api;
+        window.pictureUnavailable = true;
+        CRATE.api = (path, body) => path === 'api/stems/peaks' && pictureUnavailable
+            ? Promise.reject(new Error('no picture')) : api(path, body);
+    }""")
     page.click("#tabM"); page.wait_for_selector("#mxall"); page.click("#mxall")
     page.wait_for_function("CRATE.MX.on&&['drums','bass','vocals','other'].every(s=>CRATE.MX.slots[s]&&CRATE.MX.slots[s].buf)", timeout=90000)
     assert page.evaluate("CRATE.TR.has('drums')") is False
     page.wait_for_function("(()=>{const b=document.querySelector('[data-mxwave=\"drums\"]');return b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'})()")
+    wave = page.locator('[data-mxwave="drums"]')
+    wave.hover()
+    assert wave.locator(".trzoom").is_hidden()
+    page.evaluate("() => { window.pictureUnavailable = false; return CRATE.mxSync(); }")
+    page.wait_for_function("CRATE.TR.has('drums')", timeout=5000)
+    wave.hover()
+    assert wave.locator(".trzoom").is_visible()
 
 
 def _edge(page, slot):
@@ -1985,6 +1997,13 @@ def test_zoom_and_the_view_switch(site, page):
       w=CRATE.TR.loopView(g.bars[p.bar0],g.bars[e],g.bars[1]-g.bars[0],g.dur);return Math.abs(p._v[0]-w[0])<0.01&&Math.abs(p._v[1]-w[1])<0.01})""")
     page.click('[data-trview="song"]'); page.wait_for_timeout(400)
     assert page.evaluate("CRATE.MX.slots.bass._v[0]===0&&Math.abs(CRATE.MX.slots.bass._v[1]-CRATE.TR.song(CRATE.MX.slots.bass.track,'bass').dur)<0.01")
+    wave = page.locator('[data-mxwave="drums"]')
+    wave.hover()
+    assert wave.locator(".trzoom").is_visible()
+    wave.locator('[data-trz="loop"]').click()
+    assert page.evaluate("CRATE.MX.slots.drums._viewMode") == "loop"
+    wave.locator('[data-trz="song"]').click()
+    assert page.evaluate("CRATE.MX.slots.drums._viewMode") == "song"
     page.click("#tabS"); page.click("#tabM"); page.wait_for_selector(".trfx")                 # away and back: still there, nothing stuck
     assert page.locator(".trfx").count() == 4   # the four tracks with parts
 
@@ -2852,12 +2871,11 @@ def test_master_switch_is_on_by_default_bypasses_and_is_kept(site, page):
     page.evaluate("""() => {
         const start = OfflineAudioContext.prototype.startRendering;
         const gate = new Promise(resolve => { window.releaseMasterProbe = resolve; });
+        // Hold back the master chain's calibration only (one second of mono at 48 kHz). Loading a part renders
+        // offline too, to measure its harmonics, and must go through.
         OfflineAudioContext.prototype.startRendering = function () {
-            // Only hold the one-second calibration renders. The mixer also renders harmonics offline.
-            if (this.sampleRate === 48000 && this.length === 48000) {
-                return gate.then(() => start.call(this));
-            }
-            return start.call(this);
+            const probe = this.length === 48000 && this.sampleRate === 48000 && this.destination.channelCount === 1;
+            return probe ? gate.then(() => start.call(this)) : start.call(this);
         };
         const targets = new Set();
         const connect = AudioNode.prototype.connect, disconnect = AudioNode.prototype.disconnect;
@@ -3072,3 +3090,52 @@ def test_a_tempo_reload_waits_for_a_lanes_replacement_request(page):
     page.wait_for_function("SK.lanes[0].state==='ok'&&SK.playing", timeout=60000)
     page.evaluate("CRATE.skStop()")
     assert not resumed_early
+
+
+def test_space_starts_and_stops_the_mashup(site, page):
+    """Space is play / stop on the Mashup tab, whatever control was used last. In a text box it types a space."""
+    _mixer(site, page)
+    on = "CRATE.MX.on"
+    assert page.evaluate(on) is True
+    page.keyboard.press("Space"); assert page.evaluate(on) is False
+    assert page.inner_text("#mxplay") == "▶ play"
+    page.keyboard.press("Space"); assert page.evaluate(on) is True
+    page.focus("#mxplay"); page.keyboard.press("Space")                  # on the button itself: once, not twice
+    assert page.evaluate(on) is False
+    part = "[CRATE.MX.slots.drums.track,CRATE.MX.slots.drums.bar0]"
+    before = page.evaluate(part)
+    page.focus('[data-mxroll="drums"]'); page.keyboard.press("Space")    # on a die: plays, deals nothing
+    page.wait_for_timeout(300)
+    assert page.evaluate(on) is True and page.evaluate(part) == before
+    page.focus("#mxmaster"); page.keyboard.press("Space")                # on a switch: the switch stays as it was
+    assert page.evaluate(on) is False and page.is_checked("#mxmaster")
+    page.focus("#mxkey"); page.keyboard.press("Space")
+    assert page.evaluate(on) is True
+    page.focus("#mxbpm"); page.keyboard.press("Space")                   # typing: not a transport key
+    assert page.evaluate(on) is True
+    page.click("#tabS"); page.keyboard.press("Space")                    # another tab: the mashup is left alone
+    assert page.evaluate(on) is True
+
+
+def test_space_starts_and_stops_the_strip(site, page):
+    _strip(site, page)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    page.keyboard.press("Space"); assert page.evaluate("CRATE.PB.playing") is False
+    page.keyboard.press("Space"); assert page.evaluate("CRATE.PB.playing") is True
+
+
+def test_the_die_sits_beside_the_song_and_stands_out(site, page):
+    _mixer(site, page)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    for slot in ("drums", "bass", "vocals", "other"):
+        row = f'[data-mxrow="{slot}"] .trh'
+        src, die, back = _box(page, f"{row} .mxsrc"), _box(page, f"{row} [data-mxroll]"), _box(page, f'{row} [data-mxhist="{slot}:-1"]')
+        bars = _box(page, f"{row} .trbars")
+        assert 0 <= die["l"] - src["r"] <= 14, (slot, src, die)             # straight after the song's text
+        assert die["r"] <= back["l"] and back["r"] < bars["l"], (slot, die, back, bars)
+        assert die["r"] - die["l"] > back["r"] - back["l"] and die["b"] - die["t"] <= 24, (slot, die, back)   # a little larger, not tall
+        icon = _box(page, f"{row} [data-mxroll] svg")
+        assert abs(icon["r"] - icon["l"] - 16) < 0.5 and abs(icon["b"] - icon["t"] - 16) < 0.5, (slot, icon)       # and upright
+    assert page.evaluate("getComputedStyle(document.querySelector('[data-mxroll=\"drums\"]')).color"
+                         "===getComputedStyle(document.querySelector('#mxplay.on')).backgroundColor")   # in the accent colour
