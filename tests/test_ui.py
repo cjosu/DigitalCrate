@@ -2192,3 +2192,82 @@ def test_old_drums_parts_in_a_full_mixer(site, page):
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.order.length===13", timeout=60000)   # 8 tracks, 5 of them old Drums
     assert page.locator("#mxadd").count() == 0
+
+
+VDUCK_AUDIO = """async () => {
+  const BL = BLEND, SR = 44100, N = 4 * SR, out = {};
+  const rms = (d, a, b) => { let s = 0; for (let i = Math.round(a); i < Math.round(b); i++) s += d[i] * d[i]; return Math.sqrt(s / (b - a)); };
+  const db = x => 20 * Math.log10(x + 1e-12);
+  // a "vocal": 220 Hz and two overtones, sung for a second, silent for a second, at the loudness the server gives every part
+  const vocal = ctx => { const b = ctx.createBuffer(1, N, SR), d = b.getChannelData(0);
+    for (let i = 0; i < N; i++) { const t = i / SR;
+      d[i] = Math.floor(t) % 2 ? 0 : Math.sin(2 * Math.PI * 220 * t) + 0.5 * Math.sin(2 * Math.PI * 440 * t) + 0.25 * Math.sin(2 * Math.PI * 660 * t); }
+    const g = 0.08 / rms(d, 0, SR); for (let i = 0; i < N; i++) d[i] *= g; return b; };
+  // what is ducked: steady noise, so its level is easy to read
+  const hiss = ctx => { const b = ctx.createBuffer(1, N, SR), d = b.getChannelData(0); let a = 12345;
+    for (let i = 0; i < N; i++) { a = (a * 1664525 + 1013904223) >>> 0; d[i] = a / 2147483648 - 1; }
+    const g = 0.08 / rms(d, 0, N); for (let i = 0; i < N; i++) d[i] *= g; return b; };
+  const play = (ctx, buf) => { const s = ctx.createBufferSource(); s.buffer = buf; s.start(0); return s; };
+  const O = { fx: true, bar: 2, DT: { '1/8': 1 / 8 } };
+  // one track of this role under the vocals; -> that track alone
+  const run = async (role, duck, voices = [{ db: 0, on: true }]) => {
+    const c = new OfflineAudioContext(2, N, SR), merge = c.createChannelMerger(2); merge.connect(c.destination);
+    const MX = {}; BL.out(MX, c); MX.master.disconnect();
+    const outT = c.createGain(), outV = c.createGain(); outT.connect(merge, 0, 0); outV.connect(merge, 0, 1);
+    const ct = BL.mkChain(c, outT, MX.bus);
+    BL.applyChain(ct, BL.mixOf({ db: 0 }, role, { ...O, on: true, duck }), 0); play(c, hiss(c)).connect(ct.in);
+    for (const v of voices) { const cv = BL.mkChain(c, outV, MX.bus);
+      BL.applyChain(cv, BL.mixOf({ db: v.db }, 'vocals', { ...O, on: v.on }), 0); play(c, vocal(c)).connect(cv.in); }
+    return (await c.startRendering()).getChannelData(0); };
+  const ref = await run('tops', { on: false });
+  const against = (y, a, b) => db(rms(y, a * SR, b * SR)) - db(rms(ref, a * SR, b * SR));
+  const drop = async (...a) => { const y = await run(...a); return { sung: against(y, 2.4, 2.9), rest: against(y, 1.4, 1.9) }; };
+  out.tops3 = await drop('tops', undefined);                       // no setting yet: on, 3 dB
+  out.tops12 = await drop('tops', { on: true, db: 12 });
+  out.off = await drop('tops', { on: false, db: 12 });
+  out.muted = await drop('tops', { on: true, db: 12 }, [{ db: 0, on: false }]);
+  out.quiet = await drop('tops', { on: true, db: 12 }, [{ db: -12, on: true }]);
+  out.two = await drop('tops', { on: true, db: 12 }, [{ db: 0, on: true }, { db: 0, on: true }]);
+  for (const r of ['drums', 'bass', 'vocals', 'oneshot']) out[r] = await drop(r, { on: true, db: 12 });
+  // the whole range: as much off at 100 Hz as at 8 kHz
+  const band = async (data, f0) => { const c = new OfflineAudioContext(1, data.length, SR), b = c.createBuffer(1, data.length, SR); b.getChannelData(0).set(data);
+    const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = f0; f.Q.value = 2; play(c, b).connect(f); f.connect(c.destination);
+    return (await c.startRendering()).getChannelData(0); };
+  const y12 = await run('tops', { on: true, db: 12 });
+  const at = async f => db(rms(await band(y12, f), 2.4 * SR, 2.9 * SR)) - db(rms(await band(ref, f), 2.4 * SR, 2.9 * SR));
+  out.low = await at(100); out.high = await at(8000);
+  // Other: by frequency. The vocal is at 220, 440 and 660 Hz: Other gives way there, and keeps its lows and its top
+  const o12 = await run('other', { on: true, db: 12 }), o3 = await run('other', undefined), oOff = await run('other', { on: false, db: 12 });
+  const o2 = await run('other', { on: true, db: 12 }, [{ db: 0, on: true }, { db: 0, on: true }]);
+  const dip = async (y, f, a = 2.4, b = 2.9) => db(rms(await band(y, f), a * SR, b * SR)) - db(rms(await band(ref, f), a * SR, b * SR));
+  out.other = { at250: await dip(o12, 250), at500: await dip(o12, 500), at4k: await dip(o12, 4000), at8k: await dip(o12, 8000), at60: await dip(o12, 60),
+    d250: await dip(o3, 250), d4k: await dip(o3, 4000), rest250: await dip(o12, 250, 1.4, 1.9), off250: await dip(oOff, 250), two250: await dip(o2, 250) };
+  // one chain, its track's role changed from Bass to Other to Tops
+  { const c = new OfflineAudioContext(1, SR, SR), MX = {}; BL.out(MX, c); const ch = BL.mkChain(c, c.destination, MX.bus), seen = [];
+    for (const role of ['bass', 'other', 'tops']) { BL.applyChain(ch, BL.mixOf({ db: 0 }, role, { ...O, on: true }), 0); seen.push([ch.ducked, ch.vducked, ch.vbanded]); }
+    out.switched = seen; }
+  // a chain on a bus that has no vocal bus
+  { const c = new OfflineAudioContext(1, SR, SR), ch = BL.mkChain(c, c.destination, BL.duckBus(c));
+    for (const role of ['other', 'tops']) BL.applyChain(ch, BL.mixOf({ db: 0 }, role, { ...O, on: true }), 0);
+    ch.drop(); out.bare = [ch.vducked, ch.vbanded]; }
+  return out;
+}"""
+
+
+def test_vocal_duck_audio(page):
+    """The vocal duck, measured offline. Tops drop by close to the amount while the vocal sings, across the whole range,
+    and are back between phrases. Other gives way where the voice is and keeps its lows and its top. Nothing else is touched."""
+    o = page.evaluate(VDUCK_AUDIO)
+    assert -3.6 < o["tops3"]["sung"] < -2.2 and o["tops3"]["rest"] > -0.5
+    assert -13.0 < o["tops12"]["sung"] < -9.5 and o["tops12"]["rest"] > -1.0
+    assert o["off"]["sung"] > -0.1 and o["muted"]["sung"] > -0.1
+    assert o["quiet"]["sung"] > o["tops12"]["sung"] + 3            # a quieter vocal ducks less
+    assert o["two"]["sung"] > -13.0                                # two vocals: no deeper than the amount
+    assert all(o[r]["sung"] > -0.1 for r in ("drums", "bass", "vocals", "oneshot"))
+    assert abs(o["low"] - o["high"]) < 0.5                         # Tops: the whole range, not a shelf
+    b = o["other"]
+    assert -13.5 < b["at250"] < -8 and b["at500"] < -4             # Other at 12 dB: down where the voice is
+    assert b["at4k"] > -1.5 and b["at8k"] > -1.0 and b["at60"] > -1.0   # and its top and its lows left alone
+    assert -4.2 < b["d250"] < -2.0 and b["d4k"] > -0.6             # at 3 dB, the amount it starts with
+    assert b["rest250"] > -1.0 and b["off250"] > -0.1 and b["two250"] > -14.0   # back between phrases; off is off; two vocals go no deeper
+    assert o["switched"] == [[True, False, False], [False, False, True], [False, True, False]] and o["bare"] == [False, False]

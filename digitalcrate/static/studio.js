@@ -1470,6 +1470,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   BL.WINS = { all: [0, 1], first: [0, 0.5], second: [0.5, 1], cut: [0.5, 0.5] };  // when in it a layer changes
   BL.STYLES = ['filter', 'xfade'];
   BL.DUCK = { fc: 120, keyLp: 100, smooth: 20, scale: 13, db: 3, max: 12 };
+  // At 0.08 RMS the test vocal drops Tops by 3.0 / 12.0 dB. At 12 dB, Other drops about 8 dB near
+  // 250 and 500 Hz and less than 1.5 dB at 60 Hz, 4 kHz and 8 kHz. Between phrases both recover.
+  BL.VDUCK = { hp: 150, smooth: 6, scale: 18, fc: 10, bands: [250, 500, 1000, 2000, 4000, 8000],
+    q: 1.92, bscale: 46, db: 3, max: 12 };
   BL.Q = -3.0103;      // Web Audio's lowpass / highpass Q is in dB: this is Butterworth (no resonance)
   BL.STAGES = 2;       // biquads per filter: 2 = 24 dB / octave
   BL.EDGE = 0.05;      // the share of a filter handoff, at each end, over which the part's gain opens or closes
@@ -1517,17 +1521,27 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     x.l.forEach(f => BL.ramp(f.frequency, o.lp, t));
   };
 
-  // the duck: every drum slot feeds bus.in; bus.env is how loud their low end is right now, 0..1
-  BL.duckBus = ctx => {
-    const kin = ctx.createGain(), klp = ctx.createBiquadFilter(), rect = ctx.createWaveShaper(),
+  // Rectify, smooth and scale the key, then clamp its level to 0..1.
+  const duckEnv = (ctx, input, type, frequency, q, smooth, scale) => {
+    const filter = ctx.createBiquadFilter(), rect = ctx.createWaveShaper(),
       ksm = ctx.createBiquadFilter(), ksc = ctx.createGain(), lim = ctx.createWaveShaper();
-    klp.type = 'lowpass'; klp.frequency.value = BL.DUCK.keyLp; klp.Q.value = BL.Q;
-    ksm.type = 'lowpass'; ksm.frequency.value = BL.DUCK.smooth; ksm.Q.value = -6.0206;   // critically damped: no overshoot
+    filter.type = type; filter.frequency.value = frequency; filter.Q.value = q;
+    ksm.type = 'lowpass'; ksm.frequency.value = smooth; ksm.Q.value = -6.0206;   // critically damped
     rect.curve = new Float32Array([1, 0, 1]);   // |x|
     lim.curve = new Float32Array([0, 0, 1]);    // 0..1, and never above 1
-    ksc.gain.value = BL.DUCK.scale;
-    kin.connect(klp); klp.connect(rect); rect.connect(ksm); ksm.connect(ksc); ksc.connect(lim);
-    return { in: kin, env: lim };
+    ksc.gain.value = scale;
+    input.connect(filter).connect(rect).connect(ksm).connect(ksc).connect(lim);
+    return lim;
+  };
+
+  BL.duckBus = ctx => {
+    const input = ctx.createGain(), { keyLp, smooth, scale } = BL.DUCK;
+    return { in: input, env: duckEnv(ctx, input, 'lowpass', keyLp, BL.Q, smooth, scale) };
+  };
+  BL.vduckBus = ctx => {
+    const input = ctx.createGain(), { hp, smooth, scale, bands, q, bscale } = BL.VDUCK;
+    return { in: input, env: duckEnv(ctx, input, 'highpass', hp, BL.Q, smooth, scale),
+      bands: bands.map(f => duckEnv(ctx, input, 'bandpass', f, q, smooth, bscale)) };
   };
 
   // the mixer's output and the duck bus, made once (MX.master, MX.bus)
@@ -1535,6 +1549,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     if (!MX.master) {
       MX.master = ctx.createGain(); MX.master.gain.value = 0.9; MX.master.connect(ctx.destination);
       MX.bus = BL.duckBus(ctx);
+      MX.bus.v = BL.vduckBus(ctx);
       MX.bus.rev = BL.reverb(ctx, MX.master, MX.reverb);   // every chain made on this bus gets a send to it
     }
     return MX;
@@ -1645,7 +1660,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
   BL.legacyHarmDb = (p, hc) => p.hup ? -20 * Math.log10(BL.harmComp({ harm: p.harm }, hc)) : 0;
 
-  // a slot's chain: low shelf -> mid -> high shelf -> duck shelf -> volume -> out, a delay send, and a tap to the bus.
+  // EQ and the bass duck, then the vocal duck, volume and output. The key taps follow the volume.
   // Harmonics: a sub-bass (everything below 100 Hz) can't be heard on small speakers; a copy of the part driven through
   // a soft clipper makes overtones above 110 Hz that say where the notes are, mixed in under it (hg: how much, 0 = off)
   BL.mkChain = (ctx, out, bus) => {
@@ -1655,16 +1670,63 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     lo.type = 'lowshelf'; lo.frequency.value = 200; mid.type = 'peaking'; mid.frequency.value = 1000; mid.Q.value = 0.8;
     hi.type = 'highshelf'; hi.frequency.value = 5000; lp.type = 'lowpass'; lp.frequency.value = 4500; fb.gain.value = 0.35;
     duck.type = 'lowshelf'; duck.frequency.value = BL.DUCK.fc; duck.gain.value = 0; dk.gain.value = 0; key.gain.value = 0;
+    const { fc, bands, q } = BL.VDUCK, vbus = bus.v;
+    const vkey = ctx.createGain(), vduck = ctx.createBiquadFilter(), vdk = ctx.createGain();
+    vduck.type = 'highshelf'; vduck.frequency.value = fc; vdk.gain.value = 0;
+    const vb = bands.map(f => {
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = q;
+      return filter;
+    });
+    const vbk = vb.map(() => { const amount = ctx.createGain(); amount.gain.value = 0; return amount; });
     const inp = ctx.createGain(), harmonics = harmonicsPath(ctx), hg = harmonics.out;
-    inp.connect(lo); inp.connect(harmonics.in); hg.connect(vol);
-    lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vol); vol.connect(out);
+    const vin = vbus ? ctx.createGain() : vol;
+    inp.connect(lo); inp.connect(harmonics.in); hg.connect(vin);
+    lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vin); vol.connect(out);
+    if (vbus) { vin.connect(vol); vol.connect(vkey); }
     vol.connect(send); send.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(out);
     vol.connect(key); key.connect(bus.in); bus.env.connect(dk);
     const rsend = ctx.createGain(); rsend.gain.value = 0;
     if (bus.rev) { vol.connect(rsend); rsend.connect(bus.rev.in); }
-    // drop(): take a chain that is no longer used out of the graph (the delay's feedback loop would keep it alive)
-    const drop = () => { bus.env.disconnect(dk); [inp, ...harmonics.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend].forEach(n => n.disconnect()); };
-    return { in: inp, lo, mid, hi, duck, dk, key, vol, send, dl, fb, hg, rsend, ducked: false, drop };
+    const c = { in: inp, lo, mid, hi, duck, dk, key, vol, send, dl, fb, hg, rsend, ducked: false,
+      vkey, vduck, vdk, vb, vbk, vducked: false, vbanded: false };
+    const tops = { filters: [vduck], amounts: [vdk], levels: [vbus?.env] };
+    const other = { filters: vb, amounts: vbk, levels: vbus?.bands };
+    let path = null, keyed = false;
+    const wire = (mode, method) => {
+      const nodes = [vin, ...(mode?.filters || []), vol];
+      nodes.slice(0, -1).forEach((node, i) => node[method](nodes[i + 1]));
+      mode?.amounts.forEach((amount, i) => {
+        mode.levels[i][method](amount);
+        amount[method](mode.filters[i].gain);
+      });
+    };
+    c.applyVocalDuck = (s, t, timeConstant) => {
+      if (!vbus) return;
+      if (!!s.vkey !== keyed) {
+        if (s.vkey) vkey.connect(vbus.in); else vkey.disconnect(vbus.in);
+        keyed = !!s.vkey;
+      }
+      const next = s.vduck > 0 ? tops : s.vband > 0 ? other : null;
+      if (next) next.amounts.forEach(amount => amount.gain.setTargetAtTime(-(s.vduck || s.vband), t, timeConstant));
+      if (next !== path) {
+        wire(path, 'disconnect');
+        wire(next, 'connect');
+        path = next;
+        c.vducked = path === tops;
+        c.vbanded = path === other;
+      }
+    };
+    // Disconnect the shared envelope inputs and the delay feedback loop when a chain is retired.
+    c.drop = () => {
+      bus.env.disconnect(dk);
+      path?.amounts.forEach((amount, i) => path.levels[i].disconnect(amount));
+      if (vbus) vin.disconnect();
+      [inp, ...harmonics.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend, vkey, vduck, vdk, ...vb, ...vbk]
+        .forEach(n => n.disconnect());
+      c.vducked = c.vbanded = false;
+    };
+    return c;
   };
 
   // s: {gain (linear), eq: [lo, mid, hi] dB, send, delay (s), key (feeds the bus), duck (dB taken off the lows, 0 = off)}
@@ -1679,6 +1741,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     c.dk.gain.setTargetAtTime(-s.duck, t, T);
     const want = s.duck > 0;
     if (want !== c.ducked) { if (want) c.dk.connect(c.duck.gain); else c.dk.disconnect(c.duck.gain); c.ducked = want; }
+    c.applyVocalDuck(s, t, T);
   };
 
   // a part's mix settings as applyChain takes them. stem: what its slot plays.
@@ -1694,6 +1757,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     delay: o.bar * (o.DT[p.dt || '1/8'] || 1 / 8),
     key: stem === 'drums',
     duck: stem === 'bass' && !(o.duck && o.duck.on === false) ? BL.duckDb(o.duck) : 0,
+    vkey: stem === 'vocals',
+    vduck: stem === 'tops' && o.duck?.on !== false ? BL.duckDb(o.duck) : 0,
+    vband: stem === 'other' && o.duck?.on !== false ? BL.duckDb(o.duck) : 0,
   });
 
   // ---------------------------------------------------------------- saved state
