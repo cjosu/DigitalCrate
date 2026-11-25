@@ -62,6 +62,13 @@ mute, solo, a 3-band EQ, and a tempo-synced delay.
 The weights start as sensible guesses and are refitted (ridge logistic regression, pulled toward the guesses) once
 there are a dozen ratings, then after each new one. The mixer says how many ratings it has learned from.
 
+**6. One-shots.** A slot can also play a library sample at chosen steps of a cycle of bars (a vocal chop in the
+middle of bar 2, a stab at the end of bar 4). The dice chooses by how well the sample's notes sit on the chords of
+some bar, after shifting to the key, plus the sample taste model's score (capped, or your favorites would be all you
+get); the first hit goes on the bar it fits best. Hits are scheduled on the mixer's bar clock through the slot's own
+chain, so volume, EQ, delay and reverb apply. Not yet: one-shot slots in the play-strip view (snapshots keep them,
+the strip doesn't play them), and learning from which one-shots you keep beyond counting as a listen.
+
 ## Limits
 
 - Separation artifacts show more in an exposed stem than in a mix (see separation grain).

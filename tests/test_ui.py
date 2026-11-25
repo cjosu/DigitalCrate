@@ -1504,3 +1504,70 @@ def test_mashup_reverb_send_and_bar_axis(site, page):
     page.evaluate("CRATE.mxPlay(false)")
     page.evaluate("localStorage.removeItem('dcStems')")
     page.click("#tabS")
+
+
+def test_mashup_one_shot_slot(site, page):
+    """✦ one-shot: a library sample in a slot, placed on steps of a cycle of bars, played on the mixer's clock."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&!!(window.CRATE&&CRATE.MX&&CRATE.mxAddOneShot)", timeout=30000)
+    i = page.evaluate("S.findIndex(s=>s[F.kind]==='oneshot'&&s[F.dur]<2)")
+    assert i >= 0
+    page.evaluate(f"CRATE.mxAddOneShot({i})")                       # as ✦ Mashup in the sample panel does
+    page.wait_for_function("CRATE.MX.order.some(id=>CRATE.MX.roles[id]==='oneshot'&&CRATE.MX.slots[id]&&CRATE.MX.slots[id].buf)", timeout=120000)
+    sid = page.evaluate("CRATE.MX.order.find(id=>CRATE.MX.roles[id]==='oneshot')")
+    page.click("#tabM")
+    page.wait_for_selector(f'[data-mxstep="{sid}:0"]')
+    assert page.locator(f'[data-mxrow="{sid}"] .mxst').count() == 16 and page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0]
+    page.click(f'[data-mxstep="{sid}:10"]')                          # a hit in the middle of the bar
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 10]
+    page.select_option(f'[data-mxlen="{sid}"]', "2")                 # a two-bar cycle: 32 steps, the hits stay
+    assert page.locator(f'[data-mxrow="{sid}"] .mxst').count() == 32
+    page.click(f'[data-mxstep="{sid}:30"]')                          # ... and one at the end of bar 2
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 10, 30]
+    page.click("#mxplay")                                            # it plays on the bar clock, through its own chain
+    page.wait_for_function(f"CRATE.MX.on&&CRATE.MX.slots['{sid}']._c&&CRATE.MX.slots['{sid}']._next>0", timeout=20000)
+    page.click(f'[data-mxstep="{sid}:10"]')
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 30]
+    page.click("#mxplay")
+    # 🎲 on a one-shot slot asks the server for one (no sample named): it answers, even when the library has none to offer
+    r = json.load(urllib.request.urlopen(urllib.request.Request(site["base"] + "api/stems/oneshot", data=json.dumps(
+        {"state": {"bpm": 100, "key": None, "slots": {}}, "n": 1, "path": None}).encode(), method="POST")))
+    assert "part" in r and "error" not in r
+    page.reload()                                                    # it comes back with its placement
+    page.wait_for_function(f"window.CRATE&&CRATE.MX&&CRATE.MX.slots['{sid}']&&CRATE.MX.slots['{sid}'].n===2", timeout=30000)
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 30]
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.click("#tabS")
+
+
+def test_saving_under_a_new_name_asks_about_another_ones_snapshots(site, page):
+    """A strip that came with one saved combination doesn't silently become part of another."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&window.CRATE&&CRATE.MX", timeout=30000)
+    page.click("#tabM")
+    page.wait_for_selector("#mxall")
+    page.click("#mxall")
+    page.wait_for_function("Object.values(CRATE.MX.slots).some(p=>p&&p.buf)", timeout=120000)
+    page.click("#sncap")
+    page.wait_for_selector("#snrep")
+    page.fill("#mxname", "first one")
+    page.click("#mxsave")
+    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
+    page.fill("#mxname", "second one")
+    page.click("#mxsave")
+    page.wait_for_selector(".mxask")                                 # asked, not saved yet
+    page.click("#mxdropsn")
+    page.wait_for_function("CRATE.MX.name==='second one'&&CRATE.MX.snaps.length===0", timeout=10000)
+    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)   # saved
+    saved = json.load(urllib.request.urlopen(urllib.request.Request(site["base"] + "api/stems/saved", data=b"{}", method="POST")))["mixes"]
+    by = {m["name"]: m["state"] for m in saved}
+    assert len(by["first one"]["snaps"]) == 1 and len(by["second one"].get("snaps") or []) == 0
+    page.evaluate("CRATE.mxPlay(false)")
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.click("#tabS")

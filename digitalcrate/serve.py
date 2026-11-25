@@ -558,7 +558,7 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             req = json.loads(self.rfile.read(n) or b"{}")
             from .taste import log_event
-            path = unquote(req.get("path", ""))
+            path = unquote(req.get("path") or "")  # (a null path is no path)
             if self.path == "/api/fav":
                 on = bool(req.get("on", True))
                 set_fav(path, on, req.get("id"), req.get("label"))
@@ -617,6 +617,9 @@ class Handler(SimpleHTTPRequestHandler):
                     f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
                                   req.get("k") or 1)
                     return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f)))
+                if what == "oneshot":
+                    return self._json(dict(part=SM.oneshot(state, req.get("n") or 1, set(req.get("avoid") or []),
+                                                           path=req.get("path")), info=SM.info(state)))
                 if what == "info":
                     return self._json(SM.info(state))
                 if what == "alts":

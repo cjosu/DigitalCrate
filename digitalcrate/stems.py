@@ -532,6 +532,103 @@ def log(kind, state, stem=None):
     return n
 
 
+# ---------------------------------------------------------------- one-shots
+# A one-shot slot plays a library sample (a vocal chop, a short phrase, a stab) at chosen steps of a cycle of bars,
+# instead of looping a stem. The sample is shifted to the mixer's key by the browser (the conform endpoint), so here
+# it only has to be chosen: by how well its notes sit on the chords of some bar, and by your taste model's score.
+
+_OS = {"n": -1}
+
+
+def _oneshots(con):
+    n = con.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+    if _OS["n"] != n:
+        rows = con.execute(r"""SELECT s.id, s.path, s.category, s.subtype, s.kind, s.dur, s.key, s.scale, s.key_from,
+                               s.chroma, t.artist, t.title FROM samples s JOIN tracks t ON t.id = s.track_id
+                               WHERE s.parent_id IS NULL AND s.path NOT LIKE '\_Reference%' ESCAPE '\'
+                               AND s.chroma IS NOT NULL AND (s.kind = 'oneshot'
+                               OR (s.category IN ('Vocals', 'Vocal Atmospheres') AND s.dur <= 8))""").fetchall()
+        ch = np.array([json.loads(r["chroma"]) for r in rows], float).reshape(len(rows), 12)
+        ch /= np.linalg.norm(ch, axis=1, keepdims=True) + 1e-9
+        _OS.update(n=n, rows=[dict(r) for r in rows], ch=ch)
+    return _OS
+
+
+def cycle_harmony(state, n, lib=None):
+    """The harmony the pitched slots make in each bar of an n-bar cycle: (n, 12) unit chromas, or None with none."""
+    lib = library() if lib is None else lib
+    target = target_key(state)
+    H = np.zeros((n, 12))
+    for sid, stem, p in _parts(state, lib):
+        if stem in PITCHED:
+            c = _chroma(lib[int(p["track"])], int(p["bar0"]), int(p["n"]), _semis(state, stem, p, lib, target),
+                        float(p.get("k") or 1))
+            if len(c):
+                H += c[np.arange(n) % len(c)]
+    if not H.any():
+        return None
+    return H / (np.linalg.norm(H, axis=1, keepdims=True) + 1e-9)
+
+
+def oneshot(state, n=1, avoid=(), rng=None, path=None):
+    """A library sample for a one-shot slot with a cycle of n bars: drawn from the best by fit + taste (or `path`:
+    the one you chose). Comes with the bar it fits best (its first hit goes there) and its fit to every bar."""
+    rng = rng or np.random.default_rng()
+    con = _db()
+    O = _oneshots(con)
+    rows, ch = O["rows"], O["ch"]
+    if not rows:
+        return None
+    n = max(1, int(n or 1))
+    bar = 240.0 / float(state.get("bpm") or 100)
+    target = target_key(state)
+    semis = np.zeros(len(rows), int)
+    if target:
+        for i, r in enumerate(rows):
+            if r["key_from"] != "none" and r["key"] in NOTES and r["category"] != "Percussion":
+                semis[i] = key_semis(dict(pc=NOTES.index(r["key"]), scale=r["scale"] or "major"), target)
+    H = cycle_harmony(state, n)
+    if H is None:
+        F = np.full((len(rows), n), 0.5)
+    else:
+        F = np.zeros((len(rows), n))
+        for sft in np.unique(semis):
+            m = semis == sft
+            F[m] = np.roll(ch[m], int(sft), axis=1) @ H.T
+    try:
+        from .taste import scores_payload
+        pay = scores_payload(None) or {}
+    except Exception:
+        pay = {}
+    sc, bad = pay.get("score") or {}, set(pay.get("disliked") or [])
+    t = np.array([sc.get(r["path"], np.nan) for r in rows], float)
+    z = (t - np.nanmean(t)) / (np.nanstd(t) + 1e-9) if np.isfinite(t).any() else np.zeros(len(rows))
+    z = np.clip(np.nan_to_num(z), -2, 2)  # your favorites score far above the rest: capped, or they'd be all you get
+    best = F.argmax(1)
+    score = 4.0 * F.max(1) + 0.35 * z
+    if path is not None:
+        idx = [i for i, r in enumerate(rows) if r["path"] == path]
+        if not idx:
+            return None
+        k = idx[0]
+    else:
+        # the dice goes by harmony, so it leaves single drum hits out (you can still choose one yourself)
+        ok = np.array([r["dur"] <= 2 * bar + 0.05 and r["path"] not in bad and r["path"] not in avoid
+                       and r["category"] != "Percussion" and r["kind"] != "loop" for r in rows])  # a loop isn't a hit
+        if not ok.any():
+            return None
+        cand = np.where(ok)[0]
+        top = cand[np.argsort(-score[cand])[:40]]
+        p = np.exp((score[top] - score[top].max()) / 0.35)
+        k = int(rng.choice(top, p=p / p.sum()))
+    r = rows[k]
+    return dict(stem="oneshot", sample=r["path"], sid=r["id"], artist=r["artist"] or "", title=r["title"] or "",
+                sub=r["subtype"], cat=r["category"], dur=round(float(r["dur"]), 2), n=n, steps=[int(best[k]) * 16], every=1,
+                off=0, semis=int(semis[k]), key=(r["key"] + ("m" if r["scale"] == "minor" else "")) if r["key_from"] != "none" else None,
+                fit=[round(float(v), 3) for v in F[k]],
+                why=dict(fit=round(float(F[k].max()), 3), taste=round(float(z[k]), 2)))
+
+
 # ---------------------------------------------------------------- saved combinations
 
 def _mixes(con):

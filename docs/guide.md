@@ -93,6 +93,12 @@ song, its waveform, and the buttons that change the part), and its controls, eac
   liked. **⇄** steps through other stretches of the same stem in the same song.
 - **Sub-bass:** a part that is all below 100 Hz is marked, and gets **HARM** (overtones above 110 Hz) switched on,
   because laptop and other small speakers can't play it otherwise.
+- **✦ One-shot slots** play a library sample (a vocal chop, a short phrase, a stab, a drum hit) at chosen moments
+  instead of looping a stem. The slot shows its cycle (1, 2, 4 or 8 bars) as 16 steps a bar: click a step to place a
+  hit, click again to remove it. **🎲** picks one that fits the harmony (your placement stays), **🔍** searches your
+  library, **▶** plays it once, and **✦ Mashup** in the sample panel sends the sample you're looking at into a
+  one-shot slot. It is shifted to the mashup's key; the bar numbers under the steps are tinted by how well it fits
+  each bar's harmony. *Every time / every 2nd / every 4th* says how often the pattern plays.
 - **Slots:** each slot's menu sets what it plays (drums, bass, vocals, other); **＋ add slot** adds more, up to 8 (a
   second vocal, two drum layers); an empty slot can be removed.
 - **💾 save** keeps a named combination (open it again from the menu next to it).
