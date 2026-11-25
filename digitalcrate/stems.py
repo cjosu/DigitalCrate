@@ -513,9 +513,10 @@ def alts(state, slot):
 
 def log(kind, state, stem=None):
     """What you did. like / dislike / save: the whole combination (every slot). reroll: the slot's part thrown out
-    within a few seconds (weak no). remove: you took it out. kept: it played a good while, or you locked it (weak yes)."""
+    within a few seconds (weak no). remove: you took it out. kept: it played a good while, or you locked it (weak yes).
+    snap: a snapshot was taken with this part in it (weak yes)."""
     y, wgt = {"like": (1, 1.0), "dislike": (0, 1.0), "reroll": (0, 0.4), "kept": (1, 0.4), "lock": (1, 0.6),
-              "save": (1, 1.2), "remove": (0, 0.6)}[kind]
+              "save": (1, 1.2), "remove": (0, 0.6), "snap": (1, 0.6)}[kind]
     con, lib = _db(), library()
     taste, target = _taste(con), target_key(state)
     n = 0

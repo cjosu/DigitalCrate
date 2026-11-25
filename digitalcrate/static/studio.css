@@ -112,3 +112,27 @@ input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#2a2
 .mxlab{font-size:10px;color:var(--mute);margin-right:3px}.mxgrp output{min-width:38px}.mxsl{display:inline-flex;align-items:center}
 .mxname select{font-weight:600;text-transform:capitalize;padding:2px 4px;font-size:12px;max-width:100%}.mxname{width:104px}.mxadd{display:flex;gap:6px;align-items:center;margin:2px 0 6px}
 .mxsongs{margin-top:12px}.mxsongs summary{cursor:pointer;color:var(--mute);font-size:12px}.mxsl2{margin-top:8px;display:grid;gap:4px}.mxsong{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:10px;align-items:center;padding:3px 6px;border-radius:6px}.mxsong:hover{background:#171a20}.mxsn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mxsong .tbtn{padding:1px 5px}
+/* stem mixer snapshots: the strip above the slots (docs/plans/blend.md) */
+.snbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;background:#11141a}
+.snlab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:600}
+.snchip{display:inline-flex;gap:6px;align-items:center;padding:3px 9px 3px 4px;font-size:12px}
+.snchip b{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:5px;background:var(--panel);border:1px solid var(--line);font:600 11px ui-monospace,Menlo,monospace}
+.snchip.on{background:none;color:var(--ink);border-color:var(--acc)}.snchip.on b{background:var(--acc);color:#000;border-color:var(--acc)}
+.sndot{width:7px;height:7px;border-radius:50%;background:var(--c)}.snsep{color:var(--mute)}
+.snbar button:disabled,#pb button:disabled{opacity:.4;cursor:default}
+.tag.hot{color:var(--acc);border-color:var(--acc);margin:0}
+/* playing the strip: the mixer at half width, twice. The left snapshot's slots, the right snapshot's slots, and the
+   transition controls between them, one row per slot */
+.pbhead #pbplay.on{background:var(--acc);color:#000}
+.pbscroll{overflow-x:auto}.pbgrid{min-width:980px}
+.pb3{display:grid;grid-template-columns:minmax(0,1fr) 250px minmax(0,1fr);gap:10px;align-items:stretch;margin-bottom:8px}
+.pbside{display:flex;gap:8px;align-items:center}.pbside.r{justify-content:flex-end}
+.pbletter{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:6px;background:var(--acc);color:#000;font:600 13px ui-monospace,Menlo,monospace}
+.pbletter.idle{background:var(--panel);color:var(--ink);border:1px solid var(--line)}
+.pbslot{display:flex;gap:6px 8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#12151a;min-width:0}
+.pbslot .mxsrc{min-width:0}.pbslot .mxwave{flex:1 0 100%}.pbslot.off{opacity:.45}
+.pbx{display:grid;gap:6px;align-content:center;padding:6px 8px;border:1px dashed var(--line);border-radius:10px}
+.pbxrow{display:flex;gap:6px;align-items:center}.pbxrow select{flex:1;min-width:0;padding:1px 4px;font-size:11px}
+.pbab{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;font:10px ui-monospace,Menlo,monospace;color:var(--mute)}.pbab input{width:100%}
+.pbsame{display:grid;place-items:center;text-align:center;color:var(--mute);font-size:12px;border:1px dashed var(--line);border-radius:10px;padding:6px 8px}
+.pbx.pbmaster{border-style:solid;background:#11141a}

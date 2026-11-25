@@ -99,6 +99,14 @@ all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md]
 - **Per slot:** where the loop starts (◀ ▶), its length (1–8 bars), your own pitch offset (− ＋; drums keep their
   pitch), volume, solo and mute, a 3-band EQ and a tempo-synced delay, each with an on/off switch (**FX** switches them all).
   Everything but pitch, position and length is live.
+- **DUCK** on bass slots (on to begin with): the drums' low end pushes the bass's low end down a few dB, so a kick and
+  a bass line from different songs don't pile up. The slider is how many dB at most.
+- **📸 snapshot** keeps the mixer as it is, in a strip above the slots (A, B, C… up to 8). Click one to bring it back;
+  **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too.
+- **▶ play strip** shows two snapshots side by side, every slot of both, with the transition between them: for each
+  layer that differs a style (filter handoff or crossfade), the bars it changes over, and its own slider. The
+  **master** moves them all. Fully on the right snapshot, the arrow moves the view on. **auto** holds each snapshot,
+  makes the transition over its bars and moves on by itself. The design is in [docs/plans/blend.md](plans/blend.md).
 - **Tempo and key** are the mixer's own. *Auto* key follows the "other" slot. Parts are stretched to the tempo and
   shifted by the smallest interval to the key.
 - **Harmony fit** compares the pitched parts' notes bar by bar after shifting (100% = the same notes). New parts are
