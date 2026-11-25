@@ -99,6 +99,7 @@ def run(redo=False):
                 print(f"    {r['path']}: {str(e)[:80]}", flush=True)
                 continue
             apply(con, r["id"], g)
+            con.commit()  # right away: a write lock held across the next item's audio work blocks the app (saving, ratings) for minutes
             done += 1
             grainy += g >= GRAINY
         con.commit()
@@ -173,10 +174,11 @@ def recut(min_grain=GRAINY, model=None, limit=None):
                 better += 1
             else:
                 con.execute("UPDATE samples SET recut=? WHERE id=?", (model, r["id"]))  # tried: no better
+            con.commit()  # right away: a write lock held across the next item's audio work blocks the app (saving, ratings) for minutes
         except Exception as ex:
+            con.rollback()
             print(f"    {r['path']}: {str(ex)[:100]}", flush=True)
         if k % 10 == 0 or k == len(rows):
-            con.commit()
             print(f"recut: {k}/{len(rows)} [{better} cleaner]", flush=True)
     con.commit()
     if better:  # the page's grain tags and quality follow

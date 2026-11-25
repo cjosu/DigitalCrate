@@ -101,6 +101,8 @@ song, its waveform, and the buttons that change the part), and its controls, eac
   each bar's harmony. *Every time / every 2nd / every 4th* says how often the pattern plays.
   The sample's waveform is drawn at each hit, at its real length. **Trim** (the small waveform in its controls)
   chooses the piece of the sample that plays: drag across it, drag an edge, or double-click for the whole sample.
+  **⤢ fine** opens a large view under the slot for precise trimming: the same drags on a full-width waveform with a
+  time axis (hold shift for ten times finer), 5 ms nudges for the start and end, and exact times.
 - **⧉** duplicates a slot (its part and all its settings) into a new one right below.
 - 🎲 is quick because each slot's next part is picked and rendered ahead of time.
 - **Slots:** each slot's menu sets what it plays (drums, bass, vocals, other); **＋ add slot** adds more, up to 8 (a
