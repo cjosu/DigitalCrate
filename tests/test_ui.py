@@ -1728,10 +1728,9 @@ def test_track_header_holds_every_control(site, page):
     assert page.evaluate(f"[...document.querySelectorAll('.trk')].every(e=>!/{EMOJI}/u.test(e.textContent))")
     assert page.locator('[data-mxrow="bass"] .trmenu').is_hidden()
     _more(page, "bass")
-    items = page.evaluate("""[...document.querySelectorAll('[data-mxrow="bass"] .trmenu [data-mxfind],[data-mxrow="bass"] .trmenu [data-mxalt],
-      [data-mxrow="bass"] .trmenu [data-mxlock],[data-mxrow="bass"] .trmenu [data-mxdup],[data-mxrow="bass"] .trmenu [data-mxdel],
-      [data-mxrow="bass"] .trmenu [data-mxrole],[data-mxrow="bass"] .trmenu [data-mxrm]')].length""")
-    assert items == 7
+    menu = page.locator('[data-mxrow="bass"] .trmenu')
+    assert menu.locator('[data-mxfind], [data-mxalt], [data-mxlock], [data-mxdup], '
+                        '[data-mxdel], [data-mxrole], [data-mxrm]').count() == 7
     page.keyboard.press("Escape")
     assert page.locator('[data-mxrow="bass"].open').count() == 0
     _more(page, "bass"); page.click('[data-mxrow="bass"] [data-mxdup]')
@@ -1740,3 +1739,35 @@ def test_track_header_holds_every_control(site, page):
     os = _one_shot(page)
     assert page.inner_text(f'[data-mxrow="{os}"] .trname').strip() == "One-shot"
     assert page.locator(f'[data-mxrow="{os}"] [data-mxstep]').count() == 16 and page.locator(f'[data-mxrow="{os}"] [data-mxaud]').count() == 1
+
+
+PIXEL = """([slot,x,y])=>{const c=document.querySelector(`[data-mxwave="${slot}"] canvas`),k=c.width/c.clientWidth,
+  d=c.getContext('2d').getImageData(Math.round(x*k),Math.round(y*k),1,1).data;return [d[0],d[1],d[2]]}"""
+
+def test_track_shows_the_whole_song(site, page):
+    _mixer(site, page)
+    page.wait_for_function("['drums','bass','vocals','other'].every(s=>CRATE.TR.has(s))", timeout=20000)
+    g = page.evaluate("""(()=>{const p=CRATE.MX.slots.other,s=CRATE.TR.song(p.track,'other'),c=document.querySelector('[data-mxwave="other"] canvas');
+      return {w:c.clientWidth,h:c.clientHeight,dur:s.dur,a:s.bars[p.bar0],b:s.bars[p.bar0+CRATE.TR.srcBars(p.n,p.k||1)],n:s.pk.length,rate:s.rate}})()""")
+    assert g["rate"] == 400 and abs(g["n"] - g["dur"] * 400) <= 1 and g["b"] > g["a"]
+    xa, xb = g["a"] / g["dur"] * g["w"], g["b"] / g["dur"] * g["w"]
+    col = page.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--KEYS').trim()")
+    rgb = [int(col[i:i + 2], 16) for i in (1, 3, 5)]                                    # ("other" sounds all the way through the test song)
+    assert page.evaluate(PIXEL, ["other", (xa + xb) / 2, 1]) == rgb                     # the bar joining the loop's edges
+    outside = xb + 20 if xb + 20 < g["w"] else xa - 20
+    assert page.evaluate(PIXEL, ["other", outside, 1]) != rgb
+    assert page.evaluate(PIXEL, ["other", (xa + xb) / 2, g["h"] / 2]) == rgb            # lit inside the loop
+    assert page.evaluate(PIXEL, ["other", outside, g["h"] / 2]) == [0x39, 0x40, 0x4b]   # gray outside it
+    left = page.evaluate("parseFloat(document.querySelector('[data-mxwave=\"other\"] i').style.left)/100")
+    assert xa / g["w"] - 0.01 <= left <= xb / g["w"] + 0.01                             # the play line is inside the loop
+    assert page.inner_text('[data-mxrow="other"] .trbars') == page.evaluate("CRATE.TR.barsText(CRATE.MX.slots.other)")
+
+def test_track_plays_without_its_picture(site, page):
+    """The picture can't be had: the track still shows its loop and plays."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout
+    page.evaluate("(()=>{const a=CRATE.api;CRATE.api=(p,b)=>p==='api/stems/peaks'?Promise.reject(new Error('no picture')):a(p,b)})()")
+    page.click("#tabM"); page.wait_for_selector("#mxall"); page.click("#mxall")
+    page.wait_for_function("CRATE.MX.on&&['drums','bass','vocals','other'].every(s=>CRATE.MX.slots[s]&&CRATE.MX.slots[s].buf)", timeout=90000)
+    assert page.evaluate("CRATE.TR.has('drums')") is False
+    page.wait_for_function("(()=>{const b=document.querySelector('[data-mxwave=\"drums\"]');return b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'})()")

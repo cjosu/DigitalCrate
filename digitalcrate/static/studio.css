@@ -174,3 +174,4 @@ body.mash .projbar{display:none}
 .trmenu [aria-pressed=true]{color:var(--acc)}.trmenu [aria-pressed=true]::after{content:"✓";float:right}
 #mxall{display:inline-flex;align-items:center;gap:5px}
 .mxrvb{display:inline-flex;gap:6px;align-items:center}.mxrvb input[type=range]{width:64px}.mxrvb output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);min-width:36px}
+.trk .trwave canvas{opacity:1}

@@ -2596,6 +2596,118 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     });
   };
 
+  const pictures = new Map();
+  const pictureKey = (track, stem) => track + ':' + stem;
+  TR.load = (track, stem) => {
+    const key = pictureKey(track, stem);
+    if (!pictures.has(key)) {
+      const entry = { song: null };
+      entry.pending = (async () => {
+        try {
+          const { url: path, rate, n, dur, bars } = await window.CRATE.api('api/stems/peaks', { track, stem });
+          const response = await fetch(url(path));
+          if (!response.ok) return null;
+          const pk = new Uint8Array(await response.arrayBuffer());
+          if (!pk.length || pk.length !== n || !(rate > 0) || !(dur > 0) || !Array.isArray(bars) || bars.length < 2) return null;
+          return entry.song = { pk, rate, dur, bars };
+        } catch (e) {
+          return null;
+        }
+      })();
+      pictures.set(key, entry);
+    }
+    return pictures.get(key).pending;
+  };
+  TR.song = (track, stem) => pictures.get(pictureKey(track, stem))?.song || null;
+  const slotSong = id => TR.song(H.part(id)?.track, H.role(id));
+  TR.has = id => !!slotSong(id);
+  const loopTimes = (bars, p) => {
+    const from = clamp(p.bar0, 0, bars.length - 2);
+    const to = Math.min(bars.length - 1, from + TR.srcBars(p.n, p.k));
+    return [bars[from], bars[to]];
+  };
+  const surface = canvas => {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    const g = canvas.getContext('2d');
+    g.scale(dpr, dpr);
+    return { g, w, h, dpr };
+  };
+  TR.drawWave = (canvas, o) => {
+    const { g, w, h, dpr } = surface(canvas), { pk, rate, bars, v0, v1, col, busy } = o;
+    if (!w || !h || v1 <= v0) return;
+    canvas.parentElement.classList.toggle('busy', !!busy);
+    const xAt = t => (t - v0) * w / (v1 - v0);
+    const [a, b] = loopTimes(bars, o), xa = xAt(a), xb = xAt(b);
+    g.fillStyle = '#1a1f27';
+    g.fillRect(xa, 0, xb - xa, h);
+    g.font = '10px ui-monospace, Menlo, monospace';
+    for (let i = TR.floorBar(bars, v0); i < bars.length && bars[i] <= v1; i++) {
+      const x = xAt(bars[i]), gap = xAt(bars[i + 1]) - x;
+      if (gap >= 5) {
+        g.fillStyle = 'rgba(255,255,255,.07)';
+        g.fillRect(x, 0, 1, h);
+      }
+      if (gap >= 34) {
+        g.fillStyle = '#a4adba';
+        g.fillText(String(i + 1), x + 4, h - 4);
+      }
+    }
+    for (let px = 0; px < canvas.width; px++) {
+      const x = px / dpr, t = v0 + x / w * (v1 - v0);
+      const lo = clamp(Math.floor(t * rate), 0, pk.length - 1);
+      const hi = Math.min(pk.length, Math.max(lo + 1, Math.ceil((t + (v1 - v0) / canvas.width) * rate)));
+      let peak = 0;
+      for (let i = lo; i < hi; i++) peak = Math.max(peak, pk[i]);
+      const height = Math.max(1, peak / 255 * (h - 6));
+      g.fillStyle = x >= xa && x < xb ? col : '#39404b';
+      g.fillRect(x, (h - height) / 2, 1 / dpr, height);
+    }
+    g.fillStyle = col;
+    g.fillRect(xa, 0, xb - xa, 3);
+    g.fillRect(xa, 0, 2, h);
+    g.fillRect(xb - 2, 0, 2, h);
+    if (xb - xa >= 26) {
+      g.fillRect(xa, 0, 9, 11);
+      g.fillRect(xb - 9, 0, 9, 11);
+    }
+  };
+  const fallbackWave = (canvas, buffer, col) => {
+    const { g, w, h } = surface(canvas), audio = buffer.getChannelData(0);
+    const peaks = new Float32Array(w), step = audio.length / w;
+    let max = 0;
+    for (let x = 0; x < w; x++) {
+      const end = Math.floor((x + 1) * step);
+      for (let i = Math.floor(x * step); i < end; i += 3) peaks[x] = Math.max(peaks[x], Math.abs(audio[i]));
+      max = Math.max(max, peaks[x]);
+    }
+    g.fillStyle = col;
+    for (let x = 0; x < w; x++) {
+      const amp = Math.max(1, peaks[x] / (max || 1) * h);
+      g.fillRect(x, (h - amp) / 2, 1, amp);
+    }
+  };
+  const waveBox = id => document.querySelector(`.trwave[data-mxwave="${id}"]`);
+  TR.paintWave = id => {
+    const p = H.part(id), box = waveBox(id);
+    if (!p || !box) return;
+    const canvas = box.querySelector('canvas'), col = getComputedStyle(box).getPropertyValue('--trcol').trim();
+    const song = slotSong(id);
+    if (song) {
+      const [v0, v1] = p._v ||= [0, song.dur];
+      TR.drawWave(canvas, { ...song, bar0: p._d?.bar0 ?? p.bar0, n: p._d?.n ?? p.n, k: p.k, v0, v1, col, busy: p._busy });
+    } else if (p.buf) {
+      fallbackWave(canvas, p.buf, col);
+    }
+  };
+  TR.playhead = (id, phase) => {
+    const song = slotSong(id), p = H.part(id);
+    if (!song || !p._v) return phase;
+    const [a, b] = loopTimes(song.bars, p), [v0, v1] = p._v;
+    return (a + phase * (b - a) - v0) / (v1 - v0);
+  };
+
   window.TRACKS = TR;
 })();
 // ---------- 🎛 Mashup (the stem mixer; the tab was called Stems): drums, bass, vocals and "other" from different songs, on one tempo and key
@@ -2649,7 +2761,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     await Promise.all(MX.order.map(async stem=>{const p=MX.slots[stem];
      if(p&&isOS(stem)&&p.sample){const key=MX.key||(MX.info&&MX.info.key)||'',want=p.sample+'|'+key;if(p._key===want&&p.buf)return;p._loading=true;hint(stem);
       try{const ab=await (await fetch(key?window.CRATE.conformURL(p.sample,key,''):url(p.sample))).arrayBuffer();if(MX.slots[stem]!==p)return;p.buf=await AC.decodeAudioData(ab);p._key=want;p._loading=false;p.err=null;if(MX.on){chain(stem);apply(stem)}}catch(e){p._loading=false;p.err=e.message}return}
-     if(!p||p.track==null)return;const shift=((MX.info.slots||{})[stem]||{}).semis||0,semis=TR.semis(shift,p),want=[p.track,p.bar0,p.n,p.k||1,MX.bpm,semis].join('|');
+     if(!p||p.track==null)return;
+     const track=p.track,kind=role(stem);
+     TR.load(track,kind).then(song=>{
+      if(song&&MX.slots[stem]===p&&p.track===track&&role(stem)===kind)TR.paintWave(stem);
+     });
+     const shift=((MX.info.slots||{})[stem]||{}).semis||0,semis=TR.semis(shift,p),want=[p.track,p.bar0,p.n,p.k||1,MX.bpm,semis].join('|');
      p.semis=shift;if(p._key===want&&p.buf){p._loading=false;return}p._loading=true;hint(stem);
      try{const r=await api('api/stems/render',{track:p.track,stem:role(stem),bar0:p.bar0,n:p.n,k:p.k||1,bpm:MX.bpm,semis});const ab=await (await fetch(url(r.url))).arrayBuffer();
       if(MX.slots[stem]!==p)return;p.buf=await AC.decodeAudioData(ab);p._key=want;p._loading=false;p.err=null;p.sub=r.sub||0;if(p.sub>=0.85&&p.harm==null)p.harm=true;startSrc(stem)}catch(e){p._loading=false;p.err=e.message}}));
@@ -2719,19 +2836,18 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     g.fillStyle='#e0a458';g.fillRect(x0,0,Math.max(1,Math.round(dpr)),H);  // where the hit lands, under its step
     g.fillStyle='rgba(255,236,200,.9)';for(let x=0;x<m.length&&x0+x<W;x++){const h=Math.max(1,m[x]/(pk||1)*(H-4));g.fillRect(x0+x,(H-h)/2,1,h)}
     if(x0+wpx>W){g.fillStyle='rgba(255,255,255,.06)';g.fillRect(0,0,x0+wpx-W,H)}})}  // a hit near the end rings into the next time round
- function waves(){MX.order.forEach(stem=>{const p=MX.slots[stem],box=document.querySelector(`[data-mxwave="${stem}"]`);if(p&&p.buf&&box&&isOS(stem)){osWave(stem,p,box);return}if(!p||!p.buf||!box||isOS(stem))return;const c=box.querySelector('canvas'),dpr=devicePixelRatio||1,W=Math.round(box.clientWidth*dpr),H=Math.round((box.clientHeight||34)*dpr);
-   c.width=W;c.height=H;const g=c.getContext('2d'),d=p.buf.getChannelData(0),step=d.length/W,col=getComputedStyle(document.documentElement).getPropertyValue({drums:'--PERC',bass:'--BASS',vocals:'--VOX',other:'--KEYS'}[role(stem)]).trim()||'#8cc0da';
-   let pk=0;const m=new Float32Array(W);for(let x=0;x<W;x++){let v=0;for(let k=Math.floor(x*step),e=Math.min(d.length,Math.floor((x+1)*step));k<e;k+=3)v=Math.max(v,Math.abs(d[k]));m[x]=v;pk=Math.max(pk,v)}
-   // the waveform, over an axis that names the song's own bars (and ticks the beats), so "bars 53–56" can be read off it
-   const ax=Math.round(13*dpr),Hw=H-ax,ns=Math.max(1,Math.round(p.n*(p.k||1)));
-   g.fillStyle=col;for(let x=0;x<W;x++){const h=Math.max(1,m[x]/(pk||1)*Hw);g.fillRect(x,(Hw-h)/2,1,h)}
-   g.fillStyle='#0b0d10';g.fillRect(0,Hw,W,ax);g.font=`${9.5*dpr}px ui-monospace,Menlo,monospace`;g.textBaseline='middle';
-   const every=Math.max(1,Math.ceil(ns*30*dpr/W));  // a label needs about 30 px
-   for(let b=0;b<ns;b++){const x=Math.round(b/ns*W);if(b){g.fillStyle='rgba(255,255,255,.3)';g.fillRect(x,0,1,H)}
-    g.fillStyle='rgba(255,255,255,.22)';for(let q=1;q<4;q++)g.fillRect(Math.round((b+q/4)/ns*W),Hw,1,Math.round(ax*0.4));  // beats
-    if(b%every===0){g.fillStyle='#8a93a0';g.fillText(String(p.bar0+b+1),x+4*dpr,Hw+ax/2+dpr)}}})}
- let phRaf=0;function playheads(){phRaf=0;if(!MX.on||st.tab!=='M')return;MX.order.forEach(stem=>{const p=MX.slots[stem],el=document.querySelector(`[data-mxwave="${stem}"] i`);if(!p||!p.buf||!el)return;
-   const d=isOS(stem)?(p.n||1)*barLenM()*(p.every||1):p.buf.duration,x=(((AC.currentTime-MX.t0)%d)+d)%d/d;el.style.left=(x*100).toFixed(2)+'%';el.style.display='block'});phRaf=requestAnimationFrame(playheads)}
+ function waves(){MX.order.forEach(id=>{
+  if(!isOS(id)){TR.paintWave(id);return}
+  const p=MX.slots[id],box=document.querySelector(`[data-mxwave="${id}"]`);
+  if(p?.buf&&box)osWave(id,p,box);
+ })}
+ window.addEventListener('resize',()=>{if(st.tab==='M')waves()});
+ let phRaf=0;function playheads(){phRaf=0;if(!MX.on||st.tab!=='M')return;MX.order.forEach(id=>{
+  const p=MX.slots[id],el=document.querySelector(`[data-mxwave="${id}"] i`);if(!p?.buf||!el)return;
+  const os=isOS(id),d=os?(p.n||1)*barLenM()*(p.every||1):p.buf.duration;
+  const phase=(((AC.currentTime-MX.t0)%d)+d)%d/d,x=os?phase:TR.playhead(id,phase);
+  el.style.left=(x*100).toFixed(2)+'%';el.style.display=x<0||x>1?'none':'block';
+ });phRaf=requestAnimationFrame(playheads)}
  // open a saved combination (also: back to it as saved, dropping what you changed since)
  async function openSaved(m){const was=MX.on;if(was)play(false);MX.order.forEach(s=>stopSrc(s));
    MX.bpm=m.state.bpm||MX.bpm;MX.key=m.state.key||'';if(m.state.reverb)BLEND.setReverb(MX,m.state.reverb.type,m.state.reverb.decay);MX.slots=JSON.parse(JSON.stringify(m.state.slots||{}));adopt(m.state);BLEND.adopt(MX,m.state);MX.name=m.name;MX.snapsOf=(MX.snaps||[]).length?m.name:null;MX.info=null;MX.savedSig=sig();await sync();MX.order.forEach(apply);play(true);}
