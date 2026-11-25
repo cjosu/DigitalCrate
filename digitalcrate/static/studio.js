@@ -1860,6 +1860,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       lost = before.order.some(id => (before.slots[id] || {}).track != null) && !MX.snaps.some(x => BL.snapSig(x) === sigB);
     const was = MX.on; if (was) H.play(false);
     const put = async (st, sel) => {
+      MX.order.forEach(H.retire);
       MX.order = copy(st.order); MX.roles = copy(st.roles); MX.slots = copy(st.slots); MX.duck = copy(st.duck || {});
       MX.info = null; MX.snapSel = sel;
       await H.sync();
@@ -1964,7 +1965,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     catch (e) { return null; }   // no answer at all: not the same as "this song is no longer prepared"
   };
   const semisOf = (info, id) => (((info || {}).slots || {})[id] || {}).semis || 0;
-  const keyOf = (p, semis) => [p.track, p.stem, p.bar0, p.n, p.k || 1, H.MX.bpm, TRACKS.semis(semis, p), !!p.legacyLoop].join('|');
+  const keyOf = (p, semis) => [p.track, p.stem, p.bar0, p.n, p.k || 1, H.MX.bpm, TRACKS.semis(semis, p), !!p.legacyLoop, !!p.kit].join('|');
   // a part's audio at the mixer's tempo, rendered by the server once and shared
   const bufferOf = (key, p, semis) => {
     if (!PB.cache.has(key)) {
@@ -2013,7 +2014,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       await H.refreshSongs();
       if (my !== PB.seq) return null;
     }
-    if (H.split()) H.save();
+    if (H.split()) {
+      await H.sync();
+      if (my !== PB.seq) return null;
+    }
     const A = MX.snaps[i], B = MX.snaps[i + 1];
     if (!A || !B) return null;
     const info = await Promise.all([infoOf(A), infoOf(B)]);
@@ -2086,7 +2090,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const o = { on: true, fx: MX.fx !== false, bar: H.barLenM(), DT: H.DT };
     for (const r of PB.rows) {
       if (r.kind === 'empty') continue;
-      const set = (v, x, part, duck) => { v.set = x; BL.setXf(v.xf, x, t); BL.applyChain(v.chain, BL.mixOf(part, r.stem, { ...o, duck, hc: v.hc }), t); };
+      const set = (v, x, part, duck) => {
+        v.set = x;
+        BL.setXf(v.xf, x, t);
+        BL.applyChain(v.chain, BL.mixOf(part, part.stem || r.stem, { ...o, duck, hc: v.hc }), t);
+      };
       if (r.kind === 'same') { if (r.va) set(r.va, { gain: 1, hp: 0, lp: nyq }, BL.lerpMix(r.a, r.b, PB.m, o.fx ? r.va.hc : null), ((PB.m < 0.5 ? A : B).duck || {})[r.id]); continue; }
       const b = BL.blendAt(PB.T.layers[r.id].style, PB.pos(r.id), nyq);
       if (r.va) set(r.va, { gain: b.ga, hp: b.hp, lp: nyq }, r.a, (A.duck || {})[r.id]);
@@ -3120,7 +3128,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    mix.duck ||= {};
    for(const id of mix.order||Object.keys(mix.slots||{})){
     const r=mix.roles?.[id]||mix.slots?.[id]?.stem||id;
-    if(r==='other'||r==='tops')mix.duck[id]??={on:false,db:BLEND.VDUCK.db};
+    // A slot that used to play Bass may still have its old Duck setting.
+    if(r==='other'||r==='tops')mix.duck[id]={on:false,db:BLEND.duckDb(mix.duck[id])};
    }
    if(v>=3)continue;
    Object.entries(mix.slots||{}).forEach(([id,p])=>{
@@ -3151,17 +3160,28 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   }
   if(!splits.length)return false;
   const clean=MX.savedSig===sig();
+  const used=new Set(mixes.flatMap(mix=>mix.order||[])),companions=new Map();
+  for(const id of new Set(splits.map(split=>split.id))){
+   const base=id+'~tops';
+   let tops=base;
+   if(mixes.some(mix=>has(mix.slots?.[base])||(mix.roles?.[base]&&mix.roles[base]!=='tops'))){
+    let suffix=2;
+    while(used.has(base+'~'+suffix))suffix++;
+    tops=base+'~'+suffix;
+   }
+   used.add(tops);
+   companions.set(id,tops);
+  }
   const fields=['track','bar0','n','k','off','ct','legacyLoop','artist','title','bars','db','mute','lock',
    'eq','eqOn','dly','dt','fb','dlyOn','rev','revOn'];
   for(const {mix,id,p} of splits){
-   const tops=id+'~tops';
+   const tops=companions.get(id);
    mix.slots[tops]={stem:'tops'};
    for(const field of fields)if(p[field]!==undefined)mix.slots[tops][field]=field==='eq'?p.eq.slice():p[field];
    delete p.kit;
    delete p._key;
   }
-  for(const id of new Set(splits.map(x=>x.id))){
-   const tops=id+'~tops';
+  for(const [id,tops] of companions){
    for(const mix of mixes){
     if(mix.order.includes(tops))continue;
     const at=mix.order.indexOf(id);
@@ -3222,6 +3242,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   const src=AC.createBufferSource(),g=AC.createGain();src.buffer=p.buf;src.loop=true;src.connect(g);g.connect(c.in);g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+0.012);
   const d=p.buf.duration;src.start(when,(((when-MX.t0)%d)+d)%d);p._s={src,g};apply(stem)}  // joins at the right place in the bar
  function stopSrc(stem,when){const p=MX.slots[stem];if(!p||!p._s)return;const t=when||AC.currentTime;try{p._s.g.gain.setTargetAtTime(0,t,0.006);p._s.src.stop(t+0.05)}catch(e){}p._s=null}
+ function retire(id){
+  const c=MX.slots[id]?._c;
+  stopSrc(id);
+  // Release the vocal bus after the source fade while the delay tail rings out.
+  if(c)setTimeout(()=>c.applyVocalDuck({}),150);
+ }
  // one-shots: hits scheduled a little ahead on the mixer's bar clock (16 steps a bar), each through its slot's chain
  let osT=null;const osLive=new Set();
  // one hit of a one-shot: the piece you trimmed it to (the whole sample otherwise), 3 ms in and out so a cut never clicks
@@ -3309,7 +3335,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    if(!owns())return;
    if(kind==='drums'){
     if(whole===false&&p.kit)return true;
-    if(whole)p.kit=true;
+    if(whole&&!p.kit){
+     p.kit=true;
+     const previous=MX.hist[id]?.[MX.hpos[id]];
+     if(sameHistoryPart(previous,snap(id,p)))previous.kit=true;
+    }
    }
    p.buf=buf;
    p._key=want;
@@ -3464,7 +3494,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  // open a saved combination (also: back to it as saved, dropping what you changed since)
  async function openSaved(m){
   if(MX.on)play(false);
-  MX.order.forEach(id=>stopSrc(id));
+  MX.order.forEach(retire);
   const sv=JSON.parse(JSON.stringify(m.state));
   MX.bpm=sv.bpm||MX.bpm;MX.key=sv.key||'';MX.fx=sv.fx!==false;
   if(sv.reverb)BLEND.setReverb(MX,sv.reverb.type,sv.reverb.decay);
@@ -3546,7 +3576,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(!t||t.disabled)return;const ds=t.dataset;
   if(t.id==='mxplay'){play(!MX.on);return}if(t.id==='mxall'){await rollAll();return}
   if(t.id==='mxadd'){const id='s'+Date.now().toString(36);MX.order.push(id);MX.roles[id]=$('mxaddrole').value;save();draw();await roll(id);if(!MX.on)play(true);return}
-  if(ds.mxrm){const id=ds.mxrm;stopSrc(id);delete MX.slots[id];delete MX.roles[id];MX.order=MX.order.filter(x=>x!==id);if(MX.find&&MX.find.stem===id)MX.find=null;await sync();return}
+  if(ds.mxrm){const id=ds.mxrm;retire(id);delete MX.slots[id];delete MX.roles[id];MX.order=MX.order.filter(x=>x!==id);if(MX.find&&MX.find.stem===id)MX.find=null;await sync();return}
   if(t.id==='mxfx'){MX.fx=MX.fx===false;MX.order.forEach(id=>{if(MX.slots[id]){initHarm(id);apply(id)}});save();draw();return}
   if(ds.mxeqon){const p=MX.slots[ds.mxeqon];p.eqOn=p.eqOn===false;apply(ds.mxeqon);save();draw();return}
   if(ds.mxrevon){const p=MX.slots[ds.mxrevon];p.revOn=p.revOn===false;apply(ds.mxrevon);save();draw();return}
@@ -3554,13 +3584,13 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxdlyon){const p=MX.slots[ds.mxdlyon];p.dlyOn=p.dlyOn===false;apply(ds.mxdlyon);save();draw();return}
   if(t.id==='mxclear'){const ns=(MX.snaps||[]).length;  // a clean slate: the snapshot strip goes too (it used to stay, and tag along into the next combination)
    if(ns&&!(MX._clr&&Date.now()-MX._clr<4000)){MX._clr=Date.now();draw();setTimeout(()=>{if(MX._clr&&Date.now()-MX._clr>=3900){MX._clr=0;draw()}},4000);return}  // (kept on MX: a redraw between the two clicks mustn't forget the first)
-   MX._clr=0;MX.order.forEach(s=>{stopSrc(s);delete MX.slots[s]});MX.snaps=[];MX.trans=[];MX.snapSel=null;MX.snapsOf=null;MX.duck={};
+   MX._clr=0;MX.order.forEach(retire);MX.slots={};MX.snaps=[];MX.trans=[];MX.snapSel=null;MX.snapsOf=null;MX.duck={};
    MX.info=null;MX.name='';MX.savedSig=null;save();draw();return}
   if(ds.mxalt){const id=ds.mxalt,p=MX.slots[id],key=[p.track,p.n,role(id),MX.bpm].join('|');
    if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('mashup: '+err.message);return}}
    const A=p._alts||[];if(A.length<2){toast('no other good stretch of this in the song');return}
    const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];delete p.legacyLoop;delete p._viewKey;p.ct=0;p.since=performance.now();p.harm=null;delete p.hup;hpush(id);await sync();return}
-  if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);stopSrc(s);delete MX.slots[s];await sync();return}
+  if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);retire(s);delete MX.slots[s];await sync();return}
   if(ds.mxfind){if(MX.find&&MX.find.stem===ds.mxfind){MX.find=null;draw();return}MX.find={stem:ds.mxfind,q:''};await refreshSongs();draw();return}  // (songs still being prepared show up as they finish)
   if(ds.mxdup){const id=ds.mxdup,p=MX.slots[id];if(!has(p))return;if(MX.order.length>=8){toast('the mashup is full (8 slots)');return}
    const nid='s'+Date.now().toString(36),q={};Object.keys(p).forEach(k=>{if(k[0]!=='_')q[k]=Array.isArray(p[k])?p[k].slice():p[k]});  // everything but its audio chain; the decoded audio is shared
@@ -3623,7 +3653,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(t.id==='mxrvdecay'){BLEND.out(MX,AC);BLEND.setReverb(MX,MX.reverb.type,+t.value);save();markSave();return}  // (on release: the room is rebuilt)
   if(ds.mxrole){const id=ds.mxrole,old=MX.slots[id];if(MX.roles[id]===t.value)return;stopSrc(id);MX.roles[id]=t.value;  // a new role: a new part of that kind, the slot's mix settings stay
    if(old)MX.slots[id]={db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,fb:old.fb,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c,n:old.n,_v:old._v,_viewMode:old._viewMode,_preset:old._preset,_blank:true};
-   await roll(id);if(MX.slots[id]&&MX.slots[id]._blank){delete MX.slots[id];await sync()}return}
+   await roll(id);if(MX.slots[id]&&MX.slots[id]._blank){retire(id);delete MX.slots[id];await sync()}return}
   if(t.id==='mxload'){const m=(MX.saved||[]).find(x=>x.name===t.value);if(!m)return;await openSaved(m);return}
   if(ds.mxwarp){const p=MX.slots[ds.mxwarp];p.warp=+t.value;p._next=null;await sync();return}
   if(ds.mxfade){save();return}
@@ -3643,7 +3673,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   L.addEventListener('dblclick',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;const p=MX.slots[c.dataset.mxtrim];if(p){p.trim=null;save();draw();if(p.warp)sync()}})}
  L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;t.title=dbv(0)+' · double-click for 0 dB';apply(ds.mxdb)}
   save();markSave()});
- BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,ev,barLenM,refreshSongs,split:splitKits});
+ BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,retire,ev,barLenM,refreshSongs,split:splitKits});
  TR.init({MX,AC,role,isOS,part:id=>MX.slots[id],apply,sync,save,mark:markSave,draw,loop:setLoop,pitch:id=>{
   const p=MX.slots[id];
   hpush(id);

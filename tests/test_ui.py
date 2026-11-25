@@ -2126,6 +2126,13 @@ print("GIVEN")
 """
 
 
+def _give_tops(site, track):
+    site["tops_cleanup"].append(site["tops_dir"] / f"t{track}" / "tops.flac")
+    r = subprocess.run([sys.executable, "-c", GIVE_TOPS.replace("TID", str(track))], env=site["env"],
+                       capture_output=True, text=True)
+    assert "GIVEN" in r.stdout, r.stderr[-2000:]
+
+
 def _old_state(site, page, track, snap_only=False):
     """A mixer as it was saved before Tops: four tracks, a Drums part with settings of its own, one snapshot, v 2, clean."""
     _kits(site); _mixer(site, page); _roll(page, "drums", track)
@@ -2176,9 +2183,8 @@ def test_a_part_split_once_its_song_has_tops(site, page):                       
     _roll(page, "drums", 902)                                                            # a new part of a song without tops
     assert page.evaluate("CRATE.MX.slots.drums.kit") is True
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.drums.kit") is True
-    site["tops_cleanup"].append(site["tops_dir"] / "t902" / "tops.flac")
-    r = subprocess.run([sys.executable, "-c", GIVE_TOPS.replace("TID", "902")], env=site["env"], capture_output=True, text=True)
-    assert "GIVEN" in r.stdout, r.stderr[-2000:]
+    assert page.evaluate("CRATE.MX.hist.drums[CRATE.MX.hpos.drums].kit") is True
+    _give_tops(site, 902)
     page.evaluate("CRATE.TR.set('drums','st',1)")                                        # any new render: the list of songs is still stale
     page.wait_for_function("CRATE.MX.slots['drums~tops']&&CRATE.MX.slots['drums~tops'].track===902&&CRATE.MX.slots['drums~tops'].buf&&!CRATE.MX.slots.drums.kit", timeout=60000)
     assert page.evaluate("CRATE.MX.slots['drums~tops'].off") == 1
@@ -2318,3 +2324,94 @@ def test_state_saved_before_the_vocal_duck_is_not_ducked(site, page):
     page.click("#mxclear"); page.click("#mxclear")                                   # a clean slate ducks as a new mixer does
     _roll(page, "other", 902); _roll(page, "vocals", 901)
     page.wait_for_function("CRATE.MX.slots.other._c&&CRATE.MX.slots.other._c.vbanded===true")
+
+
+def test_playback_ducks_under_the_vocals(site, page):
+    _strip(site, page)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    assert page.evaluate("CRATE.PB.voice('other','a').chain.vbanded") is True        # A's Other, under the vocal
+    assert page.evaluate("(()=>{const c=CRATE.PB.voice('vocals','a').chain;return c.vducked||c.vbanded})()") is False
+    assert page.evaluate("CRATE.PB.voice('bass','a').chain.ducked") is True          # and the bass's own duck is as it was
+
+
+def test_playback_ducks_each_side_by_its_own_role(site, page):
+    _kits(site)
+    _mixer(site, page)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===1")
+    _more(page, "other")
+    page.select_option('[data-mxrole="other"]', "tops")
+    page.wait_for_function("CRATE.MX.slots.other?.stem==='tops'&&CRATE.MX.slots.other.buf&&!CRATE.MX.slots.other._loading")
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===2")
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    assert page.evaluate("""() => ['a','b'].map(side => {
+        const {vbanded, vducked} = CRATE.PB.voice('other', side).chain;
+        return [vbanded, vducked];
+    })""") == [[True, False], [False, True]]
+
+
+def test_vocal_duck_migration_ignores_a_previous_bass_setting(site, page):
+    _mixer(site, page)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===1")
+    # Earlier builds kept a slot's Bass setting when Plays changed its role to Other.
+    page.evaluate("""() => {
+        const s = JSON.parse(localStorage.getItem('dcStems'));
+        s.v = 3;
+        for (const mix of [s, ...s.snaps]) mix.duck.other = {on: true, db: 12};
+        const mark = JSON.parse(CRATE.mxSig(3));
+        mark.snaps = s.snaps;
+        s.savedSig = JSON.stringify(mark);
+        localStorage.setItem('dcStems', JSON.stringify(s));
+    }""")
+    page.reload()
+    page.wait_for_function("CRATE.MX?.slots.other?.buf", timeout=60000)
+    assert page.evaluate("[CRATE.MX.duck.other, CRATE.MX.snaps[0].duck.other]") == [{"on": False, "db": 12}] * 2
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+
+
+def test_tops_split_keeps_an_edited_companion_track(site, page):
+    _old_state(site, page, 904)
+    page.wait_for_function("CRATE.MX.slots['drums~tops']?.buf", timeout=60000)
+    _roll(page, "drums~tops", 905)
+    _roll(page, "drums", 902)
+    _give_tops(site, 902)
+    page.evaluate("async () => { await CRATE.mxRefreshSongs(); await CRATE.mxSync(); }")
+    assert page.evaluate("CRATE.MX.slots['drums~tops'].track") == 905
+    assert page.evaluate("""() => {
+        const m = CRATE.MX;
+        const id = m.order.find(id => m.roles[id] === 'tops' && m.slots[id]?.track === 902);
+        return !!id && m.snaps[0].order.includes(id) && m.snaps[0].slots['drums~tops'].track === 904;
+    }""")
+
+
+def test_playback_reloads_drums_after_a_kit_split(site, page):
+    _old_state(site, page, 901)
+    page.wait_for_function("CRATE.MX.slots.drums?.buf", timeout=60000)
+    for count in (2, 3):
+        page.click("#sncap")
+        page.wait_for_function("n => CRATE.MX.snaps.length === n", arg=count)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.ready&&CRATE.PB.playing&&CRATE.PB.nextReady", timeout=60000)
+    page.evaluate("window.wholeDrums = CRATE.PB.voice('drums','a').buf")
+    _give_tops(site, 901)
+    _set(page, "#pbm", 100)
+    page.click("#pbnext")
+    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.ready", timeout=60000)
+    assert page.evaluate("CRATE.PB.voice('drums','a').buf !== wholeDrums && !!CRATE.PB.voice('drums~tops','a')")
+    page.click("#pbback")
+    assert page.evaluate("!!CRATE.MX.slots['drums~tops'].buf")
+
+
+def test_vocal_duck_releases_a_discarded_mixer_chain(site, page):
+    _mixer(site, page)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===1")
+    page.evaluate("window.previousOther = CRATE.MX.slots.other._c")
+    assert page.evaluate("previousOther.vbanded")
+    page.click('[data-sn="0"]')
+    page.wait_for_function("CRATE.MX.slots.other._c?.vbanded && CRATE.MX.slots.other._c !== previousOther")
+    page.wait_for_function("!previousOther.vbanded", timeout=1500)

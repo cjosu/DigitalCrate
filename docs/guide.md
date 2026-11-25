@@ -112,8 +112,11 @@ Hover over the song for the full name and why that part was picked.
   The dots on EQ, Delay and Reverb turn them on or off and keep their settings. **FX** switches those effects and
   harmonics together.
 - On stem tracks, **Harmonics** adds overtones above 110 Hz while keeping the volume steady. A pure sub-bass starts
-  at 100% so it can be heard on small speakers. **Duck** on Bass starts on at 3 dB. The drums' low end pushes down the bass's low end
-  by up to the amount shown under **lows**.
+  at 100% so it can be heard on small speakers.
+- **Duck** starts on at 3 dB. Drums lower the Bass track's lows. Vocals lower the whole Tops track and the bands of
+  Other where the voice is loud. Drag the amount from 0 to 12 dB to set the limit for each dip. **FX** leaves
+  Duck as you set it. A muted vocal ducks nothing. Combinations saved before vocal ducking open with it off on
+  Tops and Other.
 - **One-shot tracks** play a library sample at chosen moments. Set a cycle of 1, 2, 4 or 8 bars and click a step to
   place or remove a hit. The die picks a sample that fits and keeps your steps. **Choose a sample** searches the
   library, **▶** plays it once, and **✦ Mashup** in the sample panel sends the current sample to a one-shot track.

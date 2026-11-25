@@ -23,6 +23,7 @@ line from different songs don't pile up.
 - Measured in Chrome with a kick on every beat at the loudness the server gives every part: at 3 dB the bass's 55 Hz
   drops 2.8 dB under the kick and is back between kicks, and its 440 Hz moves by less than 0.05 dB.
 - The FX switch does not turn it off: it is a mix fix, not an effect.
+- Vocals feed a second bus that ducks Tops and Other. See [the tracks plan](tracks.md).
 
 **2. Snapshots.** A snapshot is every slot as it is now (the part, its bars, pitch, volume, EQ, delay, duck), in the
 shape the mixer already saves.

@@ -1,6 +1,6 @@
 # Plan: Mashup tracks (the whole song under every loop, effects you drag, Tops and a vocal duck)
 
-Status: parts 1 and 2 built (tracks, the loop, pitch, the row of effects, harmonics as an amount, and Tops). The vocal duck is next.
+Status: built (tracks, the loop, pitch, the row of effects, harmonics as an amount, Tops and the vocal duck).
 
 ## The idea
 
@@ -153,7 +153,9 @@ inside it. Every track's settings are in view at once; there is nothing to selec
 - Songs that give only their vocals (the source policy) give no Tops.
 - The bass still ducks under Drums alone.
 
-**6. The vocal duck.** The louder the vocals, the more Tops and Other drop, across the whole range.
+**6. The vocal duck.** The louder the vocals, the more Tops and Other drop. Tops drop across the whole range.
+Other drops in six bands, each according to how loud the voice is there.
+- Other keeps its lows and its top. The whole-track dip reaches hats above the voice.
 - Every Vocals track, after its volume, feeds one more bus (so a muted vocal ducks nothing). Its level, smoothed,
   turns Tops and Other down by up to the amount set on each: 3 dB to begin with, on.
 - It sits in the row of effects of Tops and Other as **Duck**, like the bass's own, and is built the same way.
@@ -251,6 +253,7 @@ Each leaves Mashup working. The work starts from `main`.
 - A Drums waveform drawn before a song's Tops were made stays until the page is reloaded.
 - Zoomed all the way out on a long song, a one-bar loop is a few pixels wide.
 - The vocal duck follows how loud the vocal is, breaths and held notes included.
+- In the offline browser test at 0.08 RMS, Tops drops 3.0 dB or 12.0 dB at those settings, and at 12 dB Other drops about 8 dB near 250 and 500 Hz and less than 1.5 dB at 60 Hz, 4 kHz and 8 kHz. Both recover between phrases.
 
 ## Left for later
 
