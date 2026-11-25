@@ -2777,3 +2777,30 @@ def test_other_take_keeps_driven_harmonics_if_render_fails(site, page):
     page.evaluate("CRATE.TR.set('other','harm',100)")
     assert page.evaluate(f"!{p}.hk&&{p}.buf===oldOther.buf&&{p}._hc===oldOther.hc")
     page.wait_for_function(f"Math.abs({p}._c.hg.gain.value-0.35)<0.001&&{p}._c.hgo.gain.value<0.001")
+
+
+def test_octave_duplicate_gets_the_pending_one_shot_measurement(site, page):
+    _mixer(site, page)
+    slot = _one_shot(page)
+    page.evaluate("""id => {
+        const part = CRATE.MX.slots[id], original = BLEND.harmMeasure;
+        const target = part.buf.duration / 2;
+        BLEND.harmMeasure = async (buf, kind) => {
+            if (kind === 'oct' && Math.abs(buf.duration - target) < 0.001) {
+                BLEND.harmMeasure = original;
+                await new Promise(resolve => { window.releaseDuplicateMeasure = resolve; });
+            }
+            return original(buf, kind);
+        };
+        window.beforeDuplicateMeasure = part._hc;
+        void CRATE.TR.set(id, 'st', 12);
+    }""", slot)
+    page.wait_for_function("typeof window.releaseDuplicateMeasure === 'function'")
+    _more(page, slot)
+    page.click(f'[data-mxdup="{slot}"]')
+    copy = page.evaluate("id => CRATE.MX.order[CRATE.MX.order.indexOf(id) + 1]", slot)
+    page.evaluate("releaseDuplicateMeasure()")
+    page.wait_for_function("""([id, copy]) => {
+        const original = CRATE.MX.slots[id], duplicate = CRATE.MX.slots[copy];
+        return original._hc !== beforeDuplicateMeasure && duplicate._hc === original._hc;
+    }""", arg=[slot, copy], timeout=2000)

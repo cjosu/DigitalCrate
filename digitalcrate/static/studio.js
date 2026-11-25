@@ -2716,7 +2716,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const rev = device('rev', toggle('revon', 'Reverb', p.revOn !== false) +
       num('rev', 'amount'), fx && p.revOn !== false);
     const octave = toggle('hk', 'Octave', p.hk === 'oct',
-      'Octave: adds the octave above the lows, cleanly. Off: the driven sound, with more of the higher overtones (it carries on small speakers)');
+      'Add the octave above the lows. Switch off for the driven sound and higher overtones that carry on small speakers.');
     let tail;
     if (H.isOS(id)) {
       const harmOn = BLEND.harmAmt(p) > 0;
@@ -3689,6 +3689,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    hpush(nid);if(MX.on){if(isOS(nid)){chain(nid);apply(nid)}else startSrc(nid)}
    save();draw();toast('duplicated: change the copy from here');
    if(q._loading||q.err)await sync();
+   else if(isOS(nid))await refreshShot(nid);
    return}
   if(ds.mxtrimopen){MX.trimOpen=MX.trimOpen===ds.mxtrimopen?null:ds.mxtrimopen;draw();return}
   if(ds.mxtrimall){const p=MX.slots[ds.mxtrimall];p.trim=null;save();draw();refreshShot(ds.mxtrimall);return}
