@@ -621,6 +621,13 @@ class Handler(SimpleHTTPRequestHandler):
                     picture = SM.peaks(req["track"], req["stem"])
                     picture["url"] = str(picture.pop("path").relative_to(C.LIB_ROOT))
                     return self._json(picture)
+                if what == "oswarp":
+                    f = SM.oneshot_warp(req["sample"], req.get("key"), req.get("trim"), float(req["beats"]),
+                                        float(req.get("bpm") or 100), float(req.get("semis") or 0))
+                    return self._json(dict(url=str(f.relative_to(C.LIB_ROOT))))
+                if what == "export":
+                    return self._json(SM.export(req.get("name") or "Mashup", float(req.get("bpm") or 100), req.get("key"),
+                                                req.get("sections") or [], req.get("bars") or 8, req.get("reveal", True)))
                 if what == "oneshot":
                     return self._json(dict(part=SM.oneshot(state, req.get("n") or 1, set(req.get("avoid") or []),
                                                            path=req.get("path")), info=SM.info(state)))

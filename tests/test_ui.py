@@ -988,11 +988,11 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={before[0]}&&p.bar0==={before[1]}&&p.buf&&!p._loading}})()", timeout=120000)
     page.click(f'[data-mxhist="{stem}:1"]')
     page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={after[0]}&&p.bar0==={after[1]}&&p.buf&&!p._loading}})()", timeout=120000)
-    # a part that is all sub-bass gets harmonics by itself (small speakers can't play it), and says so
-    b = next((k for k in page.evaluate("CRATE.MX.order") if page.evaluate(f"CRATE.MX.roles['{{}}']".format(k)) == "bass" and page.evaluate(f"!!CRATE.MX.slots['{{}}']".format(k))), None)
-    if b:
-        page.wait_for_function(f"CRATE.MX.slots['{b}'].sub>=0.85&&CRATE.MX.slots['{b}'].harm===1", timeout=30000)
-        assert "sub-bass" in page.locator(f'[data-mxrow="{b}"] .mxsrc').inner_text()
+    # Use the C bass at its original pitch. A key-shifted deal can move a bass above the sub-bass cutoff.
+    page.select_option("#mxkey", "C")
+    _roll(page, "bass", 901)
+    page.wait_for_function("CRATE.MX.slots.bass.sub>=0.85&&CRATE.MX.slots.bass.harm===1")
+    assert "sub-bass" in page.locator('[data-mxrow="bass"] .mxsrc').inner_text()
     # the list of prepared songs, and a stem button that puts a song straight into a slot of that kind
     page.click("#mxsongs summary")
     page.wait_for_function("document.querySelectorAll('#mxsongs .mxsong').length===3", timeout=10000)
@@ -1043,6 +1043,23 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
     page.evaluate(f"CRATE.TR.setLoop('{stem}',CRATE.MX.slots['{stem}'].bar0,2)")   # (the saved one had 4 bars: 2 again, for the reload check below)
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
+    # ⌘S on this tab saves the mashup (it used to save the sketch)
+    page.evaluate(f"(()=>{{const e=document.querySelector('[data-mxdb=\"{stem}\"]');e.value=-5;e.dispatchEvent(new Event('input',{{bubbles:true}}))}})()")
+    assert "dirty" in page.locator("#mxsave").get_attribute("class")
+    page.keyboard.press("Meta+s")
+    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
+    # ⇩ Ableton sends the mixer as one section (or its snapshots, in order), with every slot's part and level
+    sent = []
+    def _grab(route):
+        sent.append(json.loads(route.request.post_data))
+        route.fulfill(status=200, body=json.dumps(dict(als="x.als", tracks=4, clips=4, sections=1, bars=8)))
+    page.route("**/api/stems/export", _grab)
+    page.click("#mxexport")
+    page.wait_for_function("document.querySelector('#toast').textContent.includes('Live set')", timeout=10000)
+    page.unroute("**/api/stems/export")
+    ex = sent[0]
+    assert ex["bpm"] == 100 and len(ex["sections"]) == 1 and ex["bars"] == 8
+    assert ex["sections"][0]["slots"][stem]["track"] == saved_track and ex["sections"][0]["slots"][stem]["db"] == -5
     # another slot (a second "other"), then its role changed to vocals: a part of the new kind comes in
     page.select_option("#mxaddrole", "other")
     page.click("#mxadd")
@@ -1582,6 +1599,19 @@ def test_mashup_one_shot_slot(site, page):
     assert "start" in page.inner_text(f'[data-mxtrimtxt="{sid}"]')
     page.click(f'[data-mxtrimall="{sid}"]')
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].trim") is None
+    # fades, and warping the piece to an exact length at the tempo (its pitch kept)
+    page.evaluate(f"(()=>{{const e=document.querySelector('[data-mxfade=\"{sid}:fout\"]');e.value=120;e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}))}})()")
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].fout") == 120
+    beat = 60 / page.evaluate("CRATE.MX.bpm")
+    fit = next(b for b in (1, 2, 4, 8) if 0.45 < b * beat / dur < 2.4)
+    _calls(page)
+    page.select_option(f'[data-mxwarp="{sid}"]', str(fit))
+    page.wait_for_function(f"(p=>p.warp==={fit}&&p.wbuf&&Math.abs(p.wbuf.duration-{fit * beat})<0.01)(CRATE.MX.slots['{sid}'])", timeout=120000)
+    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/oswarp').at(-1)[1].semis") == 5.25
+    page.evaluate("id=>CRATE.TR.set(id,'ct',-20)", sid)
+    page.wait_for_function("id=>CRATE.MX.slots[id]._wkey?.endsWith('|4.8')", arg=sid)
+    page.select_option(f'[data-mxwarp="{sid}"]', "0")
+    page.wait_for_function(f"!CRATE.MX.slots['{sid}'].wbuf", timeout=20000)
     page.click(f'.mxtrimbar [data-mxtrimopen="{sid}"]')              # done
     assert page.locator(".mxtrimbox").count() == 0
     # ⧉ duplicate: the same sample, placement and settings in a new slot right below

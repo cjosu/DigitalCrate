@@ -680,3 +680,66 @@ def test_legacy_whole_song_loops_keep_their_original_source_span(tmp_path, monke
     assert kept != full and sf.info(kept).frames == sf.info(full).frames
     assert np.max(np.abs(sf.read(kept)[0])) == 0
     assert np.max(np.abs(sf.read(full)[0])) > 0.1
+
+
+def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
+    """The mashup as a Live set, dry: a track per slot, the sections end to end with a locator each, every part a
+    looping clip of exactly its bars; a snapshot's own level is the clip's gain, and a muted slot has no clip."""
+    import gzip, sqlite3, xml.etree.ElementTree as ET
+    import soundfile as sf
+    from digitalcrate import als, stems
+    try:
+        als.template()
+    except FileNotFoundError:
+        pytest.skip("needs Ableton Live installed (its empty set is the starting point)")
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    monkeypatch.setattr(stems.C, "ABLETON_SAMPLES", tmp_path / "ableton")
+    def _con():
+        c = sqlite3.connect(tmp_path / "t.sqlite"); c.row_factory = sqlite3.Row
+        return c
+    monkeypatch.setattr(stems, "connect", _con)
+    stems._LIB.update(n=-1, lib={}); stems._EMB.clear()
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)
+    part = lambda stem, track, **kw: dict(dict(stem=stem, track=track, bar0=4, n=4, k=1, off=0, db=-2), **kw)
+    A = dict(label="A", order=["drums", "other"], roles={}, slots=dict(drums=part("drums", 1), other=part("other", 2, ct=25)))
+    B = dict(label="B", order=["drums", "other"], roles={},
+             slots=dict(drums=part("drums", 1, db=-8), other=part("other", 2, mute=True)))
+    r = stems.export("Unit mash", 100, "C", [A, B], bars=8, reveal=False)
+    assert (r["tracks"], r["clips"], r["sections"]) == (2, 3, 2)
+    dest = tmp_path / "ableton" / "Mashups" / "Unit mash"
+    ls = ET.parse(gzip.open(dest / r["als"])).getroot().find("LiveSet")
+    assert [(l.find("Time").get("Value"), l.find("Name").get("Value")) for l in ls.iter("Locator")] == [("0", "A"), ("32", "B")]
+    tr = [t for t in ls.find("Tracks") if t.tag == "AudioTrack"]
+    clips = [list(t.iter("AudioClip")) for t in tr]
+    assert [len(c) for c in clips] == [2, 1]                                    # the muted "other" has no clip in B
+    d0, d1 = clips[0]
+    assert (d0.get("Time"), d0.find("CurrentEnd").get("Value"), d0.find("Loop/LoopEnd").get("Value"), d0.find("Loop/LoopOn").get("Value")) == ("0", "32", "16", "true")
+    assert abs(float(d1.find("SampleVolume").get("Value")) - 10 ** (-6 / 20)) < 1e-3   # 6 dB lower in B: the clip's gain
+    assert abs(float(tr[0].find("DeviceChain/Mixer/Volume/Manual").get("Value")) - 10 ** (-2 / 20)) < 1e-3
+    for f in (dest / "Parts").glob("*.wav"):                                    # every part is exactly its bars at the tempo
+        i = sf.info(str(f))
+        assert i.frames == round(4 * 240 / 100 * SR)
+    assert "-1.75st" in next(f.name for f in (dest / "Parts").glob("Other*"))  # D major to C plus 25 cents
+
+
+def test_one_shot_export_uses_warp_length_and_fractional_pitch(tmp_path, monkeypatch):
+    import soundfile as sf
+
+    from digitalcrate import conform, stems
+    sample = tmp_path / "sample.wav"
+    sf.write(sample, tone(220, 0.6).T, SR)
+    monkeypatch.setattr(conform, "render", lambda path, key=None: (sample, None))
+    warped = []
+
+    def warp(path, key, trim, beats, bpm, semis):
+        warped.append((beats, semis))
+        return sample
+
+    monkeypatch.setattr(stems, "oneshot_warp", warp)
+    part = dict(sample=sample.name, fit=[0.9], steps=[0], n=1, off=2, ct=25)
+    assert stems.oneshot_loop(part, 100, None, tmp_path / "unwarped.wav") == 4
+    assert warped == []
+    assert stems.oneshot_loop(dict(part, warp=1), 100, None, tmp_path / "warped.wav") == 4
+    assert warped == [(1, 2.25)]
