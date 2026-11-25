@@ -242,9 +242,10 @@ flowchart LR
   mask that flickers from frame to frame between 1 and 8 kHz is the watery "musical noise" separators leave. Grainy cuts
   are tagged and rank lower, and `grain --recut` cuts them again with Demucs's fine-tuned model (`htdemucs_ft`, which
   mining now uses: far less grainy in blind listening) in place, keeping favorites and sketches pointing at them.
-- **Takes:** samples of one song and category that don't overlap and are of similar length group when they are the
-  same drum type and close in sound (drums), share at least half their sung words (vocals), or sound nearly alike
-  and play the same notes (everything else).
+- **Takes:** samples of one song that don't overlap and are of similar length group when they are the same drum
+  type and close in sound (drums), share at least half their sung words (vocals), or (keys, strings, pads and
+  melodies, as one family) sound nearly alike and play the same notes, or play the same notes with a similar sound
+  and the same loudness shape over time: the same figure again in a changed arrangement.
 - **Pads:** chords from [madmom](https://github.com/CPJKU/madmom)'s deep-chroma chord recognizer. A pad holds at
   most 2 distinct chords, with its chroma close to its average throughout and a steady level. Mining also looks for
   pads on purpose: stretches of the instrument stem that hold 1–2 chords, cut into 2, 4 or 8 bars starting on the

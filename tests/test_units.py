@@ -442,6 +442,9 @@ def test_alternate_takes_grouping_rules():
     assert not same_take(v1, v2, 0.8, 0.9, _toks("my love"), _toks("don't go now"))  # other words
     p1, p2 = s("Chords & Keys", "Free", 10, 8.0), s("Chords & Keys", "Free", 40, 8.5)
     assert same_take(p1, p2, 0.95, 0.95, set(), set()) and not same_take(p1, p2, 0.95, 0.6, set(), set())  # same notes
+    # the same figure again in a changed arrangement: same notes, similar sound, the same shape over time
+    assert same_take(p1, p2, 0.85, 0.98, set(), set(), env_sim=0.7)
+    assert not same_take(p1, p2, 0.85, 0.98, set(), set(), env_sim=-0.2)   # same key and instruments, another passage
     assert not same_take(p1, s("Chords & Keys", "Free", 12, 8.0), 0.95, 0.95, set(), set())  # overlapping cuts
     assert not same_take(p1, s("Chords & Keys", "Free", 40, 2.0), 0.95, 0.95, set(), set())  # very different lengths
 
