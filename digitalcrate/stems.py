@@ -15,7 +15,9 @@ shift). There can be any number of slots, several of one stem; a slot without "s
 """
 import hashlib
 import json
+import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +27,7 @@ from .db import connect
 
 DIR = C.DATA_DIR / "stems"
 CACHE = DIR / "cache"
+PEAK_RATE = 400
 STEMS = ("drums", "bass", "vocals", "other")
 PITCHED = ("bass", "vocals", "other")
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -176,27 +179,53 @@ def prepare(n_random=40, limit=None, separate=True):
 
 def src_bars(n, k):
     """How many of the song's bars a part of n mixer bars takes."""
-    return max(1, int(round(n * k)))
+    return max(1, int(n * k + 0.5))
 
 
-def render(track, stem, bar0, n, bpm, semis=0, k=1):
+@contextmanager
+def _cache_output(out):
+    """Publish completed audio and picture files even when requests overlap."""
+    with tempfile.NamedTemporaryFile(dir=out.parent, suffix=out.suffix, delete=False) as tmp:
+        path = Path(tmp.name)
+    try:
+        yield path
+        path.replace(out)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False):
     """n mixer bars of a stem from the song's bar bar0 (n * k of its bars), as a WAV exactly n bars long at bpm,
-    shifted by semis (drums never). -> path"""
+    shifted by semis. Legacy saves retain the source span they played before track editing. -> path"""
     import soundfile as sf
     from .stretch import signalsmith
-    m = library()[int(track)]
-    semis = 0 if stem == "drums" else int(round(semis))
+    track, requested = int(track), int(bar0)
+    m = library()[track]
+    semis = round(float(semis), 2) or 0.0
     bt = m["bars"]
     n, k = max(1, int(n)), float(k or 1)
-    ns = min(src_bars(n, k), len(bt) - 2)
-    bar0 = max(0, min(int(bar0), len(bt) - 1 - ns))
-    h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis}|v3".encode()).hexdigest()[:16]
-    out = CACHE / f"{h}.wav"
+    nb = len(bt) - 1
+    old_ns = min(max(1, round(n * k)), max(1, nb - 1))
+    ns = old_ns if legacy else min(src_bars(n, k), nb)
+    bar0 = max(0, min(requested, nb - ns))
+
+    def cached(start, pitch, version):
+        key = f"{track}|{stem}|{start}|{n}|{k}|{float(bpm):.2f}|{pitch}|{version}"
+        return CACHE / f"{hashlib.sha1(key.encode()).hexdigest()[:16]}.wav"
+
+    old_geometry = legacy and ns != min(src_bars(n, k), nb)
+    out = cached(bar0, f"{semis:.2f}", "v4-legacy" if old_geometry else "v4")
     if out.exists():
         return out
+    source = DIR / f"t{track}" / f"{stem}.flac"
+    # A prepared stem may have vanished while its previously rendered loop is still playable.
+    if (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
+        old = cached(bar0, int(semis), "v3")
+        if old.is_file():
+            return old
     CACHE.mkdir(parents=True, exist_ok=True)
     a, b = int(bt[bar0] * C.SR), int(bt[bar0 + ns] * C.SR)
-    y, _ = sf.read(str(DIR / f"t{track}" / f"{stem}.flac"), start=a, frames=b - a, dtype="float32", always_2d=True)
+    y, _ = sf.read(str(source), start=a, frames=b - a, dtype="float32", always_2d=True)
     y = y.T
     N = int(round(n * 240.0 / float(bpm) * C.SR))
     if semis or abs(N / max(1, y.shape[1]) - 1) > 1e-3:
@@ -211,8 +240,42 @@ def render(track, stem, bar0, n, bpm, semis=0, k=1):
     ramp = np.linspace(0, 1, f, dtype=np.float32)
     y[:, :f] *= ramp
     y[:, -f:] *= ramp[::-1]
-    sf.write(str(out), y.T, C.SR, subtype="PCM_16")
+    with _cache_output(out) as tmp:
+        sf.write(str(tmp), y.T, C.SR, subtype="PCM_16")
     return out
+
+
+def peaks(track, stem):
+    """The whole stem's waveform, one normalized peak byte per 1/400 second."""
+    import soundfile as sf
+
+    track = int(track)
+    m = library()[track]
+    if stem not in STEMS:
+        raise KeyError(stem)
+    source = DIR / f"t{track}" / f"{stem}.flac"
+    out = source.with_suffix(".pk")
+    modified = source.stat().st_mtime_ns
+    with sf.SoundFile(source) as audio:
+        sr = audio.samplerate
+        dur = audio.frames / sr
+        n = (audio.frames * PEAK_RATE + sr - 1) // sr
+        try:
+            cached = out.stat()
+        except FileNotFoundError:
+            cached = None
+        if not cached or cached.st_size != n or cached.st_mtime_ns < modified:
+            peak = np.empty(n, dtype=np.float32)
+            starts = np.arange(PEAK_RATE) * sr // PEAK_RATE
+            for i, block in enumerate(audio.blocks(blocksize=sr, dtype="float32", always_2d=True)):
+                values = np.maximum.reduceat(np.abs(block.mean(axis=1)), starts[starts < len(block)])
+                offset = i * PEAK_RATE
+                peak[offset:offset + len(values)] = values
+            scale = (np.percentile(peak, 99.9) or peak.max()) if n else 0
+            raw = (np.clip(peak / scale, 0, 1) * 255).astype(np.uint8) if scale else np.zeros(n, dtype=np.uint8)
+            with _cache_output(out) as tmp:
+                tmp.write_bytes(raw.tobytes())
+    return dict(path=out, rate=PEAK_RATE, n=n, dur=dur, bars=m["bars"])
 
 
 def sub_share(path):
@@ -313,9 +376,10 @@ def fit(a, b):
 
 
 def _semis(state, stem, part, lib, target=None):
+    off = int(part.get("off") or 0)
     if stem == "drums":
-        return 0
-    return key_semis(lib[int(part["track"])], target or target_key(state)) + int(part.get("off") or 0)
+        return off
+    return key_semis(lib[int(part["track"])], target or target_key(state)) + off
 
 
 def info(state):
@@ -672,8 +736,8 @@ def oneshot_loop(p, bpm, key, out):
     import soundfile as sf
     from .conform import render as conform
     from .stretch import repitch
-    warped = bool(p.get("fit"))
-    src = oneshot_warp(p["sample"], key, p.get("trim"), p["fit"], bpm, p.get("off") or 0) if warped \
+    warped = bool(p.get("warp"))
+    src = oneshot_warp(p["sample"], key, p.get("trim"), p["warp"], bpm, (p.get("off") or 0) + float(p.get("ct") or 0) / 100) if warped \
         else conform(p["sample"], key=key or None)[0]
     y, sr = sf.read(str(src), dtype="float32", always_2d=True)
     y = y.T
@@ -686,8 +750,8 @@ def oneshot_loop(p, bpm, key, out):
         t = p.get("trim") or [0, 1]
         if t[1] - t[0] > 0.005:
             y = y[:, int(t[0] * y.shape[1]):int(t[1] * y.shape[1])]
-        if p.get("off"):
-            y = repitch(y, float(p["off"]))  # as the mixer plays it: pitch and length together
+        if p.get("off") or p.get("ct"):
+            y = repitch(y, float(p.get("off") or 0) + float(p.get("ct") or 0) / 100)  # as the mixer plays it: pitch and length together
     y = y.copy()
     for ms, tail in ((p.get("fin") or 3, False), (p.get("fout") or 3, True)):  # your fades (3 ms at least: no clicks)
         f = min(int(max(3.0, float(ms)) / 1000 * C.SR), y.shape[1] // 2)
@@ -748,11 +812,11 @@ def export(name, bpm, key, sections, bars=8, reveal=True):
             elif p.get("track") is not None and int(p["track"]) in lib:
                 m = lib[int(p["track"])]
                 k, n = float(p.get("k") or 1), int(p.get("n") or 4)
-                semis = (inf.get(sid) or {}).get("semis", 0)
-                src = render(p["track"], role, p["bar0"], n, bpm, semis, k)
+                semis = (inf.get(sid) or {}).get("semis", 0) + float(p.get("ct") or 0) / 100  # as the mixer plays it
+                src = render(p["track"], role, p["bar0"], n, bpm, semis, k, legacy=bool(p.get("legacyLoop")))
                 b0 = int(p["bar0"])
                 f = dest / "Parts" / (_safe(f"{role.capitalize()} - {m['artist']} - {m['title']}")[:64]
-                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+d}st.wav")
+                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+g}st.wav")
                 if not f.exists():
                     shutil.copy2(src, f)
                 beats = n * 4

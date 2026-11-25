@@ -649,3 +649,76 @@ def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
         i = sf.info(str(f))
         assert i.frames == round(4 * 240 / 100 * SR)
     assert "-2st" in next(f.name for f in (dest / "Parts").glob("Other*"))      # D major shifted down to C
+
+
+def test_stem_picture_is_the_whole_stem(tmp_path, monkeypatch):
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    stems._LIB.update(n=-1, lib={})
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    m = stems.library()[1]
+    r = stems.peaks(1, "other")
+    pk = np.fromfile(r["path"], dtype=np.uint8)
+    assert r["rate"] == 400 and r["n"] == len(pk) and abs(len(pk) - r["dur"] * 400) <= 1
+    assert abs(r["dur"] - m["bars"][-1]) < 0.5 and r["bars"] == m["bars"] and pk.max() == 255
+    made = r["path"].stat().st_mtime_ns
+    assert stems.peaks(1, "other")["path"].stat().st_mtime_ns == made          # made once, then kept
+    with pytest.raises(KeyError):
+        stems.peaks(999, "other")
+
+
+def test_parts_take_fractions_of_a_semitone_and_drums_take_your_offset(tmp_path, monkeypatch):
+    import soundfile as sf
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    stems._LIB.update(n=-1, lib={})
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)    # C major
+    _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)    # D major
+    a, b, c = (stems.render(1, "other", 0, 2, 100, semis=s) for s in (0, 0.5, 1))
+    assert len({a, b, c}) == 3 and sf.info(str(b)).frames == round(2 * 240 / 100 * SR)
+    assert stems.render(1, "other", 0, 2, 100, semis=0.5) == b
+    d0, d2 = stems.render(1, "drums", 0, 2, 100, semis=0), stems.render(1, "drums", 0, 2, 100, semis=2)
+    assert d0 != d2 and not np.allclose(sf.read(str(d0))[0], sf.read(str(d2))[0])
+    st = dict(bpm=100, key="C", slots=dict(drums=dict(stem="drums", track=1, bar0=0, n=2, off=2),
+                                           bass=dict(stem="bass", track=2, bar0=0, n=2, off=1)))
+    i = stems.info(st)["slots"]
+    assert i["drums"]["semis"] == 2 and i["bass"]["semis"] == -1
+
+
+def test_a_cached_legacy_loop_survives_a_missing_stem(tmp_path, monkeypatch):
+    import hashlib
+
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", stems.DIR / "cache")
+    stems._LIB.update(n=-1, lib={})
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    made = stems.render(1, "other", 1, 4, 100, semis=-1)
+    legacy_key = hashlib.sha1(b"1|other|1|4|1.0|100.00|-1|v3").hexdigest()[:16]
+    old = made.rename(stems.CACHE / f"{legacy_key}.wav")
+    (stems.DIR / "t1" / "other.flac").unlink()
+    with pytest.raises(FileNotFoundError):
+        stems.peaks(1, "other")
+    assert stems.render(1, "other", 1, 4, 100, semis=-1) == old
+    with pytest.raises(RuntimeError):
+        stems.render(1, "other", 1, 4, 100, semis=-1.5)
+
+
+def test_legacy_whole_song_loops_keep_their_original_source_span(tmp_path, monkeypatch):
+    import soundfile as sf
+
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", stems.DIR / "cache")
+    stems._LIB.update(n=-1, lib={})
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    bars = len(stems.library()[1]["bars"]) - 1
+    source = np.zeros(bars * round(2.4 * SR), dtype=np.float32)
+    source[-round(2.4 * SR):] = tone(220, 2.4)[0]
+    sf.write(stems.DIR / "t1" / "other.flac", source, SR)
+    kept = stems.render(1, "other", 0, bars, 100, legacy=True)
+    full = stems.render(1, "other", 0, bars, 100)
+    assert kept != full and sf.info(kept).frames == sf.info(full).frames
+    assert np.max(np.abs(sf.read(kept)[0])) == 0
+    assert np.max(np.abs(sf.read(full)[0])) > 0.1

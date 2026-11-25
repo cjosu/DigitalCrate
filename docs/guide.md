@@ -80,49 +80,52 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
 
 **🎛 Mashup** recombines songs: drums, bass, vocals and "other" (keys, guitars, pads), each from a different song,
 all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md](plans/stems.md).
-The tab uses the whole window. Each slot has three zones: what it plays (with solo, mute, lock and ✕), the part (the
-song, its waveform, and the buttons that change the part), and its controls, each with its label above it.
+Each track has a header, a waveform and a row of effects. The header shows the stem, the song and the loop's bars.
+Hover over the song for the full name and why that part was picked.
 
-- **Prepare songs first:** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
-  (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used; hip-hop
-  gives vocals only.
-- **🎲** on a slot pulls another part that fits what's playing; **🎲 all** deals every unlocked slot; **🔒** keeps a
-  part; **✕** takes one out; **clear all** empties the mixer. A slot avoids songs already playing in another slot.
-- **🔍** on a slot lets you choose the song: the mixer takes its best-fitting bars.
-- **↶ ↷** step back and forward through the parts a slot has held, so trying something else never loses one you
-  liked. **⇄** steps through other stretches of the same stem in the same song.
-- **Sub-bass:** a part that is all below 100 Hz is marked, and gets **HARM** (overtones above 110 Hz) switched on,
-  because laptop and other small speakers can't play it otherwise.
-- **✦ One-shot slots** play a library sample (a vocal chop, a short phrase, a stab, a drum hit) at chosen moments
-  instead of looping a stem. The slot shows its cycle (1, 2, 4 or 8 bars) as 16 steps a bar: click a step to place a
-  hit, click again to remove it. **🎲** picks one that fits the harmony (your placement stays), **🔍** searches your
-  library, **▶** plays it once, and **✦ Mashup** in the sample panel sends the sample you're looking at into a
-  one-shot slot. It is shifted to the mashup's key; the bar numbers under the steps are tinted by how well it fits
-  each bar's harmony. *Every time / every 2nd / every 4th* says how often the pattern plays.
-  The sample's waveform is drawn at each hit, at its real length. **Trim** (the small waveform in its controls)
-  chooses the piece of the sample that plays: drag across it, drag an edge, or double-click for the whole sample.
-  **⤢ fine** opens a large view under the slot for precise trimming: the same drags on a full-width waveform with a
-  time axis (hold shift for ten times finer), 5 ms nudges for the start and end, and exact times. The same view
-  has **fade in** and **fade out**, and **warp**: fit the piece to ¼, ½, 1 or 2 bars at the tempo, its pitch kept.
+- **Prepare songs first.** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
+  (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used. Hip-hop gives
+  vocals only. Open **songs prepared for Mashup** to put a song's stem straight into a track.
+- **The die** pulls another part that fits what's playing. Each track's next part is picked and rendered ahead of time,
+  and the mixer tries to avoid songs it is already using. **All** deals every unlocked track. **↶ ↷** go back and
+  forward through its parts. **S** solos the track, **M** mutes it, and the volume slider resets to 0 dB on a double-click.
+- **⋯** opens the track's options. **Choose the song** uses its best-fitting bars. **Other takes** goes through other
+  stretches of the same song. **Keep on “all”** locks the part. **Duplicate** copies the track and its settings right
+  below. **Empty this track** takes out its part. **Plays** changes the role, and **Remove the track** removes it.
+  **＋ add slot** adds another track, up to eight. **Clear all** empties the mixer.
+- **Move the loop.** The waveform shows the whole stem, with the loop lit and the rest gray. Drag the right edge to
+  change the length, the left edge to change the start while holding the end, or inside to move the loop. Click the
+  gray to start the loop there. With the waveform focused, **← →** move it and **⇧← ⇧→** shorten or lengthen it.
+  The edges snap to whole mixer bars, up to 16. Half-time snaps to every second song bar and double-time takes two
+  mixer bars per song bar. The old loop keeps playing until the new one is ready.
+- **Zoom and pan.** Pinch or hold **⌘** or **Ctrl** while scrolling to zoom around the pointer, down to two bars.
+  Swipe sideways or drag the gray to pan. Hover over a waveform for **Loop** and **Whole song**. **Loops** and
+  **Whole song** at the top change the view across the mixer. The white line follows playback.
+- **Pitch** takes semitones and cents, including on drums. Drag either number up or down, hold **Shift** for a finer
+  drag, or focus it and press **↑ ↓**. Double-click to reset. The pitch changes when you let go.
+- **Effects** follow as you drag. **EQ** has lo, mid and hi bands at 200 Hz, 1 kHz and 5 kHz. **Delay** has time in
+  notes, feedback and amount. **Reverb** sends to the mixer's room, plate or hall, with the type and decay at the top.
+  The dots on EQ, Delay and Reverb turn them on or off and keep their settings. **FX** switches those effects and
+  harmonics together.
+- On stem tracks, **Harmonics** adds overtones above 110 Hz while keeping the volume steady. A pure sub-bass starts
+  at 100% so it can be heard on small speakers. **Duck** on Bass starts on at 3 dB. The drums' low end pushes down the bass's low end
+  by up to the amount shown under **lows**.
+- **One-shot tracks** play a library sample at chosen moments. Set a cycle of 1, 2, 4 or 8 bars and click a step to
+  place or remove a hit. The die picks a sample that fits and keeps your steps. **Choose a sample** searches the
+  library, **▶** plays it once, and **✦ Mashup** in the sample panel sends the current sample to a one-shot track.
+  The sample follows the mashup's key, and the pitch numbers also change its speed. Bar numbers under the steps are
+  tinted by how well it fits each bar's harmony. **Every time**, **every 2nd** and **every 4th** set how often the
+  cycle plays. The waveform at each hit shows its length. Drag across **Trim** to choose the piece that plays, drag
+  an edge to adjust it, or double-click for the whole sample. **Shape** opens a full-width waveform with a time
+  axis and exact trim times, **fade in** and **fade out**, and **warp**: fit the piece to ¼, ½, 1 or 2 bars at the
+  tempo, its pitch kept. Hold **Shift** while dragging for finer control. The start and end buttons nudge by
+  5 ms, or 1 ms with **Shift**. The **Harmonics** switch adds overtones to low one-shots.
 - **⇩ Ableton** writes the mashup as a Live set, dry: a track per slot, each part a looping clip at the tempo; with
   snapshots, they are laid end to end (4, 8 or 16 bars each) with a marker each. A snapshot's own level becomes the
   clip's gain, and a muted slot has no clip. Parts and set go to `Mashups/<name>/` in your Ableton samples folder.
   The effects are not exported yet ([the plan](plans/mashup-ableton.md)).
 - **⌘S** on this tab saves the mashup.
-- **⧉** duplicates a slot (its part and all its settings) into a new one right below.
-- 🎲 is quick because each slot's next part is picked and rendered ahead of time.
-- **Slots:** each slot's menu sets what it plays (drums, bass, vocals, other); **＋ add slot** adds more, up to 8 (a
-  second vocal, two drum layers); an empty slot can be removed.
 - **💾 save** keeps a named combination (open it again from the menu next to it).
-- Each slot shows its waveform with bar lines and a play line. A song near twice or half the tempo plays half-time or
-  double-time.
-- **Per slot:** where the loop starts (◀ ▶), its length (1–8 bars), your own pitch offset (− ＋; drums keep their
-  pitch), volume, solo and mute, a 3-band EQ, a tempo-synced delay and a reverb send, each with an on/off switch (**FX**
-  switches them all). The reverb is one for the whole mixer (room, plate or hall, with its decay time, at the top).
-  The waveform's axis names the song's own bars.
-  Everything but pitch, position and length is live.
-- **DUCK** on bass slots (on to begin with): the drums' low end pushes the bass's low end down a few dB, so a kick and
-  a bass line from different songs don't pile up. The slider is how many dB at most.
 - **📸 snapshot** keeps the mixer as it is, in a strip above the slots (A, B, C… up to 8). Click one to bring it back;
   **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too. Edits change
   the mixer, not the snapshot it came from: the strip says when the mixer has moved on, and **↻** keeps the change.

@@ -1586,6 +1586,65 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
   BL.setReverb = (MX, type, decay) => { MX.reverb = { type, decay: decay || BL.REVERBS[type].decay }; if (MX.bus && MX.bus.rev) MX.bus.rev.set(type, MX.reverb.decay); };
 
+  const harmonicsPath = ctx => {
+    const drive = ctx.createGain(), shaper = ctx.createWaveShaper(), hp = ctx.createBiquadFilter(),
+      hp2 = ctx.createBiquadFilter(), gain = ctx.createGain(), curve = new Float32Array(1024);
+    for (let k = 0; k < curve.length; k++) curve[k] = Math.tanh(3 * (k / 511.5 - 1));
+    shaper.curve = curve;
+    shaper.oversample = '4x';
+    drive.gain.value = 6;
+    gain.gain.value = 0;
+    hp.type = hp2.type = 'highpass';
+    hp.frequency.value = hp2.frequency.value = 110;
+    drive.connect(shaper);
+    shaper.connect(hp);
+    hp.connect(hp2);
+    hp2.connect(gain);
+    return { in: drive, out: gain, nodes: [drive, shaper, hp, hp2, gain] };
+  };
+  const harmMeasures = new WeakMap();
+  BL.harmMeasure = buf => {
+    if (!harmMeasures.has(buf)) {
+      const measure = (async () => {
+        const ctx = new OfflineAudioContext(buf.numberOfChannels, buf.length, buf.sampleRate);
+        const src = ctx.createBufferSource(), path = harmonicsPath(ctx);
+        src.buffer = buf;
+        src.connect(path.in);
+        path.out.gain.value = 0.35;
+        path.out.connect(ctx.destination);
+        src.start();
+        const wet = await ctx.startRendering();
+        const dry = [], harm = [];
+        for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+          dry.push(buf.getChannelData(ch));
+          harm.push(wet.getChannelData(ch));
+        }
+        let dd = 0, hh = 0, dh = 0;
+        for (let i = 0; i < buf.length; i++) {
+          let d = 0, h = 0;
+          for (let ch = 0; ch < dry.length; ch++) {
+            d += dry[ch][i];
+            h += harm[ch][i];
+          }
+          dd += d * d;
+          hh += h * h;
+          dh += d * h;
+        }
+        return dd ? { r2: hh / dd, c: dh / dd } : { r2: 0, c: 0 };
+      })();
+      harmMeasures.set(buf, measure.catch(() => null));
+    }
+    return harmMeasures.get(buf);
+  };
+  BL.harmAmt = p => BL.clamp01(Number(p.harm) || 0);
+  BL.harmComp = (p, hc) => {
+    if (!hc || p.hup) return 1;
+    const a = BL.harmAmt(p);
+    const ratio = 1 + 2 * a * hc.c + a * a * hc.r2;
+    return ratio > 0 ? 1 / Math.sqrt(ratio) : 1;
+  };
+  BL.legacyHarmDb = (p, hc) => p.hup ? -20 * Math.log10(BL.harmComp({ harm: p.harm }, hc)) : 0;
+
   // a slot's chain: low shelf -> mid -> high shelf -> duck shelf -> volume -> out, a delay send, and a tap to the bus.
   // Harmonics: a sub-bass (everything below 100 Hz) can't be heard on small speakers; a copy of the part driven through
   // a soft clipper makes overtones above 110 Hz that say where the notes are, mixed in under it (hg: how much, 0 = off)
@@ -1596,20 +1655,16 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     lo.type = 'lowshelf'; lo.frequency.value = 200; mid.type = 'peaking'; mid.frequency.value = 1000; mid.Q.value = 0.8;
     hi.type = 'highshelf'; hi.frequency.value = 5000; lp.type = 'lowpass'; lp.frequency.value = 4500; fb.gain.value = 0.35;
     duck.type = 'lowshelf'; duck.frequency.value = BL.DUCK.fc; duck.gain.value = 0; dk.gain.value = 0; key.gain.value = 0;
-    const inp = ctx.createGain(), pg = ctx.createGain(), sh = ctx.createWaveShaper(), hp = ctx.createBiquadFilter(),
-      hp2 = ctx.createBiquadFilter(), hg = ctx.createGain(), cv = new Float32Array(1024);
-    for (let k = 0; k < 1024; k++) cv[k] = Math.tanh(3 * (k / 511.5 - 1));
-    sh.curve = cv; sh.oversample = '4x'; pg.gain.value = 6; hg.gain.value = 0;
-    hp.type = hp2.type = 'highpass'; hp.frequency.value = hp2.frequency.value = 110;
-    inp.connect(lo); inp.connect(pg); pg.connect(sh); sh.connect(hp); hp.connect(hp2); hp2.connect(hg); hg.connect(vol);
+    const inp = ctx.createGain(), harmonics = harmonicsPath(ctx), hg = harmonics.out;
+    inp.connect(lo); inp.connect(harmonics.in); hg.connect(vol);
     lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vol); vol.connect(out);
     vol.connect(send); send.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(out);
     vol.connect(key); key.connect(bus.in); bus.env.connect(dk);
     const rsend = ctx.createGain(); rsend.gain.value = 0;
     if (bus.rev) { vol.connect(rsend); rsend.connect(bus.rev.in); }
     // drop(): take a chain that is no longer used out of the graph (the delay's feedback loop would keep it alive)
-    const drop = () => { bus.env.disconnect(dk); [inp, pg, sh, hp, hp2, hg, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend].forEach(n => n.disconnect()); };
-    return { in: inp, lo, mid, hi, duck, dk, key, vol, send, dl, hg, rsend, ducked: false, drop };
+    const drop = () => { bus.env.disconnect(dk); [inp, ...harmonics.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend].forEach(n => n.disconnect()); };
+    return { in: inp, lo, mid, hi, duck, dk, key, vol, send, dl, fb, hg, rsend, ducked: false, drop };
   };
 
   // s: {gain (linear), eq: [lo, mid, hi] dB, send, delay (s), key (feeds the bus), duck (dB taken off the lows, 0 = off)}
@@ -1618,7 +1673,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     c.vol.gain.setTargetAtTime(s.gain, t, T);
     c.lo.gain.setTargetAtTime(s.eq[0], t, T); c.mid.gain.setTargetAtTime(s.eq[1], t, T); c.hi.gain.setTargetAtTime(s.eq[2], t, T);
     c.send.gain.setTargetAtTime(s.send, t, T); c.dl.delayTime.setTargetAtTime(Math.min(1.9, s.delay), t, T);
-    c.hg.gain.setTargetAtTime(s.harm ? 0.35 : 0, t, T); c.rsend.gain.setTargetAtTime(s.rev || 0, t, T);
+    c.fb.gain.setTargetAtTime(s.fb ?? 0.35, t, T);
+    c.hg.gain.setTargetAtTime(0.35 * (s.harm || 0), t, T); c.rsend.gain.setTargetAtTime(s.rev || 0, t, T);
     c.key.gain.setTargetAtTime(s.key ? 1 : 0, t, T);
     c.dk.gain.setTargetAtTime(-s.duck, t, T);
     const want = s.duck > 0;
@@ -1626,13 +1682,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
 
   // a part's mix settings as applyChain takes them. stem: what its slot plays.
-  // o: {on (audible: not muted, not soloed out), fx, bar (seconds), DT (note value -> share of a bar), duck: {on, db} | undefined}
+  // o: {on (audible: not muted, not soloed out), fx, bar (seconds), hc (harmonics measure), DT (note value -> share of a bar), duck: {on, db} | undefined}
   BL.duckDb = d => d && d.db != null ? Math.max(0, Math.min(BL.DUCK.max, +d.db)) : BL.DUCK.db;
   BL.mixOf = (p, stem, o) => ({
-    gain: o.on ? Math.pow(10, (p.db || 0) / 20) : 0,
+    gain: o.on ? Math.pow(10, (p.db || 0) / 20) * (o.fx ? BL.harmComp(p, o.hc) : 1) : 0,
     eq: o.fx && p.eqOn !== false ? (p.eq || [0, 0, 0]) : [0, 0, 0],
     send: o.fx && p.dlyOn !== false ? (p.dly || 0) : 0,
-    harm: !!(o.fx && p.harm),
+    fb: p.fb ?? 0.35,
+    harm: o.fx ? BL.harmAmt(p) : 0,
     rev: o.fx && p.revOn !== false ? (p.rev || 0) : 0,
     delay: o.bar * (o.DT[p.dt || '1/8'] || 1 / 8),
     key: stem === 'drums',
@@ -1663,12 +1720,6 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
 
   let H = null;   // the mixer's own functions (studio.js): {MX, STEMS, ICON, PITCHED, DT, role, state, save, draw, sync, play, apply, ev, barLenM}
   BL.duckOf = id => H.MX.duck[id] || (H.MX.duck[id] = { on: true, db: BL.DUCK.db });
-  BL.duckHTML = (id, stem) => {
-    if (!H || stem !== 'bass') return '';
-    const d = H.MX.duck[id] || {}, on = d.on !== false;
-    return `<div class="mxc${on ? '' : ' mxoff'}" title="duck: the drums' low end pushes this part's low end down a little, so kick and bass don't pile up · the slider is how many dB at most"><div class="mxl"><button class="tbtn mxtg${on ? ' on' : ''}" data-mxduckon="${id}" title="duck on / off (your setting is kept)">DUCK</button><span>under the drums</span></div><div class="mxv"><input type="range" min="0" max="${BL.DUCK.max}" step="0.5" value="${BL.duckDb(d)}" data-mxduck="${id}"></div></div>`;
-  };
-
   // ---------------------------------------------------------------- snapshots
 
   BL.LETTERS = 'ABCDEFGH';
@@ -1679,7 +1730,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   BL.audible = p => !!p && p.track != null && p.mute !== true;
   // the same audio: volume, EQ, delay and lock do not count
   BL.sameAudio = (a, b) => BL.audible(a) && BL.audible(b) && a.stem === b.stem && a.track === b.track &&
-    a.bar0 === b.bar0 && a.n === b.n && (a.k || 1) === (b.k || 1) && (a.off || 0) === (b.off || 0);
+    a.bar0 === b.bar0 && a.n === b.n && (a.k || 1) === (b.k || 1) && !!a.legacyLoop === !!b.legacyLoop &&
+    TRACKS.semis(a.off || 0, a) === TRACKS.semis(b.off || 0, b);
 
   // one row per slot of two snapshots: [{id, stem, a, b, kind}], kind one of same, change, enter, exit, empty
   BL.diffSnaps = (A, B) => {
@@ -1702,9 +1754,13 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
 
   // has the mixer moved on from the selected snapshot? (what you set: parts, bars, pitch, volume, mute, EQ, delay, duck)
-  BL.snapSig = s => JSON.stringify([(s.order || []).map(id => { const p = (s.slots || {})[id];
-    return [(s.roles || {})[id] || id, p && p.track != null ? [p.track, p.bar0, p.n, p.k || 1, p.off || 0, p.db || 0, !!p.mute,
-      p.eq || [0, 0, 0], p.dly || 0, p.dt || '1/8', p.eqOn !== false, p.dlyOn !== false, p.rev || 0, p.revOn !== false] : null]; }), BL.duckSig(s)]);
+  BL.snapSig = s => JSON.stringify([(s.order || []).map(id => {
+    const p = (s.slots || {})[id];
+    return [(s.roles || {})[id] || id, p && (p.track != null || p.sample) ?
+      [p.track, p.sample, p.steps, p.every, p.trim || null, p.bar0, p.n, p.k || 1, p.off || 0, p.ct || 0, p.db || 0, !!p.mute,
+        p.eq || [0, 0, 0], p.dly || 0, p.dt || '1/8', p.fb ?? 0.35, p.eqOn !== false, p.dlyOn !== false,
+        p.rev || 0, p.revOn !== false, BL.harmAmt(p), !!p.legacyLoop] : null];
+  }), BL.duckSig(s)]);
   // the duck settings of the bass slots with the defaults filled in (a slot's entry is only created when it is first
   // drawn: an absent one and a default one are the same setting, not a change)
   BL.duckSig = s => (s.order || []).filter(id => ((s.roles || {})[id] || id) === 'bass').map(id => { const d = (s.duck || {})[id];
@@ -1808,11 +1864,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
 
   // the mix of a layer that stays, at m: volume, EQ and delay glide; the delay's note value flips halfway
-  BL.lerpMix = (a, b, m) => {
+  BL.lerpMix = (a, b, m, hc) => {
     const L = (x, y) => x + (y - x) * m, eq = p => p.eqOn === false ? [0, 0, 0] : (p.eq || [0, 0, 0]),
       dly = p => p.dlyOn === false ? 0 : (p.dly || 0), rv = p => p.revOn === false ? 0 : (p.rev || 0), ea = eq(a), eb = eq(b);
-    return { db: L(a.db || 0, b.db || 0), eq: [0, 1, 2].map(k => L(ea[k] || 0, eb[k] || 0)), dly: L(dly(a), dly(b)), rev: L(rv(a), rv(b)), revOn: true,
-      dt: (m < 0.5 ? a.dt : b.dt) || '1/8', harm: m < 0.5 ? a.harm : b.harm, eqOn: true, dlyOn: true, mute: false };
+    return { db: L((a.db || 0) + BL.legacyHarmDb(a, hc), (b.db || 0) + BL.legacyHarmDb(b, hc)), eq: [0, 1, 2].map(k => L(ea[k] || 0, eb[k] || 0)), dly: L(dly(a), dly(b)), rev: L(rv(a), rv(b)), revOn: true,
+      dt: (m < 0.5 ? a.dt : b.dt) || '1/8', fb: L(a.fb ?? 0.35, b.fb ?? 0.35), harm: L(BL.harmAmt(a), BL.harmAmt(b)), eqOn: true, dlyOn: true, mute: false };
   };
 
   // ---------------------------------------------------------------- playing the strip
@@ -1842,12 +1898,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     catch (e) { return null; }   // no answer at all: not the same as "this song is no longer prepared"
   };
   const semisOf = (info, id) => (((info || {}).slots || {})[id] || {}).semis || 0;
-  const keyOf = (p, semis) => [p.track, p.stem, p.bar0, p.n, p.k || 1, H.MX.bpm, semis].join('|');
+  const keyOf = (p, semis) => [p.track, p.stem, p.bar0, p.n, p.k || 1, H.MX.bpm, TRACKS.semis(semis, p), !!p.legacyLoop].join('|');
   // a part's audio at the mixer's tempo, rendered by the server once and shared
   const bufferOf = (key, p, semis) => {
     if (!PB.cache.has(key)) {
       const pr = (async () => {
-        const r = await window.CRATE.api('api/stems/render', { track: p.track, stem: p.stem, bar0: p.bar0, n: p.n, k: p.k || 1, bpm: H.MX.bpm, semis });
+        const r = await window.CRATE.api('api/stems/render', { track: p.track, stem: p.stem, bar0: p.bar0, n: p.n, k: p.k || 1, bpm: H.MX.bpm, semis: TRACKS.semis(semis, p), legacy: !!p.legacyLoop });
         const ab = await (await fetch(url(r.url))).arrayBuffer();
         return await AC.decodeAudioData(ab);
       })();
@@ -1875,11 +1931,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     stopVoice(v);
     setTimeout(() => { try { v.chain.drop(); v.xf.out.disconnect(); } catch (e) { } }, 150);   // after the fade
   };
-  const newVoice = (id, key, buf) => {
+  const newVoice = (id, { key, buf, hc }) => {
     const MX = H.MX; BL.out(MX, AC);
     const xf = BL.mkXf(AC), chain = BL.mkChain(AC, MX.master, MX.bus);
     xf.out.connect(chain.in);
-    return { id, key, buf, xf, chain, src: null, g: null, t: 0, set: null };
+    return { id, key, buf, hc, xf, chain, src: null, g: null, t: 0, set: null };
   };
 
   // make snaps[i] and snaps[i + 1] the pair that plays. true: loaded; false: the server did not answer, and the
@@ -1909,11 +1965,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       if (r.b && r.kind !== 'same') want.push({ s: 1, id: r.id, p: r.b, semis: semisOf(info[1], r.id) });
     });
     want.forEach(w => { w.key = keyOf(w.p, w.semis); });
-    const got = await Promise.allSettled(want.map(w => bufferOf(w.key, w.p, w.semis)));
+    const got = await Promise.allSettled(want.map(async w => {
+      const buf = await bufferOf(w.key, w.p, w.semis);
+      return { key: w.key, buf, hc: await BL.harmMeasure(buf) };
+    }));
     if (my !== PB.seq) return null;
     const bufs = {};
     want.forEach((w, k) => {
-      if (got[k].status === 'fulfilled') bufs[w.s + ':' + w.id] = { key: w.key, buf: got[k].value };
+      if (got[k].status === 'fulfilled') bufs[w.s + ':' + w.id] = got[k].value;
       else { drop(w.s, w.id); if (w.same) drop(1, w.id); }
     });
     PB.rows = BL.diffSnaps(sides[0], sides[1]);
@@ -1923,7 +1982,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const voiceFor = (id, b) => {
       const ident = id + '|' + b.key;
       let v = keep.get(ident) || old.get(ident);
-      if (!v) v = newVoice(id, b.key, b.buf);
+      if (!v) v = newVoice(id, b);
       keep.set(ident, v);
       return v;
     };
@@ -1955,8 +2014,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const o = { on: true, fx: MX.fx !== false, bar: H.barLenM(), DT: H.DT };
     for (const r of PB.rows) {
       if (r.kind === 'empty') continue;
-      const set = (v, x, part, duck) => { v.set = x; BL.setXf(v.xf, x, t); BL.applyChain(v.chain, BL.mixOf(part, r.stem, { ...o, duck }), t); };
-      if (r.kind === 'same') { if (r.va) set(r.va, { gain: 1, hp: 0, lp: nyq }, BL.lerpMix(r.a, r.b, PB.m), ((PB.m < 0.5 ? A : B).duck || {})[r.id]); continue; }
+      const set = (v, x, part, duck) => { v.set = x; BL.setXf(v.xf, x, t); BL.applyChain(v.chain, BL.mixOf(part, r.stem, { ...o, duck, hc: v.hc }), t); };
+      if (r.kind === 'same') { if (r.va) set(r.va, { gain: 1, hp: 0, lp: nyq }, BL.lerpMix(r.a, r.b, PB.m, o.fx ? r.va.hc : null), ((PB.m < 0.5 ? A : B).duck || {})[r.id]); continue; }
       const b = BL.blendAt(PB.T.layers[r.id].style, PB.pos(r.id), nyq);
       if (r.va) set(r.va, { gain: b.ga, hp: b.hp, lp: nyq }, r.a, (A.duck || {})[r.id]);
       if (r.vb) set(r.vb, { gain: b.gb, hp: 0, lp: b.lp }, r.b, (B.duck || {})[r.id]);
@@ -2065,7 +2124,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       const p = (C.slots || {})[id];
       if (!BL.audible(p) || !(info.slots || {})[id]) return;   // the server does not answer for a song no longer prepared
       const semis = semisOf(info, id), key = keyOf(p, semis);
-      keys.add(key); work.push(bufferOf(key, p, semis));
+      keys.add(key); work.push(bufferOf(key, p, semis).then(BL.harmMeasure));
     });
     PB.used.set(i + 2, keys);
     await Promise.allSettled(work);   // a failed render counts as loaded: that part will show as missing
@@ -2288,7 +2347,6 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     L.addEventListener('input', e => {
       if (st.tab !== 'M') return;
       const t = e.target, ds = t.dataset || {};
-      if (ds.mxduck) { BL.duckOf(ds.mxduck).db = +t.value; H.apply(ds.mxduck); return; }
       // read the hand's value first: switching auto off repaints the sliders
       if (t.id === 'pbm') { const v = +t.value / 100; if (PB.auto) PB.setAuto(false); PB.setMaster(v); return; }
       if (ds.pbpos) { const v = +t.value / 100; if (PB.auto) PB.setAuto(false); PB.setHand(ds.pbpos, v); return; }
@@ -2308,10 +2366,651 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.BLEND = BL;
 })();
 // ---------- end of stem blends
+// ---------- Mashup tracks: loop, waveform and controls
+(() => {
+  const TR = {};
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const step = k => k === 2 ? 2 : 1;
+  const nOf = (s, k) => s / k;
+
+  TR.MAXN = 16;
+  TR.srcBars = (n, k = 1) => Math.max(1, Math.round(n * k));
+  TR.floorBar = (bars, t) => {
+    let lo = 0, hi = bars.length - 1;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (bars[mid] <= t) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  };
+  TR.nearLine = (bars, t) => {
+    const i = TR.floorBar(bars, t);
+    return t - bars[i] < bars[i + 1] - t ? i : i + 1;
+  };
+  const snapped = (length, available, k) => {
+    const stride = step(k);
+    const limit = Math.min(TR.MAXN * k, Math.floor(available / stride) * stride);
+    return clamp(Math.round(length / stride) * stride, Math.min(stride, available), limit || available);
+  };
+  TR.resizeEnd = (p, line, nb) => {
+    const k = p.k || 1, bar0 = clamp(p.bar0, 0, nb - 1);
+    const s = snapped(line - bar0, nb - bar0, k);
+    return { bar0, n: Math.max(1, nOf(s, k)) };
+  };
+  TR.resizeStart = (p, line, nb) => {
+    const k = p.k || 1, end = Math.min(nb, p.bar0 + TR.srcBars(p.n, k));
+    const s = snapped(end - line, end, k);
+    return { bar0: end - s, n: Math.max(1, nOf(s, k)) };
+  };
+  TR.moveTo = (p, bar, nb) => {
+    const k = p.k || 1;
+    const n = clamp(p.n, 1, Math.min(TR.MAXN, Math.floor(nb / k)));
+    return { bar0: clamp(bar, 0, nb - TR.srcBars(n, k)), n };
+  };
+  TR.nudge = (p, d, nb) => TR.moveTo(p, p.bar0 + d * step(p.k), nb);
+  TR.grow = (p, d, nb) => TR.resizeEnd(p, p.bar0 + TR.srcBars(p.n, p.k) + d * step(p.k), nb);
+  TR.hit = (xa, xb, px) => {
+    const a = Math.abs(px - xa), b = Math.abs(px - xb);
+    if (b <= 7 && b <= a) return 'end';
+    if (a <= 7) return 'start';
+    return px > xa && px < xb ? 'move' : 'out';
+  };
+  TR.pan = (v0, v1, dt, dur) => {
+    const w = Math.min(v1 - v0, dur), a = clamp(v0 + dt, 0, dur - w);
+    return [a, a + w];
+  };
+  TR.zoom = (v0, v1, at, f, dur, minSpan) => {
+    const w = v1 - v0, span = clamp(w * f, Math.min(minSpan, dur), dur);
+    const a = v0 + at * (w - span);
+    return TR.pan(a, a + span, 0, dur);
+  };
+  TR.loopView = (a, b, barLen, dur) => {
+    const pad = Math.max(barLen * 2, b - a);
+    return [Math.max(0, a - pad), Math.min(dur, b + pad)];
+  };
+  TR.barsText = p => {
+    const s = Math.min(TR.srcBars(p.n, p.k), (p.bars || Infinity) - p.bar0);
+    const bars = s === 1 ? `bar ${p.bar0 + 1}` : `bars ${p.bar0 + 1}–${p.bar0 + s}`;
+    return `${bars} · ${p.n} bar${p.n === 1 ? '' : 's'}`;
+  };
+  TR.semis = (keySemis, p) => keySemis + (p.ct || 0) / 100;
+
+  let H;
+  const field = (name, min, max, step, def, unit, after = 'apply') => ({
+    min, max, step, def, unit, after,
+    get: p => p[name] ?? def,
+    put: (p, id, v) => { p[name] = v; },
+  });
+  TR.P = {
+    st: field('off', -12, 12, 1, 0, 'st', 'sync'),
+    ct: field('ct', -50, 50, 1, 0, 'ct', 'sync'),
+  };
+  const signed = v => (v > 0 ? '+' : '') + v;
+  const notes = ['1/4', '1/8', '3/16', '1/16'];
+  TR.fmt = (key, v) => {
+    switch (TR.P[key].unit) {
+      case 'st': return signed(v) + ' st';
+      case 'ct': return signed(v) + ' ct';
+      case 'db': return (v > 0 ? '+' : '') + v.toFixed(1) + ' dB';
+      case 'cut': return v.toFixed(1) + ' dB';
+      case 'pct': return v + ' %';
+      case 'note': return notes[v];
+      case 's': return Number(v.toFixed(2)) + ' s';
+      case 'hz': return v >= 1000 ? Number((v / 1000).toFixed(2)) + ' kHz' : v + ' Hz';
+      default: return String(v);
+    }
+  };
+  const numberLabel = { st: 'semitones', ct: 'cents' };
+  const paintNumber = (el, key, v) => {
+    const text = TR.fmt(key, v);
+    el.querySelector('output').textContent = text;
+    el.setAttribute('aria-valuenow', v);
+    el.setAttribute('aria-valuetext', text);
+    if (key === 'harm') el.closest('.trdev').classList.toggle('mxoff', H.MX.fx === false || v === 0);
+  };
+  TR.num = (id, key, label) => {
+    const p = H.part(id), spec = TR.P[key], v = spec.get(p, id), text = TR.fmt(key, v);
+    const name = numberLabel[key] || label;
+    return `<span class="trnum" tabindex="0" role="spinbutton" aria-label="${name}" aria-valuemin="${spec.min}" aria-valuemax="${spec.max}" aria-valuenow="${v}" aria-valuetext="${text}" data-v="${id}:${key}" title="${name} · drag up or down, or use ↑ ↓ · double-click to reset">${label ? `<span>${label}</span>` : ''}<output>${text}</output></span>`;
+  };
+  TR.refresh = (root = document) => {
+    root.querySelectorAll('[data-v]').forEach(el => {
+      const [id, key] = el.dataset.v.split(':'), p = H.part(id);
+      if (p && TR.P[key]) paintNumber(el, key, TR.P[key].get(p, id));
+    });
+  };
+  const stepped = (spec, v) => clamp(Math.round(v / spec.step) * spec.step, spec.min, spec.max);
+  TR.set = (id, key, value) => {
+    const p = H.part(id), spec = TR.P[key];
+    if (!p || !spec || !Number.isFinite(value)) return;
+    const v = stepped(spec, value);
+    if (spec.after === 'sync' && v === spec.get(p, id)) return;
+    spec.put(p, id, v);
+    let pending;
+    if (spec.after === 'sync') {
+      H.pitch(id);
+      if (!H.isOS(id)) {
+        p._loading = true;
+        pending = H.sync();
+      } else if (p.warp) pending = H.sync();   // a one-shot fitted to a length: the server stretches it again
+    } else H.apply(id);
+    H.save();
+    H.mark();
+    TR.refresh();
+    return pending;
+  };
+  TR.init = hooks => {
+    H = hooks;
+    const list = $('list');
+    menus(list);
+    loopControls(list);
+    viewControls(list);
+    let drag;
+    const number = e => e.target.closest('[data-v]');
+    list.addEventListener('pointerdown', e => {
+      const el = number(e);
+      if (!el || e.button !== 0) return;
+      const [id, key] = el.dataset.v.split(':'), spec = TR.P[key], p = H.part(id);
+      if (!p || !spec) return;
+      e.preventDefault();
+      el.focus({ preventScroll: true });
+      const v = spec.get(p, id);
+      drag = { el, id, key, spec, p, pointer: e.pointerId, y: e.clientY, raw: v, start: v, v, moved: false };
+    });
+    window.addEventListener('pointermove', e => {
+      if (!drag || e.pointerId !== drag.pointer) return;
+      const d = drag, dy = d.y - e.clientY;
+      d.y = e.clientY;
+      if (!dy) return;
+      d.moved = true;
+      d.raw = clamp(d.raw + dy * (d.spec.max - d.spec.min) / (e.shiftKey ? 640 : 160), d.spec.min, d.spec.max);
+      const v = stepped(d.spec, d.raw);
+      if (d.v === v) return;
+      d.v = v;
+      if (d.spec.after === 'apply' && H.part(d.id) === d.p) {
+        d.spec.put(d.p, d.id, v);
+        H.apply(d.id);
+      }
+      paintNumber(d.el, d.key, v);
+    });
+    const finish = e => {
+      if (!drag || e.pointerId !== drag.pointer) return;
+      const d = drag;
+      drag = null;
+      if (e.type === 'pointerup' && d.moved && H.part(d.id) === d.p) TR.set(d.id, d.key, d.v);
+      else {
+        if (d.moved && d.spec.after === 'apply' && H.part(d.id) === d.p) {
+          d.spec.put(d.p, d.id, d.start);
+          H.apply(d.id);
+        }
+        TR.refresh();
+      }
+    };
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    list.addEventListener('keydown', e => {
+      const el = number(e);
+      if (!el || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const [id, key] = el.dataset.v.split(':'), spec = TR.P[key], p = H.part(id);
+      e.preventDefault();
+      e.stopPropagation();
+      if (p && spec) TR.set(id, key, spec.get(p, id) + spec.step * (e.key === 'ArrowUp' ? 1 : -1));
+    });
+    list.addEventListener('dblclick', e => {
+      const el = number(e);
+      if (!el) return;
+      const [id, key] = el.dataset.v.split(':');
+      TR.set(id, key, TR.P[key].def);
+    });
+  };
+
+  const percent = (name, scale, max = 100, def = 0) => ({
+    ...field(name, 0, max, 1, def, 'pct'),
+    get: p => Math.round((p[name] ?? def * scale) / scale),
+    put: (p, id, v) => { p[name] = v * scale; },
+  });
+  const eqBand = i => ({
+    ...field('eq', -12, 12, 0.5, 0, 'db'),
+    get: p => p.eq?.[i] ?? 0,
+    put: (p, id, v) => { (p.eq ||= [0, 0, 0])[i] = v; },
+  });
+  Object.assign(TR.P, {
+    g0: eqBand(0),
+    g1: eqBand(1),
+    g2: eqBand(2),
+    dt: {
+      ...field('dt', 0, 3, 1, 1, 'note'),
+      get: p => Math.max(0, notes.indexOf(p.dt || '1/8')),
+      put: (p, id, v) => { p.dt = notes[v]; },
+    },
+    fb: percent('fb', 0.01, 90, 35),
+    dly: percent('dly', 0.008),
+    rev: percent('rev', 0.01),
+    harm: { ...percent('harm', 0.01), get: p => Math.round(BLEND.harmAmt(p) * 100) },
+    duck: {
+      ...field('duck', 0, BLEND.DUCK.max, 0.5, BLEND.DUCK.db, 'cut'),
+      get: (p, id) => BLEND.duckDb(H.MX.duck[id]),
+      put: (p, id, v) => { BLEND.duckOf(id).db = v; },
+    },
+  });
+  TR.fxHTML = id => {
+    const p = H.part(id), fx = H.MX.fx !== false;
+    const device = (key, body, on = true) => `<div class="trdev${on ? '' : ' mxoff'}" data-dev="${key}">${body}</div>`;
+    const toggle = (key, label, on) => `<button type="button" class="trtoggle" data-mx${key}="${id}" aria-pressed="${on}" title="${label} on / off">${label}</button>`;
+    const num = (key, label) => TR.num(id, key, label);
+    const eq = device('eq', toggle('eqon', 'EQ', p.eqOn !== false) +
+      num('g0', 'lo') + num('g1', 'mid') + num('g2', 'hi'), fx && p.eqOn !== false);
+    const dly = device('dly', toggle('dlyon', 'Delay', p.dlyOn !== false) +
+      num('dt', 'time') + num('fb', 'feedback') + num('dly', 'amount'), fx && p.dlyOn !== false);
+    const rev = device('rev', toggle('revon', 'Reverb', p.revOn !== false) +
+      num('rev', 'amount'), fx && p.revOn !== false);
+    let tail;
+    if (H.isOS(id)) {
+      const harmOn = BLEND.harmAmt(p) > 0;
+      const expanded = H.MX.trimOpen === id;
+      tail = device('harm', toggle('harm', 'Harmonics', harmOn), fx && harmOn);
+      tail += device('trim', `<span>Trim</span><canvas class="mxtrim" data-mxtrim="${id}" title="drag to choose the piece that plays · drag an edge to adjust · double-click for the whole sample"></canvas>
+        <output data-mxtrimlen="${id}"></output><button type="button" class="tbtn trfine" data-mxtrimopen="${id}" aria-expanded="${expanded}" title="a large view: fine trimming, fade in and out, and warping to a length">Shape</button>`);
+    } else {
+      tail = device('harm', '<span class="trfxlabel">Harmonics</span>' + num('harm', 'amount'), fx && BLEND.harmAmt(p) > 0);
+      if (H.role(id) === 'bass') {
+        const on = H.MX.duck[id]?.on !== false;
+        tail += device('duck', toggle('duckon', 'Duck', on) + num('duck', 'lows'), on);
+      }
+    }
+    return `<div class="trfx">${eq}${dly}${rev}${tail}</div>`;
+  };
+
+  TR.DIE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="none" stroke="currentColor"/><circle cx="5" cy="5" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="11" r="1"/></svg>';
+  TR.name = role => ({ drums: 'Drums', bass: 'Bass', vocals: 'Vocals', other: 'Other', oneshot: 'One-shot' })[role];
+  let menuId = null;
+  TR.isOpen = id => menuId === id;
+  TR.more = (id, roles, back) => {
+    const p = H.part(id), filled = p && (p.track != null || p.sample), os = H.isOS(id);
+    const item = (key, label, attrs = '') => `<button type="button" data-mx${key}="${id}" ${attrs}>${label}</button>`;
+    return `<button type="button" class="tbtn" data-trmore="${id}" aria-label="Track options" aria-expanded="${TR.isOpen(id)}" title="track options">⋯</button>
+      <div class="trmenu">
+        ${item('find', os ? 'Choose a sample' : 'Choose the song')}
+        ${filled && !os ? item('alt', 'Other takes') : ''}
+        ${filled ? item('lock', 'Keep on “all”', `aria-pressed="${!!p.lock}"`) : ''}
+        ${filled ? item('dup', 'Duplicate') + item('del', 'Empty this track') : ''}
+        ${!filled && back ? `<button type="button" data-mxhist="${id}:0">Bring back last part</button>` : ''}
+        <label>Plays <select data-mxrole="${id}" aria-label="What this track plays">${roles.map(r => `<option value="${r}" ${r === H.role(id) ? 'selected' : ''}>${TR.name(r)}</option>`).join('')}</select></label>
+        ${H.MX.order.length > 1 ? item('rm', 'Remove the track') : ''}
+      </div>`;
+  };
+  const menuOpen = (row, on) => {
+    menuId = on ? row.dataset.mxrow : null;
+    row.classList.toggle('open', on);
+    row.querySelector('[data-trmore]').setAttribute('aria-expanded', on);
+  };
+  TR.closeMenu = () => {
+    const open = document.querySelector('.trk.open');
+    if (open) menuOpen(open, false);
+    else menuId = null;
+  };
+  TR.retainFocus = list => {
+    const el = document.activeElement;
+    const attr = ['data-v', 'data-mxwave', 'data-trmore'].find(name => el?.hasAttribute(name));
+    if (!attr || !list.contains(el)) return () => {};
+    const value = CSS.escape(el.getAttribute(attr));
+    return () => list.querySelector(`[${attr}="${value}"]`)?.focus({ preventScroll: true });
+  };
+  const menus = list => {
+    const close = row => { if (row) menuOpen(row, false); };
+    list.addEventListener('click', e => {
+      const more = e.target.closest('[data-trmore]'), open = list.querySelector('.trk.open');
+      if (more) {
+        const row = more.closest('.trk'), show = row !== open;
+        close(open);
+        if (show) menuOpen(row, true);
+      } else if (e.target.closest('.trmenu button')) close(open);
+    });
+    list.addEventListener('change', e => {
+      if (e.target.matches('[data-mxrole]')) TR.closeMenu();
+    });
+    document.addEventListener('pointerdown', e => {
+      const open = list.querySelector('.trk.open');
+      if (!open || e.target.closest('.trmenu, [data-trmore]')) return;
+      close(open);
+    });
+    list.addEventListener('keydown', e => {
+      const open = list.querySelector('.trk.open');
+      if (!open || e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      close(open);
+      open.querySelector('[data-trmore]').focus();
+    });
+  };
+
+  const pictures = new Map();
+  const pictureKey = (track, stem) => track + ':' + stem;
+  TR.load = (track, stem) => {
+    const key = pictureKey(track, stem);
+    if (!pictures.has(key)) {
+      const entry = { song: null };
+      entry.pending = (async () => {
+        try {
+          const { url: path, rate, n, dur, bars } = await window.CRATE.api('api/stems/peaks', { track, stem });
+          const response = await fetch(url(path));
+          if (!response.ok) return null;
+          const pk = new Uint8Array(await response.arrayBuffer());
+          if (!pk.length || pk.length !== n || !(rate > 0) || !(dur > 0) || !Array.isArray(bars) || bars.length < 2) return null;
+          return entry.song = { pk, rate, dur, bars };
+        } catch (e) {
+          return null;
+        }
+      })();
+      pictures.set(key, entry);
+    }
+    return pictures.get(key).pending;
+  };
+  TR.song = (track, stem) => pictures.get(pictureKey(track, stem))?.song || null;
+  const slotSong = id => TR.song(H.part(id)?.track, H.role(id));
+  TR.has = id => !!slotSong(id);
+  const loopTimes = (bars, p) => {
+    const from = clamp(p.bar0, 0, bars.length - 2);
+    const to = Math.min(bars.length - 1, from + TR.srcBars(p.n, p.k));
+    return [bars[from], bars[to]];
+  };
+  const surface = canvas => {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    const g = canvas.getContext('2d');
+    g.scale(dpr, dpr);
+    return { g, w, h, dpr };
+  };
+  TR.drawWave = (canvas, o) => {
+    const { g, w, h, dpr } = surface(canvas), { pk, rate, bars, v0, v1, col, busy } = o;
+    if (!w || !h || v1 <= v0) return;
+    canvas.parentElement.classList.toggle('busy', !!busy);
+    const xAt = t => (t - v0) * w / (v1 - v0);
+    const [a, b] = loopTimes(bars, o), xa = xAt(a), xb = xAt(b);
+    canvas.parentElement.style.setProperty('--loop-left', xa + 'px');
+    canvas.parentElement.style.setProperty('--loop-right', (xb - 2) + 'px');
+    g.fillStyle = '#1a1f27';
+    g.fillRect(xa, 0, xb - xa, h);
+    g.font = '10px ui-monospace, Menlo, monospace';
+    for (let i = TR.floorBar(bars, v0); i < bars.length && bars[i] <= v1; i++) {
+      const x = xAt(bars[i]), gap = xAt(bars[i + 1]) - x;
+      if (gap >= 5) {
+        g.fillStyle = 'rgba(255,255,255,.07)';
+        g.fillRect(x, 0, 1, h);
+      }
+      if (gap >= 34) {
+        g.fillStyle = '#a4adba';
+        g.fillText(String(i + 1), x + 4, h - 4);
+      }
+    }
+    for (let px = 0; px < canvas.width; px++) {
+      const x = px / dpr, t = v0 + x / w * (v1 - v0);
+      const lo = clamp(Math.floor(t * rate), 0, pk.length - 1);
+      const hi = Math.min(pk.length, Math.max(lo + 1, Math.ceil((t + (v1 - v0) / canvas.width) * rate)));
+      let peak = 0;
+      for (let i = lo; i < hi; i++) peak = Math.max(peak, pk[i]);
+      const height = Math.max(1, peak / 255 * (h - 6));
+      g.fillStyle = x >= xa && x < xb ? col : '#39404b';
+      g.fillRect(x, (h - height) / 2, 1 / dpr, height);
+    }
+    g.fillStyle = col;
+    g.fillRect(xa, 0, xb - xa, 3);
+    g.fillRect(xa, 0, 2, h);
+    g.fillRect(xb - 2, 0, 2, h);
+    if (xb - xa >= 26) {
+      g.fillRect(xa, 0, 9, 11);
+      g.fillRect(xb - 9, 0, 9, 11);
+    }
+  };
+  const fallbackWave = (canvas, buffer, col) => {
+    const { g, w, h } = surface(canvas), audio = buffer.getChannelData(0);
+    const peaks = new Float32Array(w), step = audio.length / w;
+    let max = 0;
+    for (let x = 0; x < w; x++) {
+      const end = Math.floor((x + 1) * step);
+      for (let i = Math.floor(x * step); i < end; i += 3) peaks[x] = Math.max(peaks[x], Math.abs(audio[i]));
+      max = Math.max(max, peaks[x]);
+    }
+    g.fillStyle = col;
+    for (let x = 0; x < w; x++) {
+      const amp = Math.max(1, peaks[x] / (max || 1) * h);
+      g.fillRect(x, (h - amp) / 2, 1, amp);
+    }
+  };
+  const waveBox = id => document.querySelector(`.trwave[data-mxwave="${id}"]`);
+  TR.paintWave = id => {
+    const p = H.part(id), box = waveBox(id);
+    if (!p || !box) return;
+    const canvas = box.querySelector('canvas'), col = getComputedStyle(box).getPropertyValue('--trcol').trim();
+    const song = slotSong(id);
+    if (song) {
+      ensureView(id, song);
+      const [v0, v1] = p._v;
+      TR.drawWave(canvas, { ...song, bar0: p._d?.bar0 ?? p.bar0, n: p._d?.n ?? p.n, k: p.k, v0, v1, col, busy: p._busy });
+    } else if (p.buf) {
+      fallbackWave(canvas, p.buf, col);
+    }
+  };
+  TR.playhead = (id, phase) => {
+    const song = slotSong(id), p = H.part(id);
+    if (!song || !p._v) return phase;
+    const playing = p._playingLoop?.track === p.track ? p._playingLoop : p;
+    const [a, b] = loopTimes(song.bars, playing), [v0, v1] = p._v;
+    return (a + phase * (b - a) - v0) / (v1 - v0);
+  };
+
+  TR.setLoop = async (id, bar0, n) => {
+    const p = H.part(id), song = slotSong(id);
+    const nb = song ? song.bars.length - 1 : p?.bars;
+    if (!nb || H.isOS(id) || !Number.isFinite(bar0) || !Number.isFinite(n)) return;
+    const next = TR.moveTo({ ...p, n: Math.round(n) }, Math.round(bar0), nb);
+    if (next.bar0 === p.bar0 && next.n === p.n) return;
+    const request = {};
+    p._loopRequest = request;
+    p._busy = false;
+    const timer = setTimeout(() => {
+      if (H.part(id) !== p || p._loopRequest !== request || !p._loading) return;
+      p._busy = true;
+      TR.paintWave(id);
+    }, 150);
+    try {
+      const pending = H.loop(id, next.bar0, next.n);
+      const label = waveBox(id)?.closest('.trk').querySelector('.trbars');
+      if (label) label.textContent = TR.barsText(p);
+      TR.paintWave(id);
+      await pending;
+    } finally {
+      clearTimeout(timer);
+      if (p._loopRequest === request) {
+        delete p._loopRequest;
+        p._busy = false;
+        TR.paintWave(id);
+      }
+    }
+  };
+  const geometry = box => {
+    const id = box.dataset.mxwave, p = H.part(id), song = slotSong(id);
+    if (!song || !p._v) return null;
+    const [v0, v1] = p._v, rect = box.getBoundingClientRect(), [a, b] = loopTimes(song.bars, p);
+    const pxPerSecond = rect.width / (v1 - v0);
+    const xAt = t => rect.left + (t - v0) * pxPerSecond;
+    const tAt = x => v0 + (x - rect.left) / pxPerSecond;
+    return { id, p, song, xAt, tAt, hit: x => TR.hit(xAt(a), xAt(b), x) };
+  };
+  const lineAt = (bars, t) => {
+    const i = TR.floorBar(bars, t);
+    return i + clamp((t - bars[i]) / (bars[i + 1] - bars[i]), 0, 1);
+  };
+  const cursors = { start: 'ew-resize', end: 'ew-resize', move: 'grab', out: 'pointer' };
+  const loopControls = list => {
+    let drag;
+    list.addEventListener('pointerdown', e => {
+      const box = e.target.closest('.trwave');
+      if (!box || e.button !== 0 || e.target.closest('button')) return;
+      const g = geometry(box);
+      if (!g) return;
+      const { p, song, tAt } = g, x = e.clientX, mode = g.hit(x);
+      e.preventDefault();
+      box.focus({ preventScroll: true });
+      list.setPointerCapture(e.pointerId);
+      drag = {
+        ...g, x, mode, pointer: e.pointerId, moved: false,
+        loop: { bar0: p.bar0, n: p.n, k: p.k }, view: p._v.slice(),
+        offset: TR.floorBar(song.bars, tAt(x)) - p.bar0,
+      };
+    });
+    window.addEventListener('pointermove', e => {
+      const x = e.clientX;
+      if (!drag) {
+        const box = e.target.closest?.('.trwave');
+        const g = box && geometry(box);
+        if (g) box.style.cursor = cursors[g.hit(x)];
+        return;
+      }
+      const d = drag;
+      if (e.pointerId !== d.pointer || H.part(d.id) !== d.p) return;
+      d.moved ||= Math.abs(x - d.x) > 3;
+      if (!d.moved) return;
+      if (d.mode === 'out') {
+        const [v0, v1] = d.view;
+        if (v1 - v0 < d.song.dur) TR.view(d.id, ...TR.pan(v0, v1, d.tAt(d.x) - d.tAt(x), d.song.dur));
+        return;
+      }
+      const bars = d.song.bars, nb = bars.length - 1, t = d.tAt(x);
+      if (d.mode === 'move') d.p._d = TR.moveTo(d.loop, TR.floorBar(bars, t) - d.offset, nb);
+      else {
+        const resize = d.mode === 'start' ? TR.resizeStart : TR.resizeEnd;
+        d.p._d = resize(d.loop, lineAt(bars, t), nb);
+      }
+      TR.paintWave(d.id);
+      const box = waveBox(d.id), tip = box?.querySelector('.trtip');
+      if (!tip) return;
+      const p = d.p._d, [a, b] = loopTimes(bars, { ...d.loop, ...p }), at = d.mode === 'end' ? b : a;
+      tip.textContent = d.mode === 'move' ? TR.barsText({ ...d.loop, ...p }).split(' · ')[0] : `${p.n} bar${p.n === 1 ? '' : 's'}`;
+      tip.hidden = false;
+      tip.style.left = clamp(d.xAt(at) - box.getBoundingClientRect().left, 0, Math.max(0, box.clientWidth - tip.offsetWidth)) + 'px';
+    });
+    const finish = e => {
+      if (!drag || e.pointerId !== drag.pointer) return;
+      const d = drag, p = d.p, bars = d.song.bars;
+      drag = null;
+      let next = p._d;
+      delete p._d;
+      if (H.part(d.id) !== p) return;
+      const tip = waveBox(d.id)?.querySelector('.trtip');
+      if (tip) tip.hidden = true;
+      if (e.type === 'pointerup' && !d.moved && d.mode === 'out') {
+        next = TR.moveTo(d.loop, TR.floorBar(bars, d.tAt(e.clientX)), bars.length - 1);
+      }
+      if (e.type === 'pointerup' && next) TR.setLoop(d.id, next.bar0, next.n);
+      TR.paintWave(d.id);
+    };
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    list.addEventListener('keydown', e => {
+      if (!e.target.matches('.trwave') || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      const g = geometry(e.target);
+      if (!g) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const edit = e.shiftKey ? TR.grow : TR.nudge, d = e.key === 'ArrowLeft' ? -1 : 1;
+      const next = edit(g.p, d, g.song.bars.length - 1);
+      TR.setLoop(g.id, next.bar0, next.n);
+    });
+  };
+
+  const firstBar = song => song.bars[1] - song.bars[0];
+  const ensureView = (id, song) => {
+    const p = H.part(id), key = pictureKey(p.track, H.role(id));
+    if (p._viewKey === key && !p._preset) return;
+    const preset = p._preset || (!p._v ? H.MX._viewPreset || 'song' : null);
+    const [a, b] = loopTimes(song.bars, p);
+    if (preset === 'loop') {
+      p._v = TR.loopView(a, b, firstBar(song), song.dur);
+      p._viewMode = 'loop';
+    } else if (preset === 'song' || p._viewMode === 'song') {
+      p._v = [0, song.dur];
+      p._viewMode = 'song';
+    } else {
+      const half = (p._v[1] - p._v[0]) / 2, mid = (a + b) / 2;
+      p._v = TR.pan(mid - half, mid + half, 0, song.dur);
+      p._viewMode = 'custom';
+    }
+    delete p._preset;
+    p._viewKey = key;
+  };
+  const viewActive = mode => {
+    const tracks = H.MX.order.filter(id => H.part(id)?.track != null);
+    if (!tracks.length) return mode === (H.MX._viewPreset || 'song');
+    return tracks.every(id => {
+      const p = H.part(id);
+      return (p._preset || p._viewMode || H.MX._viewPreset || 'song') === mode;
+    });
+  };
+  const paintViewSwitch = () => {
+    document.querySelectorAll('#trview button').forEach(b => {
+      const on = viewActive(b.dataset.trview);
+      b.setAttribute('aria-pressed', on);
+    });
+  };
+  TR.view = (id, v0, v1) => {
+    const p = H.part(id), song = slotSong(id);
+    if (!song || !(v1 > v0)) return;
+    ensureView(id, song);
+    p._v = TR.pan(v0, v1, 0, song.dur);
+    p._viewMode = p._v[0] === 0 && p._v[1] === song.dur ? 'song' : 'custom';
+    TR.paintWave(id);
+    paintViewSwitch();
+  };
+  const presetView = (id, mode) => {
+    const p = H.part(id);
+    if (p?.track == null) return;
+    p._preset = mode;
+    TR.paintWave(id);
+  };
+  const viewButton = (attr, mode, label, pressed = '') =>
+    `<button type="button" class="tbtn" data-${attr}="${mode}" ${pressed}>${label}</button>`;
+  TR.viewSwitch = () => `<span class="seg" id="trview" aria-label="Track views">
+    ${viewButton('trview', 'song', 'Whole song', `aria-pressed="${viewActive('song')}"`)}
+    ${viewButton('trview', 'loop', 'Loops', `aria-pressed="${viewActive('loop')}"`)}
+    </span>`;
+  TR.zoomButtons = `<span class="trzoom" aria-label="Waveform view">
+    ${viewButton('trz', 'loop', 'Loop')}${viewButton('trz', 'song', 'Whole song')}
+    </span>`;
+  const viewControls = list => {
+    list.addEventListener('click', e => {
+      const global = e.target.closest('[data-trview]'), local = e.target.closest('[data-trz]');
+      if (global) {
+        H.MX._viewPreset = global.dataset.trview;
+        H.MX.order.forEach(id => presetView(id, H.MX._viewPreset));
+      } else if (local) presetView(local.closest('.trwave').dataset.mxwave, local.dataset.trz);
+      else return;
+      paintViewSwitch();
+    });
+    list.addEventListener('wheel', e => {
+      const box = e.target.closest('.trwave'), g = box && geometry(box);
+      if (!g) return;
+      const [v0, v1] = g.p._v, span = v1 - v0, dur = g.song.dur;
+      let next;
+      if (e.ctrlKey || e.metaKey) {
+        const at = clamp((g.tAt(e.clientX) - v0) / span, 0, 1);
+        next = TR.zoom(v0, v1, at, Math.exp(e.deltaY * 0.01), dur, 2 * firstBar(g.song));
+      } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        next = TR.pan(v0, v1, e.deltaX * span / box.clientWidth, dur);
+      } else return;
+      e.preventDefault();
+      TR.view(g.id, ...next);
+    }, { passive: false });
+  };
+
+  window.TRACKS = TR;
+})();
 // ---------- 🎛 Mashup (the stem mixer; the tab was called Stems): drums, bass, vocals and "other" from different songs, on one tempo and key
 // (digitalcrate/stems.py, docs/plans/stems.md). Parts are rendered by the server to exactly n bars at the tempo and
 // looped here on one bar clock; volume, EQ and delay are live Web Audio.
-{const api=window.CRATE.api,PROJ=window.PROJ||{};  // (this file's main part is one closure; what's appended after it gets its helpers from CRATE)
+{const api=(...args)=>window.CRATE.api(...args),TR=window.TRACKS,PROJ=window.PROJ||{};  // (this file's main part is one closure; what's appended after it gets its helpers from CRATE)
  const STEMS=['drums','bass','vocals','other'],ROLES=[...STEMS,'oneshot'],ICON={drums:'🥁',bass:'🎸',vocals:'🎤',other:'🎹',oneshot:'✦'},PITCHED=new Set(['bass','vocals','other']);
  const F_=F;  // the library's sample fields (F is also a local name in places below)
  const isOS=id=>role(id)==='oneshot',has=p=>!!p&&(p.track!=null||!!p.sample);  // a one-shot slot plays a library sample at steps of a cycle; has: the slot holds something
@@ -2320,18 +3019,84 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
  const role=id=>MX.roles[id]||id;
  function adopt(sv){const ids=sv.order&&sv.order.length?sv.order:[...new Set([...STEMS,...Object.keys(sv.slots||{})])];MX.order=ids;MX.roles=Object.fromEntries(ids.map(id=>[id,(sv.roles||{})[id]||((sv.slots||{})[id]||{}).stem||(STEMS.includes(id)?id:'other')]))}
- try{const sv=JSON.parse(localStorage.getItem('dcStems')||'null');if(sv){MX.bpm=sv.bpm||MX.bpm;MX.key=sv.key||'';MX.name=sv.name||'';MX.savedSig=sv.savedSig||null;MX.snapsOf=sv.snapsOf||null;MX.fx=sv.fx!==false;if(sv.reverb)MX.reverb=sv.reverb;MX.slots=sv.slots||{};adopt(sv);BLEND.adopt(MX,sv)}}catch(e){}
- const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
-   return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:!!p.harm}]}))}))}catch(e){}};
- const sig=()=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:BLEND.duckSig(MX),snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{const p=MX.slots[id];return [role(id),has(p)?[p.track,p.sample,p.steps,p.every,p.trim||null,p.warp||0,p.fin||0,p.fout||0,p.bar0,p.n,p.k||1,p.off||0,p.db||0,!!p.mute,p.eq||[0,0,0],p.dly||0,p.dt||'1/8',p.eqOn!==false,p.dlyOn!==false,p.rev||0,p.revOn!==false]:null]})});
+ const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:2,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
+   return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined}]}))}))}catch(e){}};
+ const sig=(legacy=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:BLEND.duckSig(MX),
+  snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{
+   const p=MX.slots[id];
+   if(!has(p))return [role(id),null];
+   const part=[p.track,p.sample,p.steps,p.every,p.trim||null,p.bar0,p.n,p.k||1,p.off||0,p.db||0,!!p.mute,
+    p.eq||[0,0,0],p.dly||0,p.dt||'1/8',p.eqOn!==false,p.dlyOn!==false,p.rev||0,p.revOn!==false];
+   if(!legacy)part.push(p.ct||0,p.fb??0.35,BLEND.harmAmt(p),!!p.legacyLoop,p.warp||0,p.fin||0,p.fout||0);
+   return [role(id),part];
+  })});
+ function restore(sv){
+  const {order,roles,slots,snaps,trans,duck}=sv;
+  MX.slots=slots||{};
+  adopt({order,roles,slots});
+  BLEND.adopt(MX,{snaps,trans,duck});
+  if(sv.v>=2)return;
+  const clean=MX.savedSig&&MX.savedSig===sig(true);
+  for(const mix of [MX,...MX.snaps]){
+   Object.values(mix.slots||{}).forEach(p=>{
+    if(p?.track==null)return;
+    // Older renders left out the last bar of a full-song loop and rounded half bars to even.
+    const k=p.k||1,roundsUp=k===0.5&&p.n>1&&p.n%4===1;
+    if(!p.bars||TR.srcBars(p.n,k)>=p.bars||roundsUp)p.legacyLoop=true;
+    if(p.harm==null)p.hup='auto';  // wait to see whether the old mixer would have enabled harmonics
+    else{
+     p.harm=BLEND.harmAmt(p);
+     if(p.harm)p.hup=true;
+    }
+   });
+  }
+  if(clean)MX.savedSig=sig();
+ }
+ try{
+  const sv=JSON.parse(localStorage.getItem('dcStems')||'null');
+  if(sv){
+   MX.bpm=sv.bpm||MX.bpm;MX.key=sv.key||'';MX.name=sv.name||'';MX.savedSig=sv.savedSig||null;
+   MX.snapsOf=sv.snapsOf||null;MX.fx=sv.fx!==false;
+   if(sv.reverb)MX.reverb=sv.reverb;
+   restore(sv);
+  }
+ }catch(e){}
  const dirty=()=>MX.savedSig?sig()!==MX.savedSig:MX.order.some(id=>has(MX.slots[id]));
- function markSave(){const b=$('mxsave');if(!b)return;const d=dirty();b.classList.toggle('dirty',d);b.textContent=d?'💾 save •':'💾 save';b.title=d?'unsaved changes: save to keep this combination (it also counts as a strong 👍)':'saved';BLEND.markSnap()}
+ function markSave(){
+  const b=$('mxsave');if(!b)return;
+  const d=dirty(),saving=!!MX._saving;
+  b.classList.toggle('dirty',d);
+  b.disabled=saving;
+  b.textContent=saving?'💾 saving…':d?'💾 save •':'💾 save';
+  b.title=saving?'saving this combination':d?'unsaved changes: save to keep this combination (it also counts as a strong 👍)':'saved';
+  BLEND.markSnap();
+ }
  const state=()=>({bpm:MX.bpm,key:MX.key||null,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>[s,{stem:role(s),track:MX.slots[s].track,bar0:MX.slots[s].bar0,n:MX.slots[s].n,k:MX.slots[s].k||1,off:MX.slots[s].off||0}]))});
  const barLenM=()=>240/MX.bpm,DT={'1/4':1/4,'1/8':1/8,'3/16':3/16,'1/16':1/16};
  // audio: source -> low shelf -> mid -> high shelf -> volume -> out, and volume -> send -> delay (with feedback) -> out
  function chain(stem){const p=MX.slots[stem];if(p._c)return p._c;BLEND.out(MX,AC);return p._c=BLEND.mkChain(AC,MX.master,MX.bus)}
  function apply(stem){const p=MX.slots[stem];if(!p||!p._c)return;const solo=MX.order.some(s=>MX.slots[s]&&MX.slots[s].solo);
-  BLEND.applyChain(p._c,BLEND.mixOf(p,role(stem),{on:!p.mute&&(!solo||p.solo),fx:MX.fx!==false,bar:barLenM(),DT,duck:(MX.duck||{})[stem]}),AC.currentTime)}
+  BLEND.applyChain(p._c,BLEND.mixOf(p,role(stem),{on:!p.mute&&(!solo||p.solo),fx:MX.fx!==false,bar:barLenM(),DT,hc:p._hc,duck:(MX.duck||{})[stem]}),AC.currentTime)}
+ function initHarm(id){
+  const p=MX.slots[id];
+  if(!p.buf||isOS(id))return;
+  const auto=p.sub>=0.85&&p.harm==null, undecided=p.hup==='auto';
+  const upgrade=(undecided?auto:p.hup)&&p._hc&&MX.fx!==false;
+  if(!auto&&!upgrade&&!undecided)return;
+  const clean=MX.savedSig&&!dirty(), snap=MX.snaps[MX.snapSel], saved=snap?.slots[id];
+  const same=saved&&BLEND.snapSig({order:[id],slots:{[id]:p}})===BLEND.snapSig({order:[id],slots:{[id]:saved}});
+  const adjust=part=>{
+   if(auto)part.harm=1;
+   if(upgrade){part.db=Math.min(6,(part.db||0)+BLEND.legacyHarmDb(part,p._hc));delete part.hup}
+   else if(part.hup==='auto'){
+    if(auto)part.hup=true;
+    else delete part.hup;
+   }
+  };
+  adjust(p);
+  if(same&&(!upgrade||saved.hup))adjust(saved);
+  if(clean)MX.savedSig=sig();
+ }
  function startSrc(stem){const p=MX.slots[stem];if(!p||!p.buf||!MX.on||isOS(stem))return;const c=chain(stem),when=AC.currentTime+0.03;stopSrc(stem,when);
   const src=AC.createBufferSource(),g=AC.createGain();src.buffer=p.buf;src.loop=true;src.connect(g);g.connect(c.in);g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+0.012);
   const d=p.buf.duration;src.start(when,(((when-MX.t0)%d)+d)%d);p._s={src,g};apply(stem)}  // joins at the right place in the bar
@@ -2343,7 +3108,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  // what a hit plays: {buf, from, len (s of buffer), rate, out (s it sounds)}. Warped: the server stretched your piece to
  // the length you chose, pitch kept, so it plays whole at normal speed. Else your trimmed piece, at your pitch offset.
  const osPlay=p=>{if(p.warp&&p.wbuf)return {buf:p.wbuf,from:0,len:p.wbuf.duration,rate:1,out:p.wbuf.duration};
-  const rate=Math.pow(2,(p.off||0)/12),[a,b]=osTrim(p),d=p.buf.duration;return {buf:p.buf,from:a*d,len:(b-a)*d,rate,out:(b-a)*d/rate}};
+  const rate=2**(TR.semis(p.off||0,p)/12),[a,b]=osTrim(p),d=p.buf.duration;return {buf:p.buf,from:a*d,len:(b-a)*d,rate,out:(b-a)*d/rate}};
  function osHit(id,p,when){const q=osPlay(p),fi=Math.min(q.out/2,Math.max(0.003,(p.fin||0)/1000)),fo=Math.min(q.out/2,Math.max(0.003,(p.fout||0)/1000));
   const src=AC.createBufferSource(),g=AC.createGain();src.buffer=q.buf;src.playbackRate.value=q.rate;src.connect(g);g.connect(p._c.in);
   g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+fi);g.gain.setValueAtTime(1,when+q.out-fo);g.gain.linearRampToValueAtTime(0,when+q.out);
@@ -2356,23 +3121,106 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    p._next=k})}
  function play(on){MX.on=on;clearInterval(osT);osLive.forEach(x=>{try{x.stop()}catch(e){}});osLive.clear();
   if(on){AC.resume();MX.t0=AC.currentTime+0.05;MX.order.forEach(id=>{if(MX.slots[id])MX.slots[id]._next=null});MX.order.forEach(startSrc);osT=setInterval(osTick,50);osTick()}else MX.order.forEach(s=>stopSrc(s));draw()}  // (draw starts the play lines)
- // bring what's loaded in line with the state: one info call, then any slot whose bars, tempo or shift changed is rendered again
- let syncing=null,again=false;
- async function sync(){if(syncing){again=true;return syncing}syncing=(async()=>{try{do{again=false;
-    MX.info=await api('api/stems/info',{state:state()});
-    await Promise.all(MX.order.map(async stem=>{const p=MX.slots[stem];
-     if(p&&isOS(stem)&&p.sample&&!(p._key===p.sample+'|'+(MX.key||(MX.info&&MX.info.key)||'')&&p.buf)){const key=MX.key||(MX.info&&MX.info.key)||'',want=p.sample+'|'+key;p._loading=true;hint(stem);
-      try{const ab=await (await fetch(key?window.CRATE.conformURL(p.sample,key,''):url(p.sample))).arrayBuffer();if(MX.slots[stem]!==p)return;p.buf=await AC.decodeAudioData(ab);p._key=want;p._loading=false;p.err=null;if(MX.on){chain(stem);apply(stem)}}catch(e){p._loading=false;p.err=e.message}}
-     if(p&&isOS(stem)&&p.sample&&p.buf){const key=MX.key||(MX.info&&MX.info.key)||'';if(!p.warp){p.wbuf=null;p._wkey=null;return}
-      const t=osTrim(p),wk=[p.sample,key,t[0].toFixed(5),t[1].toFixed(5),p.warp,MX.bpm,p.off||0].join('|');if(p._wkey===wk&&p.wbuf)return;
-      try{const r=await api('api/stems/oswarp',{sample:p.sample,key:key||null,trim:t,beats:p.warp,bpm:MX.bpm,semis:p.off||0});const ab=await (await fetch(url(r.url))).arrayBuffer();
-       if(MX.slots[stem]!==p)return;p.wbuf=await AC.decodeAudioData(ab);p._wkey=wk;p.err=null}catch(e){p.warp=0;p.wbuf=null;toast('warp: '+e.message)}return}
-     if(p&&isOS(stem))return;
-     if(!p||p.track==null)return;const semis=((MX.info.slots||{})[stem]||{}).semis||0,want=[p.track,p.bar0,p.n,p.k||1,MX.bpm,semis].join('|');
-     p.semis=semis;if(p._key===want&&p.buf)return;p._loading=true;hint(stem);
-     try{const r=await api('api/stems/render',{track:p.track,stem:role(stem),bar0:p.bar0,n:p.n,k:p.k||1,bpm:MX.bpm,semis});const ab=await (await fetch(url(r.url))).arrayBuffer();
-      if(MX.slots[stem]!==p)return;p.buf=await AC.decodeAudioData(ab);p._key=want;p._loading=false;p.err=null;p.sub=r.sub||0;if(p.sub>=0.85&&p.harm==null)p.harm=true;startSrc(stem)}catch(e){p._loading=false;p.err=e.message}}));
-   }while(again)}finally{syncing=null}save();draw();prefetchSoon()})();return syncing}
+ // Ask for the current parts in parallel. Only the latest sync may swap audio into a slot.
+ const renderKey=(p,bpm,semis)=>[p.track,p.bar0,p.n,p.k||1,bpm,semis,!!p.legacyLoop].join('|');
+ let syncing=null,syncId=0;
+ async function decode(path){
+  const response=await fetch(path);
+  if(!response.ok)throw new Error(`audio request failed (${response.status})`);
+  return AC.decodeAudioData(await response.arrayBuffer());
+ }
+ // a one-shot fitted to a length: the server stretches exactly the trimmed piece (pitch kept); fetched again when its
+ // trim, length, pitch, key or the tempo changes
+ async function warpPart(p,info,bpm,owns){
+  if(!p.warp){p.wbuf=null;p._wkey=null;return}
+  const key=MX.key||info.key||'',t=osTrim(p),semis=TR.semis(p.off||0,p);
+  const wk=[p.sample,key,t[0].toFixed(5),t[1].toFixed(5),p.warp,bpm,semis].join('|');
+  if(p._wkey===wk&&p.wbuf)return;
+  try{
+   const r=await api('api/stems/oswarp',{sample:p.sample,key:key||null,trim:t,beats:p.warp,bpm,semis});
+   const buf=await decode(url(r.url));
+   if(!owns())return;
+   p.wbuf=buf;p._wkey=wk;
+  }catch(e){
+   if(owns()){p.warp=0;p.wbuf=null;toast('warp: '+e.message)}
+  }
+ }
+ async function syncPart(id,info,bpm,current){
+  const p=MX.slots[id],kind=role(id),os=isOS(id);
+  if(!has(p))return;
+  const owns=()=>current()&&MX.slots[id]===p&&role(id)===kind;
+  let want,load;
+  if(os){
+   const key=MX.key||info.key||'';
+   want=p.sample+'|'+key;
+   load=async()=>({buf:await decode(key?window.CRATE.conformURL(p.sample,key,''):url(p.sample))});
+  }else{
+   const {track,bar0,n}=p,k=p.k||1,legacy=!!p.legacyLoop;
+   TR.load(track,kind).then(song=>{
+    if(song&&MX.slots[id]===p&&p.track===track&&role(id)===kind)TR.paintWave(id);
+   });
+   p.semis=info.slots?.[id]?.semis||0;
+   const semis=TR.semis(p.semis,p);
+   want=renderKey(p,bpm,semis);
+   load=async()=>{
+    const r=await api('api/stems/render',{track,stem:kind,bar0,n,k,bpm,semis,legacy});
+    const buf=await decode(url(r.url));
+    return {buf,sub:r.sub||0,hc:await BLEND.harmMeasure(buf)};
+   };
+  }
+  if(p._key===want&&p.buf){p._loading=false;p.err=null;if(os)await warpPart(p,info,bpm,owns);return}
+  p._loading=true;
+  hint(id);
+  const key=kind+'|'+want;
+  const request=p._request?.key===key?p._request:{key,pending:load()};
+  p._request=request;
+  try{
+   const {buf,sub,hc}=await request.pending;
+   if(!owns())return;
+   p.buf=buf;
+   p._key=want;
+   p.err=null;
+   if(os){if(MX.on){chain(id);apply(id)}await warpPart(p,info,bpm,owns)}
+   else{
+    p._playingLoop={track:p.track,bar0:p.bar0,n:p.n,k:p.k};
+    p.sub=sub;
+    p._hc=hc;
+    initHarm(id);
+    startSrc(id);
+   }
+  }catch(e){
+   if(owns())p.err=e.message;
+  }finally{
+   if(p._request===request&&owns()){delete p._request;p._loading=false}
+  }
+ }
+ function sync(){
+  const token=++syncId,want=state(),current=()=>token===syncId;
+  const task=(async()=>{
+   try{
+    const info=await api('api/stems/info',{state:want});
+    if(!current())return;
+    MX.info=info;
+    await Promise.all(MX.order.map(id=>syncPart(id,info,want.bpm,current)));
+   }catch(e){
+    if(!current())return;
+    MX.order.forEach(id=>{if(MX.slots[id])MX.slots[id]._loading=false});
+    toast('mashup: '+e.message);
+   }
+   if(current()){save();draw();prefetchSoon()}
+  })();
+  syncing=task.then(()=>{if(!current())return syncing});
+  return syncing;
+ }
+ async function setLoop(id,bar0,n){
+  const p=MX.slots[id];
+  if(!(MX.hist[id]||[]).length)hpush(id);
+  Object.assign(p,{bar0,n,alt:null,legacyLoop:false,_loading:true});
+  hpush(id);
+  save();
+  markSave();
+  await sync();
+ }
  const hint=stem=>{const el=document.querySelector(`[data-mxrow="${stem}"] .mxsrc .sub`);if(el)el.textContent='rendering…'};
  // what you do with a part teaches the recommender: thrown out within 6 s = a weak no, kept 30 s+ = a weak yes
  function leaving(stem){const p=MX.slots[stem];if(!p||!p.since||!MX.on)return;const secs=(performance.now()-p.since)/1000;
@@ -2381,23 +3229,25 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function ev(kind,stem){api('api/stems/event',{kind,stem:stem||null,state:state()}).then(r=>{MX.rated=r.rated;const el=$('mxrated');if(el)el.textContent=ratedTxt()}).catch(()=>{})}
  const ratedTxt=()=>MX.rated>=12?`recommendations learned from ${MX.rated} ratings`:`learning: ${MX.rated}/12 ratings before it adapts (👍 👎, what you keep and what you throw out)`;
  // each slot remembers the parts it has held: ↶ goes back to one you liked after trying something else, ↷ forward again
- const snap=p=>({stem:p.stem,track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,artist:p.artist,title:p.title,bars:p.bars,why:p.why,alt:p.alt||null,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,steps:(p.steps||[]).slice(),every:p.every,trim:p.trim?p.trim.slice():null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit});
+ const snap=(id,p)=>({stem:role(id),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,legacyLoop:!!p.legacyLoop,artist:p.artist,title:p.title,bars:p.bars,why:p.why,alt:p.alt||null,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,steps:(p.steps||[]).slice(),every:p.every,trim:p.trim?p.trim.slice():null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit});
  MX.hist={};MX.hpos={};
- function hpush(id){const p=MX.slots[id];if(!has(p))return;const H=MX.hist[id]||(MX.hist[id]=[]),at=MX.hpos[id]??-1,sn=snap(p),top=H[at];
-  if(top&&top.track===sn.track&&top.sample===sn.sample&&top.bar0===sn.bar0&&top.n===sn.n&&top.k===sn.k)return;H.length=at+1;H.push(sn);if(H.length>40)H.shift();MX.hpos[id]=H.length-1}
+ const sameHistoryPart=(a,b)=>a&&a.stem===b.stem&&a.track===b.track&&a.sample===b.sample&&
+  a.bar0===b.bar0&&a.n===b.n&&a.k===b.k&&a.legacyLoop===b.legacyLoop;
+ function hpush(id){const p=MX.slots[id];if(!has(p))return;const H=MX.hist[id]||(MX.hist[id]=[]),at=MX.hpos[id]??-1,sn=snap(id,p);
+  if(sameHistoryPart(H[at],sn))return;H.length=at+1;H.push(sn);if(H.length>40)H.shift();MX.hpos[id]=H.length-1}
  async function hgo(id,d){const H=MX.hist[id]||[],at=(MX.hpos[id]??-1)+d;if(at<0||at>=H.length)return;const p=MX.slots[id]||(MX.slots[id]={db:-2});
-  MX.hpos[id]=at;Object.assign(p,H[at],{since:performance.now(),harm:null,buf:null,_key:null,_next:null,wbuf:null,_wkey:null});if(MX.roles[id]!==H[at].stem&&H[at].stem)MX.roles[id]=H[at].stem;await sync()}
+  MX.hpos[id]=at;delete p._viewKey;Object.assign(p,H[at],{since:performance.now(),harm:null,hup:undefined,buf:null,_hc:null,_key:null,_next:null,wbuf:null,_wkey:null});if(MX.roles[id]!==H[at].stem&&H[at].stem)MX.roles[id]=H[at].stem;await sync()}
  // 🎲 without the wait: once the mixer settles, each unlocked stem slot's next part is picked, rendered and decoded in
  // the background. A click then swaps it in at once, if nothing it was chosen against has changed since (the other
  // slots' parts, the tempo, the key); otherwise the click asks the server as before.
  MX.pre={};
- const ctxSig=id=>JSON.stringify([MX.bpm,MX.key,(MX.slots[id]||{}).n,MX.order.filter(x=>x!==id&&MX.slots[x]&&MX.slots[x].track!=null).map(x=>{const p=MX.slots[x];return [x,p.track,p.bar0,p.n,p.k||1,p.off||0]})]);
+ const ctxSig=id=>JSON.stringify([MX.bpm,MX.key,(MX.slots[id]||{}).n,MX.order.filter(x=>x!==id&&MX.slots[x]&&MX.slots[x].track!=null).map(x=>{const p=MX.slots[x];return [x,p.track,p.bar0,p.n,p.k||1,p.off||0,p.ct||0]})]);
  async function prefetch(id){const p=MX.slots[id];if(isOS(id)||!p||p.track==null||p.lock)return;const sig=ctxSig(id),cur=MX.pre[id];if(cur&&cur.sig===sig)return;
   const tok=MX.pre[id]={sig,ready:false};
   try{const r=await api('api/stems/pick',{stem:role(id),slot:id,state:state(),avoid:(MX.recent[id]||[]).slice(-8),n:p.n});if(!r.part||MX.pre[id]!==tok)return;
-   const q=r.part,rr=await api('api/stems/render',{track:q.track,stem:role(id),bar0:q.bar0,n:q.n,k:q.k||1,bpm:MX.bpm,semis:q.semis||0});
-   const buf=await AC.decodeAudioData(await (await fetch(url(rr.url))).arrayBuffer());
-   if(MX.pre[id]===tok)Object.assign(tok,{part:q,buf,sub:rr.sub||0,ready:true})}catch(e){if(MX.pre[id]===tok)delete MX.pre[id]}}
+   const q=r.part,rr=await api('api/stems/render',{track:q.track,stem:role(id),bar0:q.bar0,n:q.n,k:q.k||1,bpm:MX.bpm,semis:TR.semis(q.semis||0,q)});
+   const buf=await decode(url(rr.url)),hc=await BLEND.harmMeasure(buf);
+   if(MX.pre[id]===tok)Object.assign(tok,{part:q,buf,hc,sub:rr.sub||0,ready:true})}catch(e){if(MX.pre[id]===tok)delete MX.pre[id]}}
  let preT=0;const prefetchSoon=()=>{clearTimeout(preT);preT=setTimeout(async()=>{if(st.tab!=='M')return;for(const id of MX.order)await prefetch(id)},350)};
  async function roll(stem,quiet,track){const old=MX.slots[stem];if(old&&old.lock&&track==null)return;leaving(stem);
   const rec=MX.recent[stem]||(MX.recent[stem]=[]);
@@ -2405,10 +3255,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   let r;try{r=hit?{part:hit.part}:isOS(stem)?await api('api/stems/oneshot',Object.assign({state:state(),n:old&&old.sample?old.n:1,avoid:rec.slice(-12)},track==null?{}:{path:track})):await api('api/stems/pick',{stem:role(stem),slot:stem,state:state(),avoid:rec.slice(-8),n:old?old.n:null,track:track==null?null:track})}catch(e){toast('mashup: '+e.message);return}
   if(!r.part){if(!quiet)toast(isOS(stem)?'no one-shot found: the library has no short samples that fit':`no ${role(stem)} part fits this tempo${PITCHED.has(role(stem))?' and key':''}: try another tempo, or prepare more songs`);return}
   if(has(old)&&!(MX.hist[stem]||[]).length)hpush(stem);  // what was there before the first roll can be gone back to as well
-  stopSrc(stem);const keep=old?{db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c}  /* (harmonics follow the part: a new one decides again) */:{db:role(stem)==='vocals'?0:-2};
+  stopSrc(stem);const keep=old?{db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,fb:old.fb,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c,_v:old._v,_viewMode:old._viewMode,_preset:old._preset}  /* (harmonics follow the part: a new one decides again) */:{db:role(stem)==='vocals'?0:-2};
   if(isOS(stem)&&old&&old.sample&&track==null){r.part.n=old.n;r.part.every=old.every;if((old.steps||[]).length)r.part.steps=old.steps.slice()}  // 🎲 swaps the sound, your placement stays
-  MX.slots[stem]=Object.assign(keep,r.part,{since:performance.now(),buf:null,_key:null,_next:null});rec.push(isOS(stem)?r.part.sample:r.part.track);hpush(stem);
-  if(hit){const p=MX.slots[stem];p.buf=hit.buf;p.sub=hit.sub;if(p.sub>=0.85&&p.harm==null)p.harm=true;p._key=[p.track,p.bar0,p.n,p.k||1,MX.bpm,p.semis||0].join('|');startSrc(stem);draw()}  // it's playing already; sync only confirms
+  MX.slots[stem]=Object.assign(keep,r.part,{ct:0,since:performance.now(),buf:null,_key:null,_next:null});rec.push(isOS(stem)?r.part.sample:r.part.track);hpush(stem);
+  if(hit){const p=MX.slots[stem];p.buf=hit.buf;p.sub=hit.sub;p._hc=hit.hc;initHarm(stem);p._key=renderKey(p,MX.bpm,TR.semis(p.semis||0,p));p._playingLoop={track:p.track,bar0:p.bar0,n:p.n,k:p.k};startSrc(stem);draw()}  // it's playing already; sync only confirms
   await sync()}
  async function rollAll(){const pr={drums:0,other:1,bass:2,vocals:3,oneshot:4};  // 'other' before bass and vocals: it sets the key they fit to
   for(const s of MX.order.slice().sort((a,b)=>pr[role(a)]-pr[role(b)]))if(!(MX.slots[s]&&MX.slots[s].lock))await roll(s,true);if(!MX.on&&MX.order.some(s=>has(MX.slots[s])))play(true)}
@@ -2431,7 +3281,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    for(let x=0;x<W;x++){const h=Math.max(1,m[x]/(pk||1)*(H-(big?16:2))),inS=x>=a*W&&x<=b*W;g.fillStyle=inS?'#ffe6bf':'#4a515c';g.fillRect(x,(H-(big?12*dpr:0)-h)/2,1,h)}
    if(big){g.font=`${9.5*dpr}px ui-monospace,Menlo,monospace`;g.textBaseline='bottom';const stp=[0.01,0.02,0.05,0.1,0.2,0.5,1,2].find(q=>q/D*W>=60*dpr)||5;  // a time axis
     for(let t=0;t<=D+1e-9;t+=stp){const x=Math.round(t/D*W);g.fillStyle='rgba(255,255,255,.2)';g.fillRect(x,H-12*dpr,1,12*dpr);g.fillStyle='#8a93a0';g.fillText(t.toFixed(stp<0.1?2:1)+' s',x+3*dpr,H)}}
-   if(big&&(p.fin||p.fout)){const fx=ms=>ms/1000/D*W*(p.warp&&p.wbuf?(b-a)*D/p.wbuf.duration:Math.pow(2,(p.off||0)/12)),hb=H-12*dpr;g.strokeStyle='#fff';g.lineWidth=1.5*dpr;g.beginPath();  // your fades, as they fall on the piece
+   if(big&&(p.fin||p.fout)){const fx=ms=>ms/1000/D*W*(p.warp&&p.wbuf?(b-a)*D/p.wbuf.duration:2**(TR.semis(p.off||0,p)/12)),hb=H-12*dpr;g.strokeStyle='#fff';g.lineWidth=1.5*dpr;g.beginPath();  // your fades, as they fall on the piece
      if(p.fin){g.moveTo(a*W,hb);g.lineTo(Math.min(b*W,a*W+fx(p.fin)),2)}if(p.fout){g.moveTo(Math.max(a*W,b*W-fx(p.fout)),2);g.lineTo(b*W,hb)}g.stroke()}
    g.fillStyle='#e0a458';[a,b].forEach((t,k)=>{const x=Math.min(W-2*dpr,Math.max(0,t*W-dpr));g.fillRect(x,0,2*dpr,H);if(big)g.fillRect(k?x-5*dpr:x,0,7*dpr,10*dpr)})});
   document.querySelectorAll(`[data-mxtrimlen="${stem}"]`).forEach(o=>o.textContent=((b-a)*D).toFixed(2)+' s');
@@ -2456,80 +3306,76 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     g.fillStyle='#e0a458';g.fillRect(x0,0,Math.max(1,Math.round(dpr)),H);  // where the hit lands, under its step
     g.fillStyle='rgba(255,236,200,.9)';for(let x=0;x<m.length&&x0+x<W;x++){const h=Math.max(1,m[x]/(pk||1)*(H-4));g.fillRect(x0+x,(H-h)/2,1,h)}
     if(x0+wpx>W){g.fillStyle='rgba(255,255,255,.06)';g.fillRect(0,0,x0+wpx-W,H)}})}  // a hit near the end rings into the next time round
- function waves(){MX.order.forEach(stem=>{const p=MX.slots[stem],box=document.querySelector(`[data-mxwave="${stem}"]`);if(p&&p.buf&&box&&isOS(stem)){osWave(stem,p,box);return}if(!p||!p.buf||!box||isOS(stem))return;const c=box.querySelector('canvas'),dpr=devicePixelRatio||1,W=Math.round(box.clientWidth*dpr),H=Math.round((box.clientHeight||34)*dpr);
-   c.width=W;c.height=H;const g=c.getContext('2d'),d=p.buf.getChannelData(0),step=d.length/W,col=getComputedStyle(document.documentElement).getPropertyValue({drums:'--PERC',bass:'--BASS',vocals:'--VOX',other:'--KEYS'}[role(stem)]).trim()||'#8cc0da';
-   let pk=0;const m=new Float32Array(W);for(let x=0;x<W;x++){let v=0;for(let k=Math.floor(x*step),e=Math.min(d.length,Math.floor((x+1)*step));k<e;k+=3)v=Math.max(v,Math.abs(d[k]));m[x]=v;pk=Math.max(pk,v)}
-   // the waveform, over an axis that names the song's own bars (and ticks the beats), so "bars 53–56" can be read off it
-   const ax=Math.round(13*dpr),Hw=H-ax,ns=Math.max(1,Math.round(p.n*(p.k||1)));
-   g.fillStyle=col;for(let x=0;x<W;x++){const h=Math.max(1,m[x]/(pk||1)*Hw);g.fillRect(x,(Hw-h)/2,1,h)}
-   g.fillStyle='#0b0d10';g.fillRect(0,Hw,W,ax);g.font=`${9.5*dpr}px ui-monospace,Menlo,monospace`;g.textBaseline='middle';
-   const every=Math.max(1,Math.ceil(ns*30*dpr/W));  // a label needs about 30 px
-   for(let b=0;b<ns;b++){const x=Math.round(b/ns*W);if(b){g.fillStyle='rgba(255,255,255,.3)';g.fillRect(x,0,1,H)}
-    g.fillStyle='rgba(255,255,255,.22)';for(let q=1;q<4;q++)g.fillRect(Math.round((b+q/4)/ns*W),Hw,1,Math.round(ax*0.4));  // beats
-    if(b%every===0){g.fillStyle='#8a93a0';g.fillText(String(p.bar0+b+1),x+4*dpr,Hw+ax/2+dpr)}}})}
- let phRaf=0;function playheads(){phRaf=0;if(!MX.on||st.tab!=='M')return;MX.order.forEach(stem=>{const p=MX.slots[stem],el=document.querySelector(`[data-mxwave="${stem}"] i`);if(!p||!p.buf||!el)return;
-   const d=isOS(stem)?(p.n||1)*barLenM()*(p.every||1):p.buf.duration,x=(((AC.currentTime-MX.t0)%d)+d)%d/d;el.style.left=(x*100).toFixed(2)+'%';el.style.display='block'});phRaf=requestAnimationFrame(playheads)}
+ function waves(){MX.order.forEach(id=>{
+  if(!isOS(id)){TR.paintWave(id);return}
+  const p=MX.slots[id],box=document.querySelector(`[data-mxwave="${id}"]`);
+  if(p?.buf&&box)osWave(id,p,box);
+ })}
+ window.addEventListener('resize',()=>{if(st.tab==='M')waves()});
+ let phRaf=0;function playheads(){phRaf=0;if(!MX.on||st.tab!=='M')return;MX.order.forEach(id=>{
+  const p=MX.slots[id],el=document.querySelector(`[data-mxwave="${id}"] i`);if(!p?.buf||!el)return;
+  const os=isOS(id),d=os?(p.n||1)*barLenM()*(p.every||1):p.buf.duration;
+  const phase=(((AC.currentTime-MX.t0)%d)+d)%d/d,x=os?phase:TR.playhead(id,phase);
+  el.style.left=(x*100).toFixed(2)+'%';el.style.display=x<0||x>1?'none':'block';
+ });phRaf=requestAnimationFrame(playheads)}
  // open a saved combination (also: back to it as saved, dropping what you changed since)
- async function openSaved(m){const was=MX.on;if(was)play(false);MX.order.forEach(s=>stopSrc(s));
-   MX.bpm=m.state.bpm||MX.bpm;MX.key=m.state.key||'';if(m.state.reverb)BLEND.setReverb(MX,m.state.reverb.type,m.state.reverb.decay);MX.slots=JSON.parse(JSON.stringify(m.state.slots||{}));adopt(m.state);BLEND.adopt(MX,m.state);MX.name=m.name;MX.snapsOf=(MX.snaps||[]).length?m.name:null;MX.info=null;MX.savedSig=sig();await sync();MX.order.forEach(apply);play(true);}
+ async function openSaved(m){
+  if(MX.on)play(false);
+  MX.order.forEach(id=>stopSrc(id));
+  const sv=JSON.parse(JSON.stringify(m.state));
+  MX.bpm=sv.bpm||MX.bpm;MX.key=sv.key||'';MX.fx=sv.fx!==false;
+  if(sv.reverb)BLEND.setReverb(MX,sv.reverb.type,sv.reverb.decay);
+  MX.savedSig=null;restore(sv);MX.name=m.name;MX.snapsOf=MX.snaps.length?m.name:null;MX.info=null;
+  MX.savedSig=sig();await sync();MX.order.forEach(apply);play(true);
+ }
  async function refreshSaved(){try{MX.saved=(await api('api/stems/saved',{})).mixes}catch(e){MX.saved=[]}}
  async function refreshSongs(){try{const r=await api('api/stems/library',{});MX.songs=r.songs;MX.n=r.n;MX.rated=r.rated}catch(e){}}
- function draw(){const L=$('list');if(st.tab!=='M'||!L)return;if(BLEND.pbDraw(L))return;const I=MX.info||{},fit=I.fit;
+ const dbv=v=>(v>0?'+':'')+(+v||0).toFixed(1)+' dB';
+ function draw(){const L=$('list');if(st.tab!=='M'||!L)return;if(BLEND.pbDraw(L))return;const I=MX.info||{},fit=I.fit,restoreFocus=TR.retainFocus(L);
   if(MX.n===0){L.innerHTML=`<div class="empty">No songs are prepared for Mashup yet.<br>Run <code>digitalcrate stems</code> (about 2 minutes a song): it separates the sources of your favorites plus some random songs.</div>`;return}
-  // a control with its label above it; a slot is three zones: what it is (role, solo / mute, lock, remove), the part it
-  // plays (song, waveform, and the buttons that change the part), and its controls
-  const grp=(label,body,cls,tip)=>`<div class="mxc${cls?' '+cls:''}"${tip?` title="${tip}"`:''}><div class="mxl">${label}</div><div class="mxv">${body}</div></div>`;
-  const dbv=v=>(v>0?'+':'')+(+v||0).toFixed(1)+' dB';
-  const row=stem=>{const p=MX.slots[stem],R=role(stem),pit=PITCHED.has(R);
-   const name=`<div class="mxname"><select data-mxrole="${stem}" title="what this slot plays: change it and a new part of that kind comes in">${ROLES.map(x=>`<option value="${x}" ${x===R?'selected':''}>${ICON[x]} ${x==='oneshot'?'one-shot':x}</option>`).join('')}</select></div>`;
-   if(!p)return `<div class="mxrow mxempty" data-mxrow="${stem}"><div class="mxhead">${name}</div>
-    <div class="mxmain"><div class="mxline"><div class="mxsrc"><span class="sub">empty</span></div><span class="mxpart"><button class="tbtn" data-mxroll="${stem}" title="pull a part that fits">🎲 pull a part</button>${(MX.hist[stem]||[]).length?`<button class="tbtn" data-mxhist="${stem}:0" title="bring back the part this slot last held">↶ bring back</button>`:''}<button class="tbtn" data-mxfind="${stem}" title="choose the song yourself: the mixer takes its best-fitting bars">🔍 choose a song</button></span></div></div>
-    <div class="mxctl">${MX.order.length>1?`<button class="tbtn" data-mxrm="${stem}" title="remove this slot">✕ remove slot</button>`:''}</div></div>${findHTML(stem)}`;
-   const eq=p.eq||[0,0,0],sm=p.semis||0,fxoff=MX.fx===false;
-   if(R==='oneshot'){const n=p.n||1,on=new Set(p.steps||[]),fit=p.fit||[];
-    return `<div class="mxrow${p.mute?' muted':''}" data-mxrow="${stem}">
-    <div class="mxhead">${name}<div class="mxsm"><button class="tbtn${p.solo?' on':''}" data-mxsolo="${stem}" title="solo">S</button><button class="tbtn${p.mute?' on':''}" data-mxmute="${stem}" title="mute">M</button><button class="tbtn${p.lock?' on':''}" data-mxlock="${stem}" title="lock: keep this when you 🎲 all">🔒</button><button class="tbtn" data-mxdup="${stem}" title="duplicate this slot: the same part and settings in a new slot, to change from there">⧉</button><button class="tbtn" data-mxdel="${stem}" title="take it out (the slot stays empty until you 🎲 or 🔍)">✕</button></div></div>
-    <div class="mxmain"><div class="mxline">
-     <span class="mxpart"><button class="tbtn" data-mxroll="${stem}" title="🎲 another one-shot that fits the harmony (your placement stays)" ${p.lock?'disabled':''}>🎲</button><button class="tbtn" data-mxfind="${stem}" title="🔍 choose one from your library">🔍</button><button class="tbtn" data-mxaud="${stem}" title="▶ hear it once">▶</button><button class="tbtn" data-mxhist="${stem}:-1" title="↶ back to what this slot held before" ${(MX.hpos[stem]??-1)>0?'':'disabled'}>↶</button><button class="tbtn" data-mxhist="${stem}:1" title="↷ forward again" ${(MX.hpos[stem]??-1)<((MX.hist[stem]||[]).length-1)?'':'disabled'}>↷</button></span>
-     <div class="mxsrc" title="${esc(p.artist)} — ${esc(p.title)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')}<br><span class="sub">${p.err?'failed: '+esc(p.err):p._loading?'loading…':`${esc(p.sub||'one-shot')} · ${p.buf?(p.buf.duration/Math.pow(2,(p.off||0)/12)).toFixed(2):(p.dur||'?')} s${p.key?` · ${p.key}${p.semis?` ${p.semis>0?'+':''}${p.semis} st`:''}`:''} · ${on.size} hit${on.size===1?'':'s'}${on.size?'':': click a step below to place one'}`}</span></div></div>
-     <div class="mxwave mxsteps" data-mxwave="${stem}" style="--n:${n*16};--b:${n}"><div class="mxsg">${Array.from({length:n*16},(_,k)=>`<button class="mxst${on.has(k)?' on':''}${k%16===0?' bar':k%4===0?' beat':''}" data-mxstep="${stem}:${k}" title="bar ${Math.floor(k/16)+1}, beat ${Math.floor(k%16/4)+1}${k%4?' + '+(k%4)+'/16':''}"></button>`).join('')}</div>
-      <canvas class="mxosw"></canvas>
-      <div class="mxsax">${Array.from({length:n},(_,b)=>`<span style="--f:${fit[b]!=null?Math.max(0,Math.min(1,(fit[b]-0.5)*2)).toFixed(2):0}" title="${fit[b]!=null?`fits this bar's harmony ${Math.round(fit[b]*100)}%`:''}">${b+1}</span>`).join('')}</div><i></i></div></div>
-    <div class="mxctl"><div class="mxcr">
-     ${grp('cycle',`<select data-mxlen="${stem}" title="how many bars before the pattern comes round again">${[1,2,4,8].map(k=>`<option value="${k}" ${n===k?'selected':''}>${k} bar${k>1?'s':''}</option>`).join('')}</select><select data-mxevery="${stem}" title="play it every time round, or only every 2nd or 4th time">${[[1,'every time'],[2,'every 2nd'],[4,'every 4th']].map(([v,l])=>`<option value="${v}" ${(p.every||1)===v?'selected':''}>${l}</option>`).join('')}</select>`,'','the pattern: its length, and how often it plays')}
-     ${grp('pitch',`<button class="tbtn" data-mxoff="${stem}:-1" title="a semitone down">−</button><output>${((p.off||0)>0?'+':'')+(p.off||0)+' st'}</output><button class="tbtn" data-mxoff="${stem}:1" title="a semitone up">＋</button>`,'','your own shift in semitones, on top of the shift to the key (it also changes the length, like a sampler)')}
-     ${grp(`volume <output>${dbv(p.db)}</output>`,`<input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${stem}">`,'mxvol','volume · double-click for 0 dB')}
-     ${grp('harmonics',`<button class="tbtn mxtg${p.harm?' on':''}" data-mxharm="${stem}">${p.harm?'on':'off'}</button>`,fxoff?'mxoff':'','adds overtones above 110 Hz, so a low or sub-heavy sound can be heard on small speakers')}
-     ${grp(`trim <output data-mxtrimlen="${stem}"></output><button class="tbtn mxtg${MX.trimOpen===stem?' on':''}" data-mxtrimopen="${stem}" title="a large view: fine trimming, fade in and out, and warping to a length">⤢ shape</button>`,`<canvas class="mxtrim" data-mxtrim="${stem}"></canvas>`,'','the piece of the sample that plays: drag across it to choose, drag an edge to adjust, double-click for the whole sample · ⤢ opens a large view')}
-     </div><div class="mxcr">
-     ${grp(`<button class="tbtn mxtg${p.eqOn!==false?' on':''}" data-mxeqon="${stem}" title="EQ on / off (your settings are kept)">EQ</button>`,['low','mid','high'].map((nm,k)=>`<label class="mxb"><i>${nm}</i><input type="range" min="-12" max="12" step="0.5" value="${eq[k]}" data-mxeq="${stem}:${k}"></label>`).join(''),p.eqOn===false||fxoff?'mxoff':'','EQ: low (200 Hz) · mid (1 kHz) · high (5 kHz), ±12 dB · double-click to reset')}
-     ${grp(`<button class="tbtn mxtg${p.dlyOn!==false?' on':''}" data-mxdlyon="${stem}" title="delay on / off (your settings are kept)">DELAY</button>`,`<input type="range" min="0" max="0.8" step="0.02" value="${p.dly||0}" data-mxdly="${stem}"><select data-mxdt="${stem}" title="its time, in notes of the tempo">${Object.keys(DT).map(k=>`<option ${k===(p.dt||'1/8')?'selected':''}>${k}</option>`).join('')}</select>`,p.dlyOn===false||fxoff?'mxoff':'','delay: how much, and its time (in notes of the tempo)')}
-     ${grp(`<button class="tbtn mxtg${p.revOn!==false?' on':''}" data-mxrevon="${stem}" title="reverb on / off (your setting is kept)">REVERB</button>`,`<input type="range" min="0" max="1" step="0.02" value="${p.rev||0}" data-mxrev="${stem}">`,p.revOn===false||fxoff?'mxoff':'','how much of this slot goes to the reverb')}
-     </div></div></div>${trimHTML(stem)}${findHTML(stem)}`}
-   return `<div class="mxrow${p.mute?' muted':''}" data-mxrow="${stem}">
-    <div class="mxhead">${name}<div class="mxsm"><button class="tbtn${p.solo?' on':''}" data-mxsolo="${stem}" title="solo: only this slot (and other soloed ones)">S</button><button class="tbtn${p.mute?' on':''}" data-mxmute="${stem}" title="mute">M</button><button class="tbtn${p.lock?' on':''}" data-mxlock="${stem}" title="lock: keep this part when you 🎲 all">🔒</button><button class="tbtn" data-mxdup="${stem}" title="duplicate this slot: the same part and settings in a new slot, to change from there">⧉</button><button class="tbtn" data-mxdel="${stem}" title="take this part out (the slot stays empty until you 🎲 or 🔍)">✕</button></div></div>
-    <div class="mxmain"><div class="mxline">
-     <span class="mxpart"><button class="tbtn" data-mxroll="${stem}" title="🎲 another part that fits what's playing" ${p.lock?'disabled':''}>🎲</button><button class="tbtn" data-mxalt="${stem}" title="⇄ another stretch of this from the same song (its other takes), best-fitting first">⇄</button><button class="tbtn" data-mxfind="${stem}" title="🔍 choose the song yourself: the mixer takes its best-fitting bars">🔍</button><button class="tbtn" data-mxhist="${stem}:-1" title="↶ back to the part this slot held before" ${(MX.hpos[stem]??-1)>0?'':'disabled'}>↶</button><button class="tbtn" data-mxhist="${stem}:1" title="↷ forward again" ${(MX.hpos[stem]??-1)<((MX.hist[stem]||[]).length-1)?'':'disabled'}>↷</button></span>
-     <div class="mxsrc" title="${esc(p.artist)} — ${esc(p.title)}${why(p)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')}<br><span class="sub">${p.err?'failed: '+esc(p.err):p._loading?'rendering…':`bars ${p.bar0+1}–${p.bar0+Math.max(1,Math.round(p.n*(p.k||1)))}${(I.slots||{})[stem]?` · from ${(I.slots[stem].src_bpm)} bpm${(p.k||1)===2?' (half-time)':(p.k||1)===0.5?' (double-time)':''}${p.alt?` · take ${p.alt[0]}/${p.alt[1]}`:''}${(p.sub||0)>=0.85?` · <span title="all of this part is below 100 Hz: laptop and other small speakers can't play it. Harmonics adds overtones you can hear on them">sub-bass${p.harm?' (+harmonics)':': silent on small speakers'}</span>`:''}${pit?` · ${I.slots[stem].key}${sm?` ${sm>0?'+':''}${sm} st`:''}`:''}`:''}`}</span></div></div>
-     <div class="mxwave" data-mxwave="${stem}"><canvas></canvas><i></i></div></div>
-    <div class="mxctl"><div class="mxcr">
-     ${grp('loop',`<button class="tbtn" data-mxpos="${stem}:-1" title="start one loop length earlier in the song">◀</button><button class="tbtn" data-mxpos="${stem}:1" title="start one loop length later">▶</button><select data-mxlen="${stem}" title="loop length">${[1,2,4,8].map(n=>`<option value="${n}" ${p.n===n?'selected':''}>${n} bar${n>1?'s':''}</option>`).join('')}</select>`,'','where in the song the loop starts, and how long it is')}
-     ${grp('pitch',`<button class="tbtn" data-mxoff="${stem}:-1" ${pit?'':'disabled'} title="a semitone down">−</button><output>${pit?((p.off||0)>0?'+':'')+(p.off||0)+' st':'·'}</output><button class="tbtn" data-mxoff="${stem}:1" ${pit?'':'disabled'} title="a semitone up">＋</button>`,'',pit?'your own shift in semitones, on top of the shift to the key':'drums are never pitch-shifted')}
-     ${grp(`volume <output>${dbv(p.db)}</output>`,`<input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${stem}">`,'mxvol','volume · double-click for 0 dB')}
-     ${grp('harmonics',`<button class="tbtn mxtg${p.harm?' on':''}" data-mxharm="${stem}">${p.harm?'on':'off'}</button>`,fxoff?'mxoff':'','adds overtones above 110 Hz, so a sub-bass can be heard on small speakers (switched on by itself for a pure sub)')}
-     ${BLEND.duckHTML(stem,R)}</div><div class="mxcr">
-     ${grp(`<button class="tbtn mxtg${p.eqOn!==false?' on':''}" data-mxeqon="${stem}" title="EQ on / off (your settings are kept)">EQ</button>`,['low','mid','high'].map((n,k)=>`<label class="mxb"><i>${n}</i><input type="range" min="-12" max="12" step="0.5" value="${eq[k]}" data-mxeq="${stem}:${k}"></label>`).join(''),p.eqOn===false||fxoff?'mxoff':'','EQ: low (200 Hz) · mid (1 kHz) · high (5 kHz), ±12 dB · double-click to reset')}
-     ${grp(`<button class="tbtn mxtg${p.dlyOn!==false?' on':''}" data-mxdlyon="${stem}" title="delay on / off (your settings are kept)">DELAY</button>`,`<input type="range" min="0" max="0.8" step="0.02" value="${p.dly||0}" data-mxdly="${stem}"><select data-mxdt="${stem}" title="its time, in notes of the tempo">${Object.keys(DT).map(k=>`<option ${k===(p.dt||'1/8')?'selected':''}>${k}</option>`).join('')}</select>`,p.dlyOn===false||fxoff?'mxoff':'','delay: how much, and its time (in notes of the tempo)')}
-     ${grp(`<button class="tbtn mxtg${p.revOn!==false?' on':''}" data-mxrevon="${stem}" title="reverb on / off (your setting is kept)">REVERB</button>`,`<input type="range" min="0" max="1" step="0.02" value="${p.rev||0}" data-mxrev="${stem}">`,p.revOn===false||fxoff?'mxoff':'','how much of this slot goes to the reverb (its type and decay are set at the top)')}
-     </div></div></div>${findHTML(stem)}`};
+  const row=id=>{
+   const p=MX.slots[id],R=role(id),os=isOS(id),filled=has(p),color=BLEND.STEMVAR[R]||'--VOX';
+   const name=`<div class="trname">${TR.name(R)}</div>`;
+   const die=`<button class="tbtn" data-mxroll="${id}" aria-label="New part" title="pull a part that fits" ${p?.lock?'disabled':''}>${TR.DIE}</button>`;
+   const more=TR.more(id,ROLES,(MX.hist[id]||[]).length);
+   const open=`<div class="trk${p?.mute?' muted':''}${TR.isOpen(id)?' open':''}" data-mxrow="${id}" style="--trcol:var(${color})">`;
+   const find=findHTML(id);
+   if(!filled)return `${open}<div class="trh">${name}<div class="trsrc sub">empty</div>${die}${more}</div></div>${find}`;
+
+   const n=p.n||1,k=p.k||1,on=new Set(p.steps||[]),fit=p.fit||[],i=I.slots?.[id];
+   const shift=TR.semis(p.semis||0,p);
+   const shiftText=shift?` ${shift>0?'+':''}${Number(shift.toFixed(2))} st`:'';
+   const length=p.buf?(p.buf.duration/2**(TR.semis(p.off||0,p)/12)).toFixed(2):(p.dur||'?');
+   const sampleText=`${esc(p.sub||'one-shot')} · ${length} s${p.key?` · ${p.key}${p.semis?` ${p.semis>0?'+':''}${p.semis} st`:''}`:''} · ${on.size} hit${on.size===1?'':'s'}`;
+   const rateText=k===2?' (half-time)':k===0.5?' (double-time)':'';
+   const takeText=p.alt?` · take ${p.alt[0]}/${p.alt[1]}`:'';
+   const subText=p.sub>=0.85?` · sub-bass${p.harm?' (+harmonics)':': silent on small speakers'}`:'';
+   const songText=i?`from ${i.src_bpm} bpm${rateText}${takeText}${subText} · ${i.key}${shiftText}`:'';
+   const sub=p.err?'failed: '+esc(p.err):p._loading?(os?'loading…':'rendering…'):os?sampleText:songText;
+   const src=`<div class="mxsrc trsrc" title="${esc(p.artist||'')} — ${esc(p.title||'')}${sub?' · '+sub:''}${why(p)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')} <span class="sub">${sub}</span></div>`;
+   const cycle=`<select data-mxlen="${id}" title="cycle length">${[1,2,4,8].map(l=>`<option value="${l}" ${n===l?'selected':''}>${l} bar${l===1?'':'s'}</option>`).join('')}</select>
+    <select data-mxevery="${id}" title="how often it plays">${[[1,'every time'],[2,'every 2nd'],[4,'every 4th']].map(([v,l])=>`<option value="${v}" ${(p.every||1)===v?'selected':''}>${l}</option>`).join('')}</select>`;
+   const history=`<button class="tbtn" data-mxhist="${id}:-1" title="back to the previous part" ${(MX.hpos[id]??-1)>0?'':'disabled'}>↶</button>
+    <button class="tbtn" data-mxhist="${id}:1" title="forward again" ${(MX.hpos[id]??-1)<(MX.hist[id]||[]).length-1?'':'disabled'}>↷</button>`;
+   const audition=os?`<button class="tbtn" data-mxaud="${id}" title="hear it once">▶</button>`:'';
+   const mix=`<button class="tbtn${p.solo?' on':''}" data-mxsolo="${id}" title="solo">S</button><button class="tbtn${p.mute?' on':''}" data-mxmute="${id}" title="mute">M</button>
+    <input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${id}" aria-label="Volume" title="${dbv(p.db)} · double-click for 0 dB">`;
+   const part=os?`<div class="mxwave mxsteps" data-mxwave="${id}" style="--n:${n*16};--b:${n}"><div class="mxsg">${Array.from({length:n*16},(_,j)=>`<button class="mxst${on.has(j)?' on':''}${j%16===0?' bar':j%4===0?' beat':''}" data-mxstep="${id}:${j}" title="bar ${Math.floor(j/16)+1}, beat ${Math.floor(j%16/4)+1}${j%4?' + '+(j%4)+'/16':''}"></button>`).join('')}</div>
+    <canvas class="mxosw"></canvas><div class="mxsax">${Array.from({length:n},(_,j)=>`<span style="--f:${fit[j]!=null?Math.max(0,Math.min(1,(fit[j]-0.5)*2)).toFixed(2):0}" title="${fit[j]!=null?`fits this bar's harmony ${Math.round(fit[j]*100)}%`:''}">${j+1}</span>`).join('')}</div><i></i></div>`
+    :`<div class="mxwave trwave" data-mxwave="${id}" tabindex="0" aria-label="${TR.name(R)} waveform"><canvas></canvas><i></i><span class="trtip" hidden></span>${TR.zoomButtons}</div>`;
+   return `${open}<div class="trh">${name}${src}<div class="trbars">${os?cycle:TR.barsText(p)}</div>
+    <span class="trgroup">${TR.num(id,'st')}${TR.num(id,'ct')}</span><span class="trgroup">${die}${audition}${history}</span><span class="trgroup">${mix}</span>${more}</div>
+    ${part}${TR.fxHTML(id)}</div>${trimHTML(id)}${find}`;
+  };
   L.innerHTML=`<div class="mx"><div class="mxtop">
     <button id="mxplay" class="${MX.on?'on':''}">${MX.on?'■ stop':'▶ play'}</button>
     <label>tempo <input id="mxbpm" type="number" min="50" max="200" step="1" value="${MX.bpm}" style="width:64px"> bpm</label>
     <label>key <select id="mxkey"><option value="">auto${!MX.key&&I.key?` (${I.key})`:''}</option>${KEYS.map(k=>`<option ${MX.key===k?'selected':''}>${k}</option>`).join('')}</select></label>
-    <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">🎲 all</button>
+    <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">${TR.DIE} all</button>
     <span class="mxrate"><button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button></span>
-    <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ, delay and harmonics on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
+    <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ, delay, reverb and harmonics on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
     <span class="mxrvb" title="the reverb every slot's REVERB send goes to"><span class="mxlab">reverb</span><select id="mxrvtype">${Object.keys(BLEND.REVERBS).map(k=>`<option ${k===MX.reverb.type?'selected':''}>${k}</option>`).join('')}</select><input type="range" id="mxrvdecay" min="0.3" max="6" step="0.1" value="${MX.reverb.decay}" title="decay time"><output>${(+MX.reverb.decay).toFixed(1)} s</output></span>
+    ${TR.viewSwitch()}
     <span class="mxfit" title="how well the pitched parts' notes agree, bar by bar, after shifting to the key (100% = the same notes)">${fit==null?'':`harmony fit <b style="color:${fit>=0.8?'var(--ok,#8fc98f)':fit>=0.65?'var(--acc)':'#d96c6c'}">${Math.round(fit*100)}%</b>`}</span>
     <span class="mxsaveg"><input id="mxname" placeholder="name this combination" value="${esc(MX.name||'')}" style="width:150px"><button id="mxsave">💾 save</button>
     ${MX.saved&&MX.saved.length?`<select id="mxload"><option value="">open a saved one…</option>${MX.saved.map(m=>`<option ${m.name===MX.name?'selected':''}>${esc(m.name)}</option>`).join('')}</select>${MX.name&&MX.saved.some(m=>m.name===MX.name)?`<button id="mxrevert" title="back to “${esc(MX.name)}” as it was last saved: drops the changes made since">↺ revert</button><button id="mxdelsaved" title="delete the saved combination “${esc(MX.name)}”">🗑</button>`:''}`:''}</span>
@@ -2539,23 +3385,28 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    ${BLEND.stripHTML()}
    ${MX.order.map(row).join('')}
    ${MX.order.length<8?`<div class="mxadd"><select id="mxaddrole">${ROLES.map(x=>`<option value="${x}">${ICON[x]} ${x==='oneshot'?'one-shot':x}</option>`).join('')}</select><button id="mxadd" title="another slot (up to 8): a second vocal, two drum layers, a pad under the keys…">＋ add slot</button></div>`:''}
-   <div class="sub" style="margin-top:10px"><span id="mxrated">${ratedTxt()}</span> · everything is stretched to the tempo and shifted to the key; drums keep their pitch</div>
+   <div class="sub" style="margin-top:10px"><span id="mxrated">${ratedTxt()}</span> · stems follow the tempo and pitched parts follow the key</div>
    <details class="mxsongs" id="mxsongs" ${MX.showSongs?'open':''}><summary>${MX.n==null?'':MX.n+' '}songs prepared for Mashup</summary>${songsHTML()}</details></div>`;
   const dt=$('mxsongs');if(dt)dt.ontoggle=async()=>{MX.showSongs=dt.open;if(dt.open){await refreshSongs();const el=dt.querySelector('.mxsl2');if(el)el.outerHTML=songsHTML();const sm=dt.querySelector('summary');if(sm)sm.textContent=`${MX.n} songs prepared for Mashup`}};
-  markSave();waves();if(MX.on&&!phRaf)phRaf=requestAnimationFrame(playheads);if(MX.find&&$('mxq')){const q=$('mxq');q.focus();q.setSelectionRange(q.value.length,q.value.length)}}
+  markSave();waves();restoreFocus();if(MX.on&&!phRaf)phRaf=requestAnimationFrame(playheads);if(MX.find&&$('mxq')){const q=$('mxq');q.focus();q.setSelectionRange(q.value.length,q.value.length)}}
  const L=$('list');
+ let pressedButton=null;
+ L.addEventListener('pointerdown',e=>{pressedButton=e.target.closest('button')});
  L.addEventListener('click',async e=>{if(st.tab!=='M')return;let t=e.target.closest('button');
   // the mixer may redraw between the press and the release of a click (a part finished loading): the button under the
   // pointer was replaced, and the browser hands the click to the container instead. Take the button that's there now.
-  if(!t&&e.clientX){const el=document.elementFromPoint(e.clientX,e.clientY);t=el&&el.closest?el.closest('button'):null;if(t&&!L.contains(t))t=null}
-  if(!t)return;const ds=t.dataset;
+  if(!t&&e.detail&&pressedButton&&!pressedButton.isConnected){
+   const replacement=document.elementFromPoint(e.clientX,e.clientY)?.closest('button');
+   if(replacement&&L.contains(replacement)&&replacement.id===pressedButton.id&&
+      Object.entries(pressedButton.dataset).every(([key,value])=>replacement.dataset[key]===value))t=replacement;
+  }
+  if(!t||t.disabled)return;const ds=t.dataset;
   if(t.id==='mxplay'){play(!MX.on);return}if(t.id==='mxall'){await rollAll();return}
   if(t.id==='mxadd'){const id='s'+Date.now().toString(36);MX.order.push(id);MX.roles[id]=$('mxaddrole').value;save();draw();await roll(id);if(!MX.on)play(true);return}
   if(ds.mxrm){const id=ds.mxrm;stopSrc(id);delete MX.slots[id];delete MX.roles[id];MX.order=MX.order.filter(x=>x!==id);if(MX.find&&MX.find.stem===id)MX.find=null;await sync();return}
-  if(t.id==='mxfx'){MX.fx=MX.fx===false;MX.order.forEach(apply);save();draw();return}
+  if(t.id==='mxfx'){MX.fx=MX.fx===false;MX.order.forEach(id=>{if(MX.slots[id]){initHarm(id);apply(id)}});save();draw();return}
   if(ds.mxeqon){const p=MX.slots[ds.mxeqon];p.eqOn=p.eqOn===false;apply(ds.mxeqon);save();draw();return}
   if(ds.mxrevon){const p=MX.slots[ds.mxrevon];p.revOn=p.revOn===false;apply(ds.mxrevon);save();draw();return}
-  if(ds.mxharm){const p=MX.slots[ds.mxharm];p.harm=!p.harm;apply(ds.mxharm);save();draw();return}
   if(ds.mxhist){const [id,d]=ds.mxhist.split(':');hgo(id,+d);return}
   if(ds.mxdlyon){const p=MX.slots[ds.mxdlyon];p.dlyOn=p.dlyOn===false;apply(ds.mxdlyon);save();draw();return}
   if(t.id==='mxclear'){const ns=(MX.snaps||[]).length;  // a clean slate: the snapshot strip goes too (it used to stay, and tag along into the next combination)
@@ -2565,15 +3416,20 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxalt){const id=ds.mxalt,p=MX.slots[id],key=[p.track,p.n,role(id),MX.bpm].join('|');
    if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('mashup: '+err.message);return}}
    const A=p._alts||[];if(A.length<2){toast('no other good stretch of this in the song');return}
-   const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];p.since=performance.now();p.harm=null;hpush(id);await sync();return}
+   const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];delete p.legacyLoop;delete p._viewKey;p.ct=0;p.since=performance.now();p.harm=null;delete p.hup;hpush(id);await sync();return}
   if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);stopSrc(s);delete MX.slots[s];await sync();return}
   if(ds.mxfind){if(MX.find&&MX.find.stem===ds.mxfind){MX.find=null;draw();return}MX.find={stem:ds.mxfind,q:''};await refreshSongs();draw();return}  // (songs still being prepared show up as they finish)
   if(ds.mxdup){const id=ds.mxdup,p=MX.slots[id];if(!has(p))return;if(MX.order.length>=8){toast('the mashup is full (8 slots)');return}
    const nid='s'+Date.now().toString(36),q={};Object.keys(p).forEach(k=>{if(k[0]!=='_')q[k]=Array.isArray(p[k])?p[k].slice():p[k]});  // everything but its audio chain; the decoded audio is shared
-   q.lock=false;q.solo=false;q.since=performance.now();q._key=p._key;MX.slots[nid]=q;MX.roles[nid]=role(id);MX.order.splice(MX.order.indexOf(id)+1,0,nid);if((MX.duck||{})[id])MX.duck[nid]=Object.assign({},MX.duck[id]);
-   hpush(nid);if(MX.on){if(isOS(nid)){chain(nid);apply(nid)}else startSrc(nid)}save();draw();toast('duplicated: change the copy from here');return}
+   q.lock=false;q.solo=false;q.since=performance.now();q._key=p._key;q._hc=p._hc;q._playingLoop=p._playingLoop;MX.slots[nid]=q;MX.roles[nid]=role(id);MX.order.splice(MX.order.indexOf(id)+1,0,nid);if((MX.duck||{})[id])MX.duck[nid]=Object.assign({},MX.duck[id]);
+   q._loading=!!p._loading;q._request=p._request;
+   hpush(nid);if(MX.on){if(isOS(nid)){chain(nid);apply(nid)}else startSrc(nid)}
+   save();draw();toast('duplicated: change the copy from here');
+   if(q._loading||q.err)await sync();
+   return}
   if(ds.mxtrimopen){MX.trimOpen=MX.trimOpen===ds.mxtrimopen?null:ds.mxtrimopen;draw();return}
   if(ds.mxtrimall){const p=MX.slots[ds.mxtrimall];p.trim=null;save();draw();if(p.warp)sync();return}
+  if(ds.mxharm){const p=MX.slots[ds.mxharm];p.harm=!BLEND.harmAmt(p);apply(ds.mxharm);save();draw();return}
   if(ds.mxnudge){const [id,w,d]=ds.mxnudge.split(':'),p=MX.slots[id],D=p.buf?p.buf.duration:1,t=osTrim(p).slice(),stp=(e.shiftKey?0.001:0.005)/D;
    t[+w]=Math.max(0,Math.min(1,t[+w]+(+d)*stp));if(t[1]-t[0]<0.004/D)return;p.trim=t;save();if(p.warp)sync();osTrimDraw(id,p);const box=document.querySelector(`[data-mxwave="${id}"]`);if(box)osWave(id,p,box);return}
   if(ds.mxstep){const [id,k]=ds.mxstep.split(':'),p=MX.slots[id],st2=new Set(p.steps||[]);st2.has(+k)?st2.delete(+k):st2.add(+k);p.steps=[...st2].sort((a,b)=>a-b);save();draw();return}
@@ -2585,12 +3441,19 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    await roll(id,false,+tid);if(!MX.on)play(true);return}
   if(ds.mxsong){const [s,tid]=ds.mxsong.split(':');MX.find=null;await roll(s,false,+tid);if(!MX.on)play(true);return}
   if(t.id==='mxsave'||t.id==='mxkeepsn'||t.id==='mxdropsn'){const name=($('mxname').value||'').trim()||MX.name||`Mix ${new Date().toLocaleString()}`;
+   if(MX._saving)return;
    // a strip that came with another saved combination doesn't silently become part of this one
    if(t.id==='mxsave'&&(MX.snaps||[]).length&&MX.snapsOf&&MX.snapsOf!==name){MX.ask=name;draw();return}
    if(t.id==='mxdropsn'){MX.snaps=[];MX.trans=[];MX.snapSel=null}
    MX.ask=null;MX.name=name;MX.snapsOf=(MX.snaps||[]).length?name:null;save();
-   const sb=$('mxsave');if(sb){sb.textContent='💾 saving…';sb.disabled=true}  // something happens at once, whatever the server is busy with
-   const mix=JSON.parse(localStorage.getItem('dcStems')||'{}');try{const r=await api('api/stems/save',{name,mix,state:state()});MX.rated=r.rated;MX.savedSig=sig();save();await refreshSaved();toast(`saved “${name}”`)}catch(err){toast('not saved: '+err.message+' (your combination is still here: try again)')}draw();return}
+   const mix=JSON.parse(localStorage.getItem('dcStems')||'{}'),savedSig=sig();
+   MX._saving=true;markSave();
+   try{
+    const r=await api('api/stems/save',{name,mix,state:state()});
+    MX.rated=r.rated;MX.savedSig=savedSig;save();await refreshSaved();toast(`saved “${name}”`);
+   }catch(err){toast('not saved: '+err.message+' (your combination is still here: try again)')}
+   finally{MX._saving=false;draw()}
+   return}
   if(t.id==='mxaskno'){MX.ask=null;draw();return}
   if(t.id==='mxexport'){const now=BLEND.snapNow(),L8='ABCDEFGH',secs=(MX.snaps||[]).length?MX.snaps.map((sn,k)=>({label:L8[k],order:sn.order,roles:sn.roles,slots:sn.slots})):[{label:MX.name||'Mashup',order:now.order,roles:now.roles,slots:now.slots}];
    const name=(MX.name||'').trim()||`Mashup ${new Date().toISOString().slice(0,10)}`;t.disabled=true;t.textContent='exporting…';
@@ -2602,15 +3465,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(t.id==='mxdown'){ev('dislike');MX.order.forEach(s=>{if(MX.slots[s])MX.slots[s].since=null});await rollAll();return}
   if(ds.mxroll){await roll(ds.mxroll);if(!MX.on)play(true);return}
   if(ds.mxlock){const p=MX.slots[ds.mxlock];p.lock=!p.lock;if(p.lock)ev('lock',ds.mxlock);save();draw();return}
-  if(ds.mxpos){const [s,d]=ds.mxpos.split(':'),p=MX.slots[s];const ns=Math.max(1,Math.round(p.n*(p.k||1)));p.alt=null;p.bar0=Math.max(0,Math.min((p.bars||9999)-ns,p.bar0+(+d)*ns));await sync();return}
-  if(ds.mxoff){const [s,d]=ds.mxoff.split(':'),p=MX.slots[s];p.off=Math.max(-12,Math.min(12,(p.off||0)+(+d)));if(isOS(s)){save();draw();if(p.warp)await sync();return}await sync();return}
+
   if(ds.mxsolo){const p=MX.slots[ds.mxsolo];p.solo=!p.solo;MX.order.forEach(apply);draw();return}
   if(ds.mxmute){const p=MX.slots[ds.mxmute];p.mute=!p.mute;MX.order.forEach(apply);save();draw();return}});
  L.addEventListener('input',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset;
   if(t.id==='mxq'){MX.find.q=t.value;draw();return}if(t.id==='mxname'){MX.name=t.value;return}
-  if(ds.mxdb){MX.slots[ds.mxdb].db=+t.value;apply(ds.mxdb);const o=t.closest('.mxc')&&t.closest('.mxc').querySelector('output');if(o)o.textContent=(+t.value>0?'+':'')+(+t.value).toFixed(1)+' dB'}else if(ds.mxeq){const [s,k]=ds.mxeq.split(':'),p=MX.slots[s];p.eq=p.eq||[0,0,0];p.eq[+k]=+t.value;apply(s)}
-  else if(ds.mxdly){MX.slots[ds.mxdly].dly=+t.value;apply(ds.mxdly)}
-  else if(ds.mxrev){MX.slots[ds.mxrev].rev=+t.value;apply(ds.mxrev)}
+  if(ds.mxdb){MX.slots[ds.mxdb].db=+t.value;apply(ds.mxdb);t.title=dbv(+t.value)+' · double-click for 0 dB'}
   else if(ds.mxfade){const [id,w]=ds.mxfade.split(':'),p=MX.slots[id];p[w]=+t.value;t.nextElementSibling.textContent=t.value+' ms';osTrimDraw(id,p)}
   else if(t.id==='mxrvdecay'){t.parentNode.querySelector('output').textContent=(+t.value).toFixed(1)+' s'}markSave()});
  L.addEventListener('change',async e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset;
@@ -2620,7 +3480,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(t.id==='mxrvtype'){BLEND.out(MX,AC);BLEND.setReverb(MX,t.value);save();draw();return}        // a type brings its own decay
   if(t.id==='mxrvdecay'){BLEND.out(MX,AC);BLEND.setReverb(MX,MX.reverb.type,+t.value);save();markSave();return}  // (on release: the room is rebuilt)
   if(ds.mxrole){const id=ds.mxrole,old=MX.slots[id];if(MX.roles[id]===t.value)return;stopSrc(id);MX.roles[id]=t.value;  // a new role: a new part of that kind, the slot's mix settings stay
-   if(old)MX.slots[id]={db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c,n:old.n,_blank:true};
+   if(old)MX.slots[id]={db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,fb:old.fb,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c,n:old.n,_v:old._v,_viewMode:old._viewMode,_preset:old._preset,_blank:true};
    await roll(id);if(MX.slots[id]&&MX.slots[id]._blank){delete MX.slots[id];await sync()}return}
   if(t.id==='mxload'){const m=(MX.saved||[]).find(x=>x.name===t.value);if(!m)return;await openSaved(m);return}
   if(ds.mxwarp){const p=MX.slots[ds.mxwarp];p.warp=+t.value;p._next=null;await sync();return}
@@ -2628,8 +3488,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxevery){MX.slots[ds.mxevery].every=+t.value;save();draw();return}
   if(ds.mxlen&&isOS(ds.mxlen)){const p=MX.slots[ds.mxlen];p.n=+t.value;p.steps=(p.steps||[]).filter(k=>k<p.n*16);p.fit=null;p._next=null;save();draw();
    api('api/stems/oneshot',{state:state(),n:p.n,path:p.sample}).then(r=>{if(r.part&&MX.slots[ds.mxlen]===p){p.fit=r.part.fit;save();draw()}}).catch(()=>{});return}  // how it fits each bar of the new cycle
-  if(ds.mxlen){const p=MX.slots[ds.mxlen];p.n=+t.value;if((p.k||1)===0.5&&p.n<2)p.n=2;p.bar0=Math.max(0,Math.min((p.bars||9999)-Math.max(1,Math.round(p.n*(p.k||1))),p.bar0));await sync();return}
-  if(ds.mxdt){MX.slots[ds.mxdt].dt=t.value;apply(ds.mxdt);save();return}save()});
+  save()});
  L.addEventListener('keydown',e=>{if(st.tab!=='M'||e.target.id!=='mxq')return;if(e.key==='Enter'){const b=document.querySelector('.mxfind [data-mxsong]');if(b)b.click()}else if(e.key==='Escape'){MX.find=null;draw()}e.stopPropagation()});
  {let dr=null;const fr=(c,e)=>Math.max(0,Math.min(1,(e.clientX-c.getBoundingClientRect().left)/c.clientWidth));
   L.addEventListener('mousedown',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;e.preventDefault();const id=c.dataset.mxtrim,p=MX.slots[id];if(!p||!p.buf)return;
@@ -2640,14 +3499,20 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.addEventListener('mouseup',()=>{if(!dr)return;const p=dr.p,moved=dr.moved;dr=null;if(!moved)return;  // a plain click changes nothing (and mustn't redraw: a double-click needs the same canvas twice)
    if(!p.trim||p.trim[1]-p.trim[0]<0.01||(p.trim[0]<0.005&&p.trim[1]>0.995))p.trim=null;save();draw();if(p.warp)sync()});
   L.addEventListener('dblclick',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;const p=MX.slots[c.dataset.mxtrim];if(p){p.trim=null;save();draw()}})}
- L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;apply(ds.mxdb)}
-  else if(ds.mxeq){const [s,k]=ds.mxeq.split(':');MX.slots[s].eq[+k]=0;t.value=0;apply(s)}
-  else if(ds.mxrev){MX.slots[ds.mxrev].rev=0;t.value=0;apply(ds.mxrev)}else if(ds.mxdly){MX.slots[ds.mxdly].dly=0;t.value=0;apply(ds.mxdly)}save();markSave()});
+ L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;t.title=dbv(0)+' · double-click for 0 dB';apply(ds.mxdb)}
+  save();markSave()});
  BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,ev,barLenM});
+ TR.init({MX,AC,role,isOS,part:id=>MX.slots[id],apply,sync,save,mark:markSave,draw,loop:setLoop,pitch:id=>{
+  const p=MX.slots[id];
+  hpush(id);
+  const entry=MX.hist[id]?.[MX.hpos[id]];
+  if(entry){entry.off=p.off;entry.ct=p.ct}
+  if(isOS(id)&&p.buf)draw()
+ }});
  // the tab
  $('tabY').insertAdjacentHTML('afterend',`<button id="tabM" title="recombine drums, bass, vocals and the rest from different songs">🎛 Mashup</button>`);
  $('tabM').onclick=()=>{st.tab='M';render()};
- const _rM=render;render=function(...a){$('tabM').classList.toggle('on',st.tab==='M');if(st.tab!=='M'){document.body.classList.remove('mash');if(MX._refit){MX._refit=false;if(typeof scheduleRefit==='function')scheduleRefit()}return _rM.apply(this,a)}
+ const _rM=render;render=function(...a){$('tabM').classList.toggle('on',st.tab==='M');if(st.tab!=='M'){TR.closeMenu();document.body.classList.remove('mash');if(MX._refit){MX._refit=false;if(typeof scheduleRefit==='function')scheduleRefit()}return _rM.apply(this,a)}
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.id==='tabM'));try{localStorage.setItem('dcTab','M')}catch(e){}
   document.body.classList.add('wide','mash');['cats','subsBox','sbanner','tbanner'].forEach(id=>{if($(id))$(id).hidden=true});$('count').textContent='mashup';draw();
   if(MX.saved==null){MX.saved=[];refreshSaved().then(draw)}
@@ -2664,7 +3529,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  if(typeof scheduleRefit==='function'){const _sr=scheduleRefit;scheduleRefit=function(){if(st.tab==='M'){MX._refit=true;return}_sr()}}
  // ⌘S on this tab saves the mashup (not the sketch)
  window.addEventListener('keydown',e=>{if(st.tab!=='M'||!(e.metaKey||e.ctrlKey)||e.key.toLowerCase()!=='s')return;e.preventDefault();e.stopImmediatePropagation();const b=$('mxsave');if(b&&!b.disabled)b.click()},true);
- window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync}
+ window.CRATE.TR=TRACKS;window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync}
 // ---------- sliders: keep each one's fill (--a .. --b, see studio.css) in step with its value. The fill runs from the
 // minimum, or from zero when the range spans it (EQ, tune, dB), so "all the way down" and "0" both look off.
 {const paint=el=>{const mn=+el.min||0,mx=el.max===''?100:+el.max,v=+el.value,span=mx-mn||1,p=Math.max(0,Math.min(1,(v-mn)/span)),z=mn<0&&mx>0?(0-mn)/span:0;

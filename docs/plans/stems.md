@@ -3,6 +3,8 @@
 Status: phase 1 built, and from phase 2: half/double time, bar rotation, the still-harmony preference, choosing a song
 yourself, saving combinations. Still to do: per-bar warping, grain- and section-aware picking, export.
 
+How a slot looks and is played: [tracks.md](tracks.md).
+
 Snapshots, blends between them and the low-end duck: [blend.md](blend.md).
 
 ## The idea
