@@ -1000,12 +1000,15 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function("Object.entries(CRATE.MX.slots).some(([id,p])=>CRATE.MX.roles[id]==='drums'&&p&&p.track===903&&p.buf)", timeout=120000)
     # ⇄ steps to another stretch of the same stem in the same song
     b0, tr = page.evaluate(f"[CRATE.MX.slots['{stem}'].bar0,CRATE.MX.slots['{stem}'].track]")
+    _more(page, stem)
     page.click(f'[data-mxalt="{stem}"]')
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].bar0!=={b0}&&CRATE.MX.slots['{stem}'].buf&&!CRATE.MX.slots['{stem}']._loading", timeout=120000)
     assert page.evaluate(f"CRATE.MX.slots['{stem}'].track") == tr and page.evaluate(f"CRATE.MX.slots['{stem}'].alt[1]") >= 2
     # ✕ takes a part out; 🔍 puts a chosen song in
+    _more(page, stem)
     page.click(f'[data-mxdel="{stem}"]')
     page.wait_for_function(f"!CRATE.MX.slots['{stem}']", timeout=10000)
+    _more(page, stem)
     page.click(f'[data-mxfind="{stem}"]')
     page.fill("#mxq", "Stem Artist 902")
     page.wait_for_selector(f'[data-mxsong="{stem}:902"]')
@@ -1029,6 +1032,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     # ↺ revert: changes made to an open saved combination are dropped, and it's back as saved
     saved_track = page.evaluate(f"CRATE.MX.slots['{stem}'].track")
+    _more(page, stem)
     page.click(f'[data-mxdel="{stem}"]')
     page.wait_for_function(f"!CRATE.MX.slots['{stem}']", timeout=10000)
     page.click("#mxrevert")
@@ -1042,6 +1046,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.slots[CRATE.MX.order[4]]&&CRATE.MX.slots[CRATE.MX.order[4]].buf", timeout=120000)
     new = page.evaluate("CRATE.MX.order[4]")
     assert page.evaluate(f"CRATE.MX.slots['{new}'].stem") == "other"
+    _more(page, new)
     page.select_option(f'[data-mxrole="{new}"]', "vocals")
     page.wait_for_function(f"CRATE.MX.roles['{new}']==='vocals'&&CRATE.MX.slots['{new}']&&CRATE.MX.slots['{new}'].stem==='vocals'&&CRATE.MX.slots['{new}'].buf", timeout=120000)
     page.click("#mxplay")
@@ -1260,6 +1265,7 @@ def _strip(site, page, bpm=100, three=False):
     page.click("#sncap")
     page.wait_for_function("CRATE.MX.snaps.length===1")
     _roll(page, "drums", 902)
+    _more(page, 'other')
     page.click('[data-mxdel="other"]')
     page.wait_for_function("!CRATE.MX.slots.other")
     page.click("#sncap")
@@ -1439,6 +1445,7 @@ def test_snapshot_says_when_the_mixer_has_moved_on(site, page):
     page.wait_for_function("!document.querySelector('#snrep').classList.contains('dirty')", timeout=5000)
     assert page.evaluate(f"CRATE.MX.snaps[0].slots['{sid}'].mute") is True       # ↻ wrote the change into it
     # a snapshot click replaces the mixer: when what was there isn't in any snapshot, it can be undone
+    _more(page, sid)
     page.click(f'[data-mxdel="{sid}"]')
     page.wait_for_function(f"!CRATE.MX.slots['{sid}']", timeout=10000)
     page.click('[data-sn="0"]')
@@ -1536,13 +1543,16 @@ def test_mashup_one_shot_slot(site, page):
     page.dblclick(f'canvas[data-mxtrim="{sid}"]')
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].trim") is None
     # ⧉ duplicate: the same sample, placement and settings in a new slot right below
+    _more(page, sid)
     page.click(f'[data-mxdup="{sid}"]')
     dup = page.evaluate(f"CRATE.MX.order[CRATE.MX.order.indexOf('{sid}')+1]")
     assert page.evaluate(f"CRATE.MX.roles['{dup}']") == "oneshot" and page.evaluate(f"CRATE.MX.slots['{dup}'].steps") == [0, 10, 30]
     assert page.evaluate(f"CRATE.MX.slots['{dup}'].sample===CRATE.MX.slots['{sid}'].sample&&!!CRATE.MX.slots['{dup}'].buf")
     page.click(f'[data-mxstep="{dup}:4"]')                           # the copy is its own: changing it leaves the original
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 10, 30]
+    _more(page, dup)
     page.click(f'[data-mxdel="{dup}"]')
+    _more(page, dup)
     page.click(f'[data-mxrm="{dup}"]')
     page.wait_for_function(f"!CRATE.MX.order.includes('{dup}')", timeout=10000)
     page.click("#mxplay")                                            # it plays on the bar clock, through its own chain
@@ -1694,3 +1704,39 @@ def test_effects_are_numbers_under_every_track(site, page):
         assert page.evaluate(f"[...document.querySelectorAll('[data-mxrow=\"{s}\"] .trfx .trdev')].every(d=>d.getBoundingClientRect().right<={r['r']}+1)")
     os = _one_shot(page)
     assert devs(os) == ["eq", "dly", "rev", "trim"] and page.locator(f'[data-mxrow="{os}"] .trfx canvas[data-mxtrim="{os}"]').count() == 1
+
+
+EMOJI = "[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}]"
+
+def _more(page, slot):
+    """Open a track's ⋯ menu (the moved controls are in it)."""
+    if not page.locator(f'[data-mxrow="{slot}"].open').count():
+        page.click(f'[data-trmore="{slot}"]')
+
+def test_track_header_holds_every_control(site, page):
+    _mixer(site, page)
+    page.set_viewport_size({"width": 1280, "height": 800})
+    for slot, word in (("drums", "Drums"), ("bass", "Bass"), ("vocals", "Vocals"), ("other", "Other")):
+        row = f'[data-mxrow="{slot}"]'
+        assert page.inner_text(f"{row} .trname").strip() == word
+        h = _box(page, f"{row} .trh")
+        for sel in (".trname", ".mxsrc", ".trbars", f'[data-v="{slot}:st"]', f'[data-v="{slot}:ct"]', "[data-mxroll]", f'[data-mxhist="{slot}:-1"]', f'[data-mxhist="{slot}:1"]', "[data-mxsolo]",
+                    "[data-mxmute]", "input[data-mxdb]", "[data-trmore]"):
+            b = _box(page, f"{row} .trh {sel}")
+            assert b["l"] >= h["l"] - 1 and b["r"] <= h["r"] + 1 and b["r"] <= 1280 and b["r"] > b["l"], (slot, sel, b)
+    assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+    assert page.evaluate(f"[...document.querySelectorAll('.trk')].every(e=>!/{EMOJI}/u.test(e.textContent))")
+    assert page.locator('[data-mxrow="bass"] .trmenu').is_hidden()
+    _more(page, "bass")
+    items = page.evaluate("""[...document.querySelectorAll('[data-mxrow="bass"] .trmenu [data-mxfind],[data-mxrow="bass"] .trmenu [data-mxalt],
+      [data-mxrow="bass"] .trmenu [data-mxlock],[data-mxrow="bass"] .trmenu [data-mxdup],[data-mxrow="bass"] .trmenu [data-mxdel],
+      [data-mxrow="bass"] .trmenu [data-mxrole],[data-mxrow="bass"] .trmenu [data-mxrm]')].length""")
+    assert items == 7
+    page.keyboard.press("Escape")
+    assert page.locator('[data-mxrow="bass"].open').count() == 0
+    _more(page, "bass"); page.click('[data-mxrow="bass"] [data-mxdup]')
+    page.wait_for_function("CRATE.MX.order.length===5")
+    # a one-shot: the same header, its own part under it
+    os = _one_shot(page)
+    assert page.inner_text(f'[data-mxrow="{os}"] .trname').strip() == "One-shot"
+    assert page.locator(f'[data-mxrow="{os}"] [data-mxstep]').count() == 16 and page.locator(f'[data-mxrow="{os}"] [data-mxaud]').count() == 1

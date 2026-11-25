@@ -2420,11 +2420,16 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   TR.set = (id, key, value) => {
     const p = H.part(id), spec = TR.P[key];
     if (!p || !spec || !Number.isFinite(value)) return;
-    spec.put(p, id, stepped(spec, value));
+    const v = stepped(spec, value);
+    if (spec.after === 'sync' && v === spec.get(p, id)) return;
+    spec.put(p, id, v);
     let pending;
     if (spec.after === 'sync') {
       H.pitch(id);
-      if (!H.isOS(id)) pending = H.sync();
+      if (!H.isOS(id)) {
+        p._loading = true;
+        pending = H.sync();
+      }
     } else H.apply(id);
     H.save();
     H.mark();
@@ -2434,6 +2439,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   TR.init = hooks => {
     H = hooks;
     const list = $('list');
+    menus(list);
     let drag;
     const number = e => e.target.closest('[data-v]');
     list.addEventListener('pointerdown', e => {
@@ -2545,6 +2551,51 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return `<div class="trfx">${eq}${dly}${rev}${tail}</div>`;
   };
 
+  TR.DIE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="none" stroke="currentColor"/><circle cx="5" cy="5" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="11" r="1"/></svg>';
+  TR.name = role => ({ drums: 'Drums', bass: 'Bass', vocals: 'Vocals', other: 'Other', oneshot: 'One-shot' })[role];
+  TR.more = (id, roles, back) => {
+    const p = H.part(id), filled = p && (p.track != null || p.sample), os = H.isOS(id);
+    const item = (key, label, attrs = '') => `<button type="button" data-mx${key}="${id}" ${attrs}>${label}</button>`;
+    return `<button type="button" class="tbtn" data-trmore="${id}" aria-label="Track options" aria-expanded="false" title="track options">⋯</button>
+      <div class="trmenu">
+        ${item('find', os ? 'Choose a sample' : 'Choose the song')}
+        ${filled && !os ? item('alt', 'Other takes') : ''}
+        ${filled ? item('lock', 'Keep on “all”', `aria-pressed="${!!p.lock}"`) : ''}
+        ${filled ? item('dup', 'Duplicate') + item('del', 'Empty this track') : ''}
+        ${!filled && back ? `<button type="button" data-mxhist="${id}:0">Bring back last part</button>` : ''}
+        <label>Plays <select data-mxrole="${id}" aria-label="What this track plays">${roles.map(r => `<option value="${r}" ${r === H.role(id) ? 'selected' : ''}>${TR.name(r)}</option>`).join('')}</select></label>
+        ${H.MX.order.length > 1 ? item('rm', 'Remove the track') : ''}
+      </div>`;
+  };
+  const menuOpen = (row, on) => {
+    row.classList.toggle('open', on);
+    row.querySelector('[data-trmore]').setAttribute('aria-expanded', on);
+  };
+  const menus = list => {
+    const close = row => { if (row) menuOpen(row, false); };
+    list.addEventListener('click', e => {
+      const more = e.target.closest('[data-trmore]'), open = list.querySelector('.trk.open');
+      if (more) {
+        const row = more.closest('.trk'), show = row !== open;
+        close(open);
+        if (show) menuOpen(row, true);
+      } else if (e.target.closest('.trmenu button')) close(open);
+    });
+    document.addEventListener('pointerdown', e => {
+      const open = list.querySelector('.trk.open');
+      if (!open || e.target.closest('.trmenu, [data-trmore]')) return;
+      close(open);
+    });
+    list.addEventListener('keydown', e => {
+      const open = list.querySelector('.trk.open');
+      if (!open || e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      close(open);
+      open.querySelector('[data-trmore]').focus();
+    });
+  };
+
   window.TRACKS = TR;
 })();
 // ---------- 🎛 Mashup (the stem mixer; the tab was called Stems): drums, bass, vocals and "other" from different songs, on one tempo and key
@@ -2599,7 +2650,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
      if(p&&isOS(stem)&&p.sample){const key=MX.key||(MX.info&&MX.info.key)||'',want=p.sample+'|'+key;if(p._key===want&&p.buf)return;p._loading=true;hint(stem);
       try{const ab=await (await fetch(key?window.CRATE.conformURL(p.sample,key,''):url(p.sample))).arrayBuffer();if(MX.slots[stem]!==p)return;p.buf=await AC.decodeAudioData(ab);p._key=want;p._loading=false;p.err=null;if(MX.on){chain(stem);apply(stem)}}catch(e){p._loading=false;p.err=e.message}return}
      if(!p||p.track==null)return;const shift=((MX.info.slots||{})[stem]||{}).semis||0,semis=TR.semis(shift,p),want=[p.track,p.bar0,p.n,p.k||1,MX.bpm,semis].join('|');
-     p.semis=shift;if(p._key===want&&p.buf)return;p._loading=true;hint(stem);
+     p.semis=shift;if(p._key===want&&p.buf){p._loading=false;return}p._loading=true;hint(stem);
      try{const r=await api('api/stems/render',{track:p.track,stem:role(stem),bar0:p.bar0,n:p.n,k:p.k||1,bpm:MX.bpm,semis});const ab=await (await fetch(url(r.url))).arrayBuffer();
       if(MX.slots[stem]!==p)return;p.buf=await AC.decodeAudioData(ab);p._key=want;p._loading=false;p.err=null;p.sub=r.sub||0;if(p.sub>=0.85&&p.harm==null)p.harm=true;startSrc(stem)}catch(e){p._loading=false;p.err=e.message}}));
    }while(again)}finally{syncing=null}save();draw();prefetchSoon()})();return syncing}
@@ -2686,48 +2737,50 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    MX.bpm=m.state.bpm||MX.bpm;MX.key=m.state.key||'';if(m.state.reverb)BLEND.setReverb(MX,m.state.reverb.type,m.state.reverb.decay);MX.slots=JSON.parse(JSON.stringify(m.state.slots||{}));adopt(m.state);BLEND.adopt(MX,m.state);MX.name=m.name;MX.snapsOf=(MX.snaps||[]).length?m.name:null;MX.info=null;MX.savedSig=sig();await sync();MX.order.forEach(apply);play(true);}
  async function refreshSaved(){try{MX.saved=(await api('api/stems/saved',{})).mixes}catch(e){MX.saved=[]}}
  async function refreshSongs(){try{const r=await api('api/stems/library',{});MX.songs=r.songs;MX.n=r.n;MX.rated=r.rated}catch(e){}}
+ const dbv=v=>(v>0?'+':'')+(+v||0).toFixed(1)+' dB';
  function draw(){const L=$('list');if(st.tab!=='M'||!L)return;if(BLEND.pbDraw(L))return;const I=MX.info||{},fit=I.fit;
   if(MX.n===0){L.innerHTML=`<div class="empty">No songs are prepared for Mashup yet.<br>Run <code>digitalcrate stems</code> (about 2 minutes a song): it separates the sources of your favorites plus some random songs.</div>`;return}
-  // a control with its label above it; a slot is three zones: what it is (role, solo / mute, lock, remove), the part it
-  // plays (song, waveform, and the buttons that change the part), and its controls
-  const grp=(label,body,cls,tip)=>`<div class="mxc${cls?' '+cls:''}"${tip?` title="${tip}"`:''}><div class="mxl">${label}</div><div class="mxv">${body}</div></div>`;
-  const dbv=v=>(v>0?'+':'')+(+v||0).toFixed(1)+' dB';
-  const row=stem=>{const p=MX.slots[stem],R=role(stem),pit=PITCHED.has(R);
-   const name=`<div class="mxname"><select data-mxrole="${stem}" title="what this slot plays: change it and a new part of that kind comes in">${ROLES.map(x=>`<option value="${x}" ${x===R?'selected':''}>${ICON[x]} ${x==='oneshot'?'one-shot':x}</option>`).join('')}</select></div>`;
-   if(!p)return `<div class="mxrow mxempty" data-mxrow="${stem}"><div class="mxhead">${name}</div>
-    <div class="mxmain"><div class="mxline"><div class="mxsrc"><span class="sub">empty</span></div><span class="mxpart"><button class="tbtn" data-mxroll="${stem}" title="pull a part that fits">🎲 pull a part</button>${(MX.hist[stem]||[]).length?`<button class="tbtn" data-mxhist="${stem}:0" title="bring back the part this slot last held">↶ bring back</button>`:''}<button class="tbtn" data-mxfind="${stem}" title="choose the song yourself: the mixer takes its best-fitting bars">🔍 choose a song</button></span></div></div>
-    <div class="mxctl">${MX.order.length>1?`<button class="tbtn" data-mxrm="${stem}" title="remove this slot">✕ remove slot</button>`:''}</div></div>${findHTML(stem)}`;
-   const sm=p.semis||0;
-   if(R==='oneshot'){const n=p.n||1,on=new Set(p.steps||[]),fit=p.fit||[];
-    return `<div class="mxrow${p.mute?' muted':''}" data-mxrow="${stem}">
-    <div class="mxhead">${name}<div class="mxsm"><button class="tbtn${p.solo?' on':''}" data-mxsolo="${stem}" title="solo">S</button><button class="tbtn${p.mute?' on':''}" data-mxmute="${stem}" title="mute">M</button><button class="tbtn${p.lock?' on':''}" data-mxlock="${stem}" title="lock: keep this when you 🎲 all">🔒</button><button class="tbtn" data-mxdup="${stem}" title="duplicate this slot: the same part and settings in a new slot, to change from there">⧉</button><button class="tbtn" data-mxdel="${stem}" title="take it out (the slot stays empty until you 🎲 or 🔍)">✕</button></div></div>
-    <div class="mxmain"><div class="mxline">
-     <span class="mxpart"><button class="tbtn" data-mxroll="${stem}" title="🎲 another one-shot that fits the harmony (your placement stays)" ${p.lock?'disabled':''}>🎲</button><button class="tbtn" data-mxfind="${stem}" title="🔍 choose one from your library">🔍</button><button class="tbtn" data-mxaud="${stem}" title="▶ hear it once">▶</button><button class="tbtn" data-mxhist="${stem}:-1" title="↶ back to what this slot held before" ${(MX.hpos[stem]??-1)>0?'':'disabled'}>↶</button><button class="tbtn" data-mxhist="${stem}:1" title="↷ forward again" ${(MX.hpos[stem]??-1)<((MX.hist[stem]||[]).length-1)?'':'disabled'}>↷</button></span>
-     <div class="mxsrc" title="${esc(p.artist)} — ${esc(p.title)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')}<br><span class="sub">${p.err?'failed: '+esc(p.err):p._loading?'loading…':`${esc(p.sub||'one-shot')} · ${p.buf?(p.buf.duration/2**(TR.semis(p.off||0,p)/12)).toFixed(2):(p.dur||'?')} s${p.key?` · ${p.key}${p.semis?` ${p.semis>0?'+':''}${p.semis} st`:''}`:''} · ${on.size} hit${on.size===1?'':'s'}${on.size?'':': click a step below to place one'}`}</span></div></div>
-     <div class="mxwave mxsteps" data-mxwave="${stem}" style="--n:${n*16};--b:${n}"><div class="mxsg">${Array.from({length:n*16},(_,k)=>`<button class="mxst${on.has(k)?' on':''}${k%16===0?' bar':k%4===0?' beat':''}" data-mxstep="${stem}:${k}" title="bar ${Math.floor(k/16)+1}, beat ${Math.floor(k%16/4)+1}${k%4?' + '+(k%4)+'/16':''}"></button>`).join('')}</div>
-      <canvas class="mxosw"></canvas>
-      <div class="mxsax">${Array.from({length:n},(_,b)=>`<span style="--f:${fit[b]!=null?Math.max(0,Math.min(1,(fit[b]-0.5)*2)).toFixed(2):0}" title="${fit[b]!=null?`fits this bar's harmony ${Math.round(fit[b]*100)}%`:''}">${b+1}</span>`).join('')}</div><i></i></div></div>
-    <div class="mxctl"><div class="mxcr">
-     ${grp('cycle',`<select data-mxlen="${stem}" title="how many bars before the pattern comes round again">${[1,2,4,8].map(k=>`<option value="${k}" ${n===k?'selected':''}>${k} bar${k>1?'s':''}</option>`).join('')}</select><select data-mxevery="${stem}" title="play it every time round, or only every 2nd or 4th time">${[[1,'every time'],[2,'every 2nd'],[4,'every 4th']].map(([v,l])=>`<option value="${v}" ${(p.every||1)===v?'selected':''}>${l}</option>`).join('')}</select>`,'','the pattern: its length, and how often it plays')}
-     ${grp('pitch',TR.num(stem,'st')+TR.num(stem,'ct'))}
-     ${grp(`volume <output>${dbv(p.db)}</output>`,`<input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${stem}">`,'mxvol','volume · double-click for 0 dB')}
-     </div></div>${TR.fxHTML(stem)}</div>${findHTML(stem)}`}
-   return `<div class="mxrow${p.mute?' muted':''}" data-mxrow="${stem}">
-    <div class="mxhead">${name}<div class="mxsm"><button class="tbtn${p.solo?' on':''}" data-mxsolo="${stem}" title="solo: only this slot (and other soloed ones)">S</button><button class="tbtn${p.mute?' on':''}" data-mxmute="${stem}" title="mute">M</button><button class="tbtn${p.lock?' on':''}" data-mxlock="${stem}" title="lock: keep this part when you 🎲 all">🔒</button><button class="tbtn" data-mxdup="${stem}" title="duplicate this slot: the same part and settings in a new slot, to change from there">⧉</button><button class="tbtn" data-mxdel="${stem}" title="take this part out (the slot stays empty until you 🎲 or 🔍)">✕</button></div></div>
-    <div class="mxmain"><div class="mxline">
-     <span class="mxpart"><button class="tbtn" data-mxroll="${stem}" title="🎲 another part that fits what's playing" ${p.lock?'disabled':''}>🎲</button><button class="tbtn" data-mxalt="${stem}" title="⇄ another stretch of this from the same song (its other takes), best-fitting first">⇄</button><button class="tbtn" data-mxfind="${stem}" title="🔍 choose the song yourself: the mixer takes its best-fitting bars">🔍</button><button class="tbtn" data-mxhist="${stem}:-1" title="↶ back to the part this slot held before" ${(MX.hpos[stem]??-1)>0?'':'disabled'}>↶</button><button class="tbtn" data-mxhist="${stem}:1" title="↷ forward again" ${(MX.hpos[stem]??-1)<((MX.hist[stem]||[]).length-1)?'':'disabled'}>↷</button></span>
-     <div class="mxsrc" title="${esc(p.artist)} — ${esc(p.title)}${why(p)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')}<br><span class="sub">${p.err?'failed: '+esc(p.err):p._loading?'rendering…':`bars ${p.bar0+1}–${p.bar0+Math.max(1,Math.round(p.n*(p.k||1)))}${(I.slots||{})[stem]?` · from ${(I.slots[stem].src_bpm)} bpm${(p.k||1)===2?' (half-time)':(p.k||1)===0.5?' (double-time)':''}${p.alt?` · take ${p.alt[0]}/${p.alt[1]}`:''}${(p.sub||0)>=0.85?` · <span title="all of this part is below 100 Hz: laptop and other small speakers can't play it. Harmonics adds overtones you can hear on them">sub-bass${p.harm?' (+harmonics)':': silent on small speakers'}</span>`:''}${pit?` · ${I.slots[stem].key}${sm?` ${sm>0?'+':''}${sm} st`:''}`:''}`:''}`}</span></div></div>
-     <div class="mxwave" data-mxwave="${stem}"><canvas></canvas><i></i></div></div>
-    <div class="mxctl"><div class="mxcr">
-     ${grp('loop',`<button class="tbtn" data-mxpos="${stem}:-1" title="start one loop length earlier in the song">◀</button><button class="tbtn" data-mxpos="${stem}:1" title="start one loop length later">▶</button><select data-mxlen="${stem}" title="loop length">${[1,2,4,8].map(n=>`<option value="${n}" ${p.n===n?'selected':''}>${n} bar${n>1?'s':''}</option>`).join('')}</select>`,'','where in the song the loop starts, and how long it is')}
-     ${grp('pitch',TR.num(stem,'st')+TR.num(stem,'ct'))}
-     ${grp(`volume <output>${dbv(p.db)}</output>`,`<input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${stem}">`,'mxvol','volume · double-click for 0 dB')}
-     </div></div>${TR.fxHTML(stem)}</div>${findHTML(stem)}`};
+  const row=id=>{
+   const p=MX.slots[id],R=role(id),os=isOS(id),filled=has(p),color=BLEND.STEMVAR[R]||'--VOX';
+   const name=`<div class="trname">${TR.name(R)}</div>`;
+   const die=`<button class="tbtn" data-mxroll="${id}" aria-label="New part" title="pull a part that fits" ${p?.lock?'disabled':''}>${TR.DIE}</button>`;
+   const more=TR.more(id,ROLES,(MX.hist[id]||[]).length);
+   const open=`<div class="trk${p?.mute?' muted':''}" data-mxrow="${id}" style="--trcol:var(${color})">`;
+   const find=findHTML(id);
+   if(!filled)return `${open}<div class="trh">${name}<div class="trsrc sub">empty</div>${die}${more}</div></div>${find}`;
+
+   const n=p.n||1,k=p.k||1,on=new Set(p.steps||[]),fit=p.fit||[],i=I.slots?.[id];
+   const shift=TR.semis(p.semis||0,p);
+   const shiftText=shift?` ${shift>0?'+':''}${Number(shift.toFixed(2))} st`:'';
+   const length=p.buf?(p.buf.duration/2**(TR.semis(p.off||0,p)/12)).toFixed(2):(p.dur||'?');
+   const sampleText=`${esc(p.sub||'one-shot')} · ${length} s${p.key?` · ${p.key}`:''} · ${on.size} hit${on.size===1?'':'s'}`;
+   const rateText=k===2?' (half-time)':k===0.5?' (double-time)':'';
+   const takeText=p.alt?` · take ${p.alt[0]}/${p.alt[1]}`:'';
+   const subText=p.sub>=0.85?` · sub-bass${p.harm?' (+harmonics)':': silent on small speakers'}`:'';
+   const songText=i?`from ${i.src_bpm} bpm${rateText}${takeText}${subText} · ${i.key}${shiftText}`:'';
+   const sub=p.err?'failed: '+esc(p.err):p._loading?(os?'loading…':'rendering…'):os?sampleText:songText;
+   const src=`<div class="mxsrc trsrc" title="${esc(p.artist||'')} — ${esc(p.title||'')}${sub?' · '+sub:''}${why(p)}"><b>${esc(p.artist||'')}</b> — ${esc(p.title||'')} <span class="sub">${sub}</span></div>`;
+   const cycle=`<select data-mxlen="${id}" title="cycle length">${[1,2,4,8].map(l=>`<option value="${l}" ${n===l?'selected':''}>${l} bar${l===1?'':'s'}</option>`).join('')}</select>
+    <select data-mxevery="${id}" title="how often it plays">${[[1,'every time'],[2,'every 2nd'],[4,'every 4th']].map(([v,l])=>`<option value="${v}" ${(p.every||1)===v?'selected':''}>${l}</option>`).join('')}</select>`;
+   const loop=`<span class="trgroup"><button class="tbtn" data-mxpos="${id}:-1" title="previous bars">◀</button><button class="tbtn" data-mxpos="${id}:1" title="next bars">▶</button>
+    <select data-mxlen="${id}" title="loop length">${[1,2,4,8,16].map(l=>`<option value="${l}" ${n===l?'selected':''} ${k===0.5&&l===1?'disabled':''}>${l} bars</option>`).join('')}</select></span>`;
+   const history=`<button class="tbtn" data-mxhist="${id}:-1" title="back to the previous part" ${(MX.hpos[id]??-1)>0?'':'disabled'}>↶</button>
+    <button class="tbtn" data-mxhist="${id}:1" title="forward again" ${(MX.hpos[id]??-1)<(MX.hist[id]||[]).length-1?'':'disabled'}>↷</button>`;
+   const audition=os?`<button class="tbtn" data-mxaud="${id}" title="hear it once">▶</button>`:'';
+   const mix=`<button class="tbtn${p.solo?' on':''}" data-mxsolo="${id}" title="solo">S</button><button class="tbtn${p.mute?' on':''}" data-mxmute="${id}" title="mute">M</button>
+    <input type="range" min="-24" max="6" step="0.5" value="${p.db||0}" data-mxdb="${id}" aria-label="Volume" title="${dbv(p.db)} · double-click for 0 dB">`;
+   const part=os?`<div class="mxwave mxsteps" data-mxwave="${id}" style="--n:${n*16};--b:${n}"><div class="mxsg">${Array.from({length:n*16},(_,j)=>`<button class="mxst${on.has(j)?' on':''}${j%16===0?' bar':j%4===0?' beat':''}" data-mxstep="${id}:${j}" title="bar ${Math.floor(j/16)+1}, beat ${Math.floor(j%16/4)+1}${j%4?' + '+(j%4)+'/16':''}"></button>`).join('')}</div>
+    <canvas class="mxosw"></canvas><div class="mxsax">${Array.from({length:n},(_,j)=>`<span style="--f:${fit[j]!=null?Math.max(0,Math.min(1,(fit[j]-0.5)*2)).toFixed(2):0}" title="${fit[j]!=null?`fits this bar's harmony ${Math.round(fit[j]*100)}%`:''}">${j+1}</span>`).join('')}</div><i></i></div>`
+    :`<div class="mxwave trwave" data-mxwave="${id}"><canvas></canvas><i></i></div>`;
+   return `${open}<div class="trh">${name}${src}<div class="trbars">${os?cycle:TR.barsText(p)}</div>${os?'':loop}
+    <span class="trgroup">${TR.num(id,'st')}${TR.num(id,'ct')}</span><span class="trgroup">${die}${audition}${history}</span><span class="trgroup">${mix}</span>${more}</div>
+    ${part}${TR.fxHTML(id)}</div>${find}`;
+  };
   L.innerHTML=`<div class="mx"><div class="mxtop">
     <button id="mxplay" class="${MX.on?'on':''}">${MX.on?'■ stop':'▶ play'}</button>
     <label>tempo <input id="mxbpm" type="number" min="50" max="200" step="1" value="${MX.bpm}" style="width:64px"> bpm</label>
     <label>key <select id="mxkey"><option value="">auto${!MX.key&&I.key?` (${I.key})`:''}</option>${KEYS.map(k=>`<option ${MX.key===k?'selected':''}>${k}</option>`).join('')}</select></label>
-    <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">🎲 all</button>
+    <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">${TR.DIE} all</button>
     <span class="mxrate"><button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button></span>
     <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ, delay and harmonics on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
     <span class="mxrvb" title="the reverb every slot's REVERB send goes to"><span class="mxlab">reverb</span><select id="mxrvtype">${Object.keys(BLEND.REVERBS).map(k=>`<option ${k===MX.reverb.type?'selected':''}>${k}</option>`).join('')}</select><input type="range" id="mxrvdecay" min="0.3" max="6" step="0.1" value="${MX.reverb.decay}" title="decay time"><output>${(+MX.reverb.decay).toFixed(1)} s</output></span>
@@ -2794,7 +2847,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxmute){const p=MX.slots[ds.mxmute];p.mute=!p.mute;MX.order.forEach(apply);save();draw();return}});
  L.addEventListener('input',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset;
   if(t.id==='mxq'){MX.find.q=t.value;draw();return}if(t.id==='mxname'){MX.name=t.value;return}
-  if(ds.mxdb){MX.slots[ds.mxdb].db=+t.value;apply(ds.mxdb);const o=t.closest('.mxc')&&t.closest('.mxc').querySelector('output');if(o)o.textContent=(+t.value>0?'+':'')+(+t.value).toFixed(1)+' dB'}
+  if(ds.mxdb){MX.slots[ds.mxdb].db=+t.value;apply(ds.mxdb);t.title=dbv(+t.value)+' · double-click for 0 dB'}
   else if(t.id==='mxrvdecay'){t.parentNode.querySelector('output').textContent=(+t.value).toFixed(1)+' s'}markSave()});
  L.addEventListener('change',async e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset;
   if(t.id==='mxbpm'){MX.bpm=Math.max(50,Math.min(200,+t.value||100));const was=MX.on;if(was)play(false);await sync();MX.order.forEach(apply);if(was)play(true);return}
@@ -2819,7 +2872,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.addEventListener('mouseup',()=>{if(!dr)return;const p=dr.p,moved=dr.moved;dr=null;if(!moved)return;  // a plain click changes nothing (and mustn't redraw: a double-click needs the same canvas twice)
    if(!p.trim||p.trim[1]-p.trim[0]<0.01||(p.trim[0]<0.005&&p.trim[1]>0.995))p.trim=null;save();draw()});
   L.addEventListener('dblclick',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;const p=MX.slots[c.dataset.mxtrim];if(p){p.trim=null;save();draw()}})}
- L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;apply(ds.mxdb)}
+ L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;t.title=dbv(0)+' · double-click for 0 dB';apply(ds.mxdb)}
   save();markSave()});
  BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,ev,barLenM});
  TR.init({MX,AC,role,isOS,part:id=>MX.slots[id],apply,sync,save,mark:markSave,draw,pitch:id=>{

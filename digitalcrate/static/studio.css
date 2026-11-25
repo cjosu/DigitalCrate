@@ -91,11 +91,7 @@ svg.wave .phs{fill:var(--acc);opacity:.18}svg.wave .phl{fill:var(--acc);opacity:
 .tag.takes{cursor:pointer;background:#22323f;color:#bfe0f5}.tag.takes:hover{background:#2c4254}#tkbox .prow.cur .name{color:var(--ink);font-weight:600}
 /* stem mixer */
 .mx{padding:12px 16px}.mxtop{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.mxtop #mxplay.on{background:var(--acc);color:#000}.mxfit{margin-left:auto}
-.mxrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;background:#12151a}.mxrow.muted{opacity:.5}
 .mxname{width:84px;font-weight:600;text-transform:capitalize}.mxsrc{flex:1;min-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
-.mxgrp{display:inline-flex;gap:2px;align-items:center}.mxgrp output{min-width:22px;text-align:center;font:11px ui-monospace,Menlo,monospace;color:var(--mute)}
-.mxsl input{width:90px}.mxeq{display:inline-flex;gap:6px;align-items:center;font-size:10px;color:var(--mute)}.mxeq label{display:inline-flex;flex-direction:column;align-items:center}.mxeq input[type=range]{width:54px}
-.mxrow select{padding:1px 4px;font-size:11px}
 .mxwave{position:relative;flex:1.2;min-width:160px;height:34px;background:#0e1013;border-radius:6px;overflow:hidden}.mxwave canvas{width:100%;height:34px;display:block;opacity:.85}
 .mxwave i{position:absolute;top:0;bottom:0;width:2px;background:#fff;left:0;pointer-events:none;display:none}
 .mxfind{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:-4px 0 8px 92px;padding:8px;border:1px solid var(--line);border-radius:10px}.mxfind input{width:240px}
@@ -108,9 +104,8 @@ input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;ba
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;border-radius:50%;background:#d9dde3;border:0;margin-top:-4px;box-shadow:0 0 0 1px rgba(0,0,0,.35)}
 input[type=range]:disabled{opacity:.4;cursor:default}
 input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#2a2f37}input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#d9dde3;border:0}
-.mxoff input[type=range]{opacity:.35}.mxtg{font-size:10px;padding:1px 5px}
-.mxlab{font-size:10px;color:var(--mute);margin-right:3px}.mxgrp output{min-width:38px}.mxsl{display:inline-flex;align-items:center}
-.mxname select{font-weight:600;text-transform:capitalize;padding:2px 4px;font-size:12px;max-width:100%}.mxname{width:104px}.mxadd{display:flex;gap:6px;align-items:center;margin:2px 0 6px}
+.mxlab{font-size:10px;color:var(--mute);margin-right:3px}
+.mxname{width:104px}.mxadd{display:flex;gap:6px;align-items:center;margin:2px 0 6px}
 .mxsongs{margin-top:12px}.mxsongs summary{cursor:pointer;color:var(--mute);font-size:12px}.mxsl2{margin-top:8px;display:grid;gap:4px}.mxsong{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:10px;align-items:center;padding:3px 6px;border-radius:6px}.mxsong:hover{background:#171a20}.mxsn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mxsong .tbtn{padding:1px 5px}
 /* stem mixer snapshots: the strip above the slots (docs/plans/blend.md) */
 .snbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:12px;background:#11141a}
@@ -136,26 +131,11 @@ input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#2a2
 .pbab{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;font:10px ui-monospace,Menlo,monospace;color:var(--mute)}.pbab input{width:100%}
 .pbsame{display:grid;place-items:center;text-align:center;color:var(--mute);font-size:12px;border:1px dashed var(--line);border-radius:10px;padding:6px 8px}
 .pbx.pbmaster{border-style:solid;background:#11141a}
-/* Mashup, laid out: full width (no library sidebar, sample panel or library toolbars on this tab); a slot is three
-   zones (what it is · the part · its controls), and every control has its label above it */
+/* Mashup uses the full width. Tracks have a header, a waveform and an effects row. */
 body.mash .projbar{display:none}
 .mxtop{gap:8px 9px}.mxtop .mxfit{margin-left:4px}.mxrate{display:inline-flex;gap:3px}.mxsaveg{display:inline-flex;gap:6px;align-items:center;margin-left:auto}.mxtop #mxclear{color:var(--mute)}
-.mxrow{display:grid;grid-template-columns:128px minmax(200px,1fr) auto;grid-template-areas:"head line ctl" "head wave ctl";gap:6px 18px;align-items:center;padding:10px 12px;flex-wrap:nowrap}
-.mxhead{grid-area:head;display:grid;gap:6px;align-content:center}.mxhead .mxname{width:auto}.mxhead .mxname select{width:100%}.mxsm{display:flex;gap:3px}.mxsm .tbtn{flex:1;padding:2px 0;text-align:center}
-.mxmain{display:contents}.mxline{grid-area:line;display:flex;gap:12px;align-items:center;min-width:0}.mxline .mxsrc{flex:1;min-width:0}
-.mxline .mxsrc br{display:none}.mxline .mxsrc>.sub{margin-left:10px}
-.mxpart{display:inline-flex;gap:2px;flex:none;padding:2px;border:1px solid var(--line);border-radius:8px;background:#0f1216}.mxpart .tbtn{border-color:transparent;font-size:16px;line-height:1;padding:5px 9px;min-width:34px}.mxpart .tbtn:hover{background:#1c2129}.mxpart .tbtn:disabled{opacity:.3}
-.mxrow .mxwave{grid-area:wave;height:58px;min-width:0;flex:none;align-self:end}.mxrow .mxwave canvas{height:100%}
-.mxctl{grid-area:ctl;display:grid;gap:6px;align-content:center}.mxcr{display:flex;gap:14px;align-items:flex-start}
-.mxc{display:grid;gap:3px}.mxl{height:18px;display:flex;gap:6px;align-items:center;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
-.mxl output{text-transform:none;letter-spacing:0;font:10px ui-monospace,Menlo,monospace;color:var(--ink)}.mxl .mxtg{letter-spacing:.07em}
-.mxv{display:flex;gap:4px;align-items:center;height:26px}.mxv output{min-width:38px;text-align:center;font:11px ui-monospace,Menlo,monospace;color:var(--mute)}
-.mxv input[type=range]{width:96px;height:22px}.mxvol .mxv input[type=range]{width:150px}.mxv select{padding:1px 4px;font-size:11px}
-.mxb{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--mute)}.mxb i{font-style:normal}.mxb+.mxb{margin-left:4px}
-.mxempty{grid-template-areas:"head line ctl"}.mxrvb{display:inline-flex;gap:6px;align-items:center}.mxrvb input[type=range]{width:64px}.mxrvb output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);min-width:36px}.mxempty .mxpart{border:0;background:none;gap:6px}.mxempty .mxpart .tbtn{border-color:var(--line);font-size:13px}
-@media (max-width:1280px){.mxrow{grid-template-columns:128px minmax(0,1fr);grid-template-areas:"head line" "head wave" "ctl ctl"}.mxcr{flex-wrap:wrap}.mxempty{grid-template-areas:"head line" "ctl ctl"}}
 /* a one-shot slot's timeline: 16 steps a bar, hits lit; the axis under it numbers the cycle's bars, tinted by fit */
-.mxrow .mxsteps{display:grid;grid-template-rows:20px minmax(0,1fr) 13px;background:#0e1013;height:66px}
+.trk .mxsteps{display:grid;grid-template-rows:20px minmax(0,1fr) 13px;background:#0e1013;height:58px}
 .mxsg{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:1px;padding:2px 0 1px}
 .mxst{border:0;border-radius:2px;background:#171b21;padding:0;min-width:0;cursor:pointer}.mxst.beat{background:#1f242c}.mxst.bar{background:#2b313c}
 .mxst:hover{outline:1px solid var(--mute)}.mxst.on{background:var(--VOX,#e0a458)}
@@ -163,8 +143,8 @@ body.mash .projbar{display:none}
 .mxsax span{padding-left:4px;border-left:1px solid rgba(255,255,255,.3);background:rgba(143,201,143,calc(var(--f,0)*.28))}.mxsax span:first-child{border-left:0}
 .mxask{margin:0 0 10px;padding:8px 12px;border:1px solid var(--acc);border-radius:10px;background:#1a1710;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 /* the step grid (click to place hits) on top; under it its own lane with the sample's waveform at each hit; then the bar numbers */
-.mxrow .mxsteps{position:relative}.mxosw{display:block;width:100%;height:100%;min-height:0;background:#11141a;pointer-events:none}
-.mxtrim{width:170px;height:26px;display:block;background:#0e1013;border-radius:5px;cursor:ew-resize}.mxsm .tbtn{font-size:11px}
+.trk .mxsteps{position:relative}.mxosw{display:block;width:100%;height:100%;min-height:0;background:#11141a;pointer-events:none}
+.mxtrim{width:170px;height:26px;display:block;background:#0e1013;border-radius:5px;cursor:ew-resize}
 .trnum{display:inline-flex;align-items:center;gap:4px;padding:2px 5px;border:1px solid var(--line);border-radius:4px;background:#0e1013;color:var(--mute);font-size:11px;white-space:nowrap;cursor:ns-resize;touch-action:none;user-select:none}
 .trnum output{font:11px ui-monospace,Menlo,monospace;color:var(--ink)}
 .trnum:focus-visible{outline:1px solid var(--acc);outline-offset:1px}
@@ -176,3 +156,21 @@ body.mash .projbar{display:none}
 .trtoggle[aria-pressed=true]::before{background:var(--acc);border-color:var(--acc)}
 .trdev .mxtrim{height:19px}
 .trdev>output{min-width:42px;font:10px ui-monospace,Menlo,monospace}
+
+.trk{position:relative;min-width:0;margin:0 0 5px;padding:0 6px;border:1px solid var(--line);border-radius:7px;background:#12151a}
+.trk.muted{opacity:.55}.trk.open{z-index:3;opacity:1}
+.trh{display:flex;height:30px;min-width:0;gap:8px;align-items:center;white-space:nowrap}
+.trh>*{flex:none}.trh .trsrc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.trsrc>.sub{margin-left:6px}.trname{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.trname::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--trcol)}
+.trbars{font-size:11px;color:var(--mute)}.trgroup{display:inline-flex;align-items:center;gap:3px}
+.trh .tbtn{display:inline-flex;align-items:center;justify-content:center;min-width:23px;height:22px;padding:1px 5px}
+.trh .tbtn:disabled{opacity:.35}.trh select{padding:1px 3px;font-size:11px}
+.trh input[type=range]{width:85px}.trh [data-trmore]{font-size:16px}.trk.open [data-trmore]{border-color:var(--acc)}
+.trk .mxwave{min-width:0;height:58px}.trk .mxwave canvas{height:100%}
+.trmenu{display:none;position:absolute;right:6px;top:28px;width:172px;padding:4px;background:#161a20;border:1px solid var(--line);border-radius:6px;box-shadow:0 5px 16px #0009}
+.trk.open .trmenu{display:grid;gap:2px}.trmenu button,.trmenu label{padding:5px 6px;border:0;background:none;text-align:left;font-size:12px}
+.trmenu button:hover,.trmenu button:focus-visible{background:#232a34}.trmenu label{display:flex;align-items:center;justify-content:space-between}
+.trmenu [aria-pressed=true]{color:var(--acc)}.trmenu [aria-pressed=true]::after{content:"✓";float:right}
+#mxall{display:inline-flex;align-items:center;gap:5px}
+.mxrvb{display:inline-flex;gap:6px;align-items:center}.mxrvb input[type=range]{width:64px}.mxrvb output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);min-width:36px}
