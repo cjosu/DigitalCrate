@@ -2258,7 +2258,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.BLEND = BL;
 })();
 // ---------- end of stem blends
-// ---------- 🎛 stem mixer: drums, bass, vocals and "other" from different songs, on one tempo and key
+// ---------- 🎛 Mashup (the stem mixer; the tab was called Stems): drums, bass, vocals and "other" from different songs, on one tempo and key
 // (digitalcrate/stems.py, docs/plans/stems.md). Parts are rendered by the server to exactly n bars at the tempo and
 // looped here on one bar clock; volume, EQ and delay are live Web Audio.
 {const api=window.CRATE.api,PROJ=window.PROJ||{};  // (this file's main part is one closure; what's appended after it gets its helpers from CRATE)
@@ -2309,7 +2309,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   MX.hpos[id]=at;Object.assign(p,H[at],{since:performance.now(),harm:null});if(MX.roles[id]!==H[at].stem&&H[at].stem)MX.roles[id]=H[at].stem;await sync()}
  async function roll(stem,quiet,track){const old=MX.slots[stem];if(old&&old.lock&&track==null)return;leaving(stem);
   const rec=MX.recent[stem]||(MX.recent[stem]=[]);
-  let r;try{r=await api('api/stems/pick',{stem:role(stem),slot:stem,state:state(),avoid:rec.slice(-8),n:old?old.n:null,track:track==null?null:track})}catch(e){toast('stem mixer: '+e.message);return}
+  let r;try{r=await api('api/stems/pick',{stem:role(stem),slot:stem,state:state(),avoid:rec.slice(-8),n:old?old.n:null,track:track==null?null:track})}catch(e){toast('mashup: '+e.message);return}
   if(!r.part){if(!quiet)toast(`no ${role(stem)} part fits this tempo${PITCHED.has(role(stem))?' and key':''}: try another tempo, or prepare more songs`);return}
   if(old&&old.track!=null&&!(MX.hist[stem]||[]).length)hpush(stem);  // what was there before the first roll can be gone back to as well
   stopSrc(stem);const keep=old?{db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,eqOn:old.eqOn,dlyOn:old.dlyOn,_c:old._c}  /* (harmonics follow the part: a new one decides again) */:{db:role(stem)==='vocals'?0:-2};
@@ -2335,7 +2335,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  async function refreshSaved(){try{MX.saved=(await api('api/stems/saved',{})).mixes}catch(e){MX.saved=[]}}
  async function refreshSongs(){try{const r=await api('api/stems/library',{});MX.songs=r.songs;MX.n=r.n;MX.rated=r.rated}catch(e){}}
  function draw(){const L=$('list');if(st.tab!=='M'||!L)return;if(BLEND.pbDraw(L))return;const I=MX.info||{},fit=I.fit;
-  if(MX.n===0){L.innerHTML=`<div class="empty">No songs are prepared for the stem mixer yet.<br>Run <code>digitalcrate stems</code> (about 2 minutes a song): it separates the sources of your favorites plus some random songs.</div>`;return}
+  if(MX.n===0){L.innerHTML=`<div class="empty">No songs are prepared for Mashup yet.<br>Run <code>digitalcrate stems</code> (about 2 minutes a song): it separates the sources of your favorites plus some random songs.</div>`;return}
   const row=stem=>{const p=MX.slots[stem],R=role(stem),pit=PITCHED.has(R);
    const name=`<div class="mxname"><select data-mxrole="${stem}" title="what this slot plays: change it and a new part of that kind comes in">${STEMS.map(x=>`<option value="${x}" ${x===R?'selected':''}>${ICON[x]} ${x}</option>`).join('')}</select></div>`;
    if(!p)return `<div class="mxrow" data-mxrow="${stem}">${name}<div class="mxsrc"><span class="sub">empty</span></div><button class="tbtn" data-mxroll="${stem}" title="pull a part that fits">🎲</button>${(MX.hist[stem]||[]).length?`<button class="tbtn" data-mxhist="${stem}:0" title="bring back the part this slot last held">↶</button>`:''}<button class="tbtn" data-mxfind="${stem}" title="choose the song yourself: the mixer takes its best-fitting bars">🔍</button>${MX.order.length>1?`<button class="tbtn" data-mxrm="${stem}" title="remove this slot">✕ remove slot</button>`:''}</div>${findHTML(stem)}`;
@@ -2357,7 +2357,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     <label>key <select id="mxkey"><option value="">auto${!MX.key&&I.key?` (${I.key})`:''}</option>${KEYS.map(k=>`<option ${MX.key===k?'selected':''}>${k}</option>`).join('')}</select></label>
     <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">🎲 all</button>
     <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ and delay on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
-    <button id="mxclear" title="a clean slate: empties every slot (locked ones too) and the snapshot strip. Saved combinations are not touched">clear all</button>
+    <button id="mxclear" title="a clean slate: empties every slot (locked ones too) and the snapshot strip. Saved combinations are not touched">${MX._clr&&Date.now()-MX._clr<4000?`clear all, and ${(MX.snaps||[]).length===1?'its snapshot':'its '+(MX.snaps||[]).length+' snapshots'}? click again`:'clear all'}</button>
     <button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button>
     <span class="mxfit" title="how well the pitched parts' notes agree, bar by bar, after shifting to the key (100% = the same notes)">${fit==null?'':`harmony fit <b style="color:${fit>=0.8?'var(--ok,#8fc98f)':fit>=0.65?'var(--acc)':'#d96c6c'}">${Math.round(fit*100)}%</b>`}</span></div>
    <div class="mxtop mxsave"><input id="mxname" placeholder="name this combination" value="${esc(MX.name||'')}" style="width:220px"><button id="mxsave">💾 save</button>
@@ -2366,8 +2366,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    ${MX.order.map(row).join('')}
    ${MX.order.length<8?`<div class="mxadd"><select id="mxaddrole">${STEMS.map(x=>`<option value="${x}">${ICON[x]} ${x}</option>`).join('')}</select><button id="mxadd" title="another slot (up to 8): a second vocal, two drum layers, a pad under the keys…">＋ add slot</button></div>`:''}
    <div class="sub" style="margin-top:10px"><span id="mxrated">${ratedTxt()}</span> · everything is stretched to the tempo and shifted to the key; drums keep their pitch</div>
-   <details class="mxsongs" id="mxsongs" ${MX.showSongs?'open':''}><summary>${MX.n==null?'':MX.n+' '}songs prepared for the mixer</summary>${songsHTML()}</details></div>`;
-  const dt=$('mxsongs');if(dt)dt.ontoggle=async()=>{MX.showSongs=dt.open;if(dt.open){await refreshSongs();const el=dt.querySelector('.mxsl2');if(el)el.outerHTML=songsHTML();const sm=dt.querySelector('summary');if(sm)sm.textContent=`${MX.n} songs prepared for the mixer`}};
+   <details class="mxsongs" id="mxsongs" ${MX.showSongs?'open':''}><summary>${MX.n==null?'':MX.n+' '}songs prepared for Mashup</summary>${songsHTML()}</details></div>`;
+  const dt=$('mxsongs');if(dt)dt.ontoggle=async()=>{MX.showSongs=dt.open;if(dt.open){await refreshSongs();const el=dt.querySelector('.mxsl2');if(el)el.outerHTML=songsHTML();const sm=dt.querySelector('summary');if(sm)sm.textContent=`${MX.n} songs prepared for Mashup`}};
   markSave();waves();if(MX.on&&!phRaf)phRaf=requestAnimationFrame(playheads);if(MX.find&&$('mxq')){const q=$('mxq');q.focus();q.setSelectionRange(q.value.length,q.value.length)}}
  const L=$('list');
  L.addEventListener('click',async e=>{if(st.tab!=='M')return;const t=e.target.closest('button');if(!t)return;const ds=t.dataset;
@@ -2380,11 +2380,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(ds.mxhist){const [id,d]=ds.mxhist.split(':');hgo(id,+d);return}
   if(ds.mxdlyon){const p=MX.slots[ds.mxdlyon];p.dlyOn=p.dlyOn===false;apply(ds.mxdlyon);save();draw();return}
   if(t.id==='mxclear'){const ns=(MX.snaps||[]).length;  // a clean slate: the snapshot strip goes too (it used to stay, and tag along into the next combination)
-   if(ns&&t.dataset.armed!=='1'){t.dataset.armed='1';t.textContent=`clear all, and ${ns===1?'its snapshot':'its '+ns+' snapshots'}? click again`;setTimeout(()=>{if(t.isConnected){t.dataset.armed='';t.textContent='clear all'}},3500);return}
-   MX.order.forEach(s=>{stopSrc(s);delete MX.slots[s]});MX.snaps=[];MX.trans=[];MX.snapSel=null;MX.duck={};
+   if(ns&&!(MX._clr&&Date.now()-MX._clr<4000)){MX._clr=Date.now();draw();setTimeout(()=>{if(MX._clr&&Date.now()-MX._clr>=3900){MX._clr=0;draw()}},4000);return}  // (kept on MX: a redraw between the two clicks mustn't forget the first)
+   MX._clr=0;MX.order.forEach(s=>{stopSrc(s);delete MX.slots[s]});MX.snaps=[];MX.trans=[];MX.snapSel=null;MX.duck={};
    MX.info=null;MX.name='';MX.savedSig=null;save();draw();return}
   if(ds.mxalt){const id=ds.mxalt,p=MX.slots[id],key=[p.track,p.n,role(id),MX.bpm].join('|');
-   if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('stem mixer: '+err.message);return}}
+   if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('mashup: '+err.message);return}}
    const A=p._alts||[];if(A.length<2){toast('no other good stretch of this in the song');return}
    const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;p.alt=[k+1,A.length];p.since=performance.now();p.harm=null;hpush(id);await sync();return}
   if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);stopSrc(s);delete MX.slots[s];await sync();return}
@@ -2424,11 +2424,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   else if(ds.mxeq){const [s,k]=ds.mxeq.split(':');MX.slots[s].eq[+k]=0;t.value=0;apply(s)}save()});
  BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,ev,barLenM});
  // the tab
- $('tabY').insertAdjacentHTML('afterend',`<button id="tabM" title="recombine drums, bass, vocals and the rest from different songs">🎛 Stems</button>`);
+ $('tabY').insertAdjacentHTML('afterend',`<button id="tabM" title="recombine drums, bass, vocals and the rest from different songs">🎛 Mashup</button>`);
  $('tabM').onclick=()=>{st.tab='M';render()};
  const _rM=render;render=function(...a){$('tabM').classList.toggle('on',st.tab==='M');if(st.tab!=='M')return _rM.apply(this,a);
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.id==='tabM'));try{localStorage.setItem('dcTab','M')}catch(e){}
-  document.body.classList.remove('wide');['cats','subsBox','sbanner','tbanner'].forEach(id=>{if($(id))$(id).hidden=true});$('count').textContent='stem mixer';draw();
+  document.body.classList.remove('wide');['cats','subsBox','sbanner','tbanner'].forEach(id=>{if($(id))$(id).hidden=true});$('count').textContent='mashup';draw();
   if(MX.saved==null){MX.saved=[];refreshSaved().then(draw)}
   if(MX.n==null)api('api/stems/library',{}).then(r=>{MX.n=r.n;MX.rated=r.rated;MX.songs=r.songs;draw();if(r.n&&MX.order.some(s=>MX.slots[s]))sync()}).catch(()=>{MX.n=0;draw()})};
  try{if(localStorage.getItem('dcTab')==='M'){st.tab='M';render()}}catch(e){}  // back on this tab after a refresh

@@ -955,7 +955,7 @@ print("STEMS OK")
 
 
 def test_stem_mixer_deals_plays_and_learns(site, page):
-    """🎛 Stems: prepared songs, 🎲 all fills the slots with parts rendered to the tempo, they loop in sync, and a
+    """🎛 Mashup: prepared songs, 🎲 all fills the slots with parts rendered to the tempo, they loop in sync, and a
     rating is logged."""
     # three prepared songs written straight into the test library (the beat tracker doesn't take the synthetic songs)
     r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
@@ -1069,7 +1069,7 @@ def test_sliders_look_off_at_their_minimum(page):
 
 # ---------------------------------------------------------------------------------------------------- stem blends
 def _mixer(site, page, bpm=100):
-    """🎛 Stems on the three prepared test songs, with a part dealt into each of the four slots and playing."""
+    """🎛 Mashup on the three prepared test songs, with a part dealt into each of the four slots and playing."""
     r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
     assert "STEMS OK" in r.stdout, r.stderr[-2000:]
     page.click("#tabM")

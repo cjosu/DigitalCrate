@@ -2,7 +2,7 @@
 
 Everything the [README](../README.md) skips. The small **?** buttons in the app explain features in place too.
 
-- [Browse](#browse) · [Sketchpad](#sketchpad) · [Drum lane](#drum-lane) · [Stem mixer](#stem-mixer) · [Chords](#chords) · [Pads](#pads) ·
+- [Browse](#browse) · [Sketchpad](#sketchpad) · [Drum lane](#drum-lane) · [Mashup](#mashup) · [Chords](#chords) · [Pads](#pads) ·
   [Drum Racks from songs](#drum-racks-from-songs) · [Search](#search) · [Editing](#editing) · [Taste](#taste) ·
   [Scout](#scout) · [Organizing](#organizing) · [Mining](#mining-and-sources) · [Export](#export) · [Keyboard and MIDI](#keyboard-and-midi) ·
   [How it works](#how-it-works) · [Command line](#command-line) · [Library on disk](#the-library-on-disk) ·
@@ -76,9 +76,9 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
 - **🥁 slice into pads** cuts a drum loop at its hits, each on its step, ready to re-sequence.
 - **⇩ MIDI + rack** writes a Drum Rack of the pads and a MIDI clip of the pattern for Live.
 
-## Stem mixer
+## Mashup
 
-**🎛 Stems** recombines songs: drums, bass, vocals and "other" (keys, guitars, pads), each from a different song,
+**🎛 Mashup** recombines songs: drums, bass, vocals and "other" (keys, guitars, pads), each from a different song,
 all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md](plans/stems.md).
 
 - **Prepare songs first:** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
@@ -288,7 +288,7 @@ loops [--redo]                     find sustain loops in pads, drones and held c
 pads [--redo] [--no-move]          label chords of sustained samples; move non-pads to Strings & Orchestral
 pads --mine [--limit N]            look at mined songs again for pads only (adds, removes nothing)
 grain [--recut]                    score stem samples for separation grain; --recut: cut grainy ones again
-stems [--random N] [--limit N]     prepare songs for the stem mixer (favorites' sources + N random)
+stems [--random N] [--limit N]     prepare songs for Mashup (favorites' sources + N random)
 sections [--limit N]               song sections (needs All-In-One)
 reloop [--fix]                     re-cut older loops onto downbeats
 ```

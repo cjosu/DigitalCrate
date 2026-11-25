@@ -1,4 +1,4 @@
-# Plan: Stem mixer (recombine drums, bass, vocals and the rest from different songs)
+# Plan: Mashup, the stem mixer (recombine drums, bass, vocals and the rest from different songs)
 
 Status: phase 1 built, and from phase 2: half/double time, bar rotation, the still-harmony preference, choosing a song
 yourself, saving combinations. Still to do: per-bar warping, grain- and section-aware picking, export.

@@ -1,4 +1,4 @@
-"""Stem mixer: drums, bass, vocals and "other" from different songs, on one tempo and key (docs/plans/stems.md).
+"""Mashup, the stem mixer: drums, bass, vocals and "other" from different songs, on one tempo and key (docs/plans/stems.md).
 
     prepare(n_random)             the library pass: separate songs and keep their stems + what the mixer needs to know
     library()                     {track_id: meta}
@@ -156,7 +156,7 @@ def prepare(n_random=40, limit=None, separate=True):
     con = connect()
     ids = choose(con, n_random)
     ids = ids[:limit] if limit else ids
-    print(f"TASK preparing stems of {len(ids)} songs for the stem mixer", flush=True)
+    print(f"TASK preparing stems of {len(ids)} songs for Mashup", flush=True)
     done = 0
     for k, tid in enumerate(ids, 1):
         breathe()
@@ -169,7 +169,7 @@ def prepare(n_random=40, limit=None, separate=True):
         except Exception as e:
             print(f"    {row['artist']} - {row['title']}: {str(e)[:100]}", flush=True)
         print(f"stems: {k}/{len(ids)} [{done} ready]", flush=True)
-    print(f"TASK DONE {done} songs added to the stem mixer ({len(library())} in all)", flush=True)
+    print(f"TASK DONE {done} songs added to Mashup ({len(library())} in all)", flush=True)
 
 
 # ---------------------------------------------------------------- rendering a part

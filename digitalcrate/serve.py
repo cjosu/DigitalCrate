@@ -39,7 +39,7 @@ BACKGROUND = {"styles", "lyrics", "credits", "reloop", "loops", "sections", "pad
 _SLOW = {}
 
 
-LABELS = dict(pads="pads", grain="separation grain", stems="stems for the mixer", sections="song sections",
+LABELS = dict(pads="pads", grain="separation grain", stems="stems for Mashup", sections="song sections",
               styles="styles", lyrics="words", loops="sustain loops", process="mining", drums="drums",
               ytscout="scout", ingest="adding a source")
 
