@@ -1004,9 +1004,15 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.keyboard.press("Enter")
     page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
     # save, clear all, open it again
+    assert "dirty" in page.locator("#mxsave").get_attribute("class")      # unsaved changes: the button says so
     page.fill("#mxname", "ui mix")
     page.click("#mxsave")
     page.wait_for_selector("#mxload")
+    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
+    page.evaluate(f"(()=>{{const e=document.querySelector('[data-mxdb=\"{stem}\"]');e.value=-9;e.dispatchEvent(new Event('input',{{bubbles:true}}))}})()")
+    assert "dirty" in page.locator("#mxsave").get_attribute("class")      # a volume change is a change
+    page.click("#mxsave")
+    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
     page.click("#mxclear")
     assert page.evaluate("Object.keys(CRATE.MX.slots).length") == 0
     page.select_option("#mxload", "ui mix")
