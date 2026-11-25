@@ -2703,3 +2703,77 @@ def test_octave_measurement_follows_the_current_part(site, page):
     page.click('[data-mxhist="bass:1"]')
     page.wait_for_function(f"{slot}.track!=={track}&&{slot}.buf")
     assert page.evaluate(slot + ".hk") is None
+
+
+def test_octave_toggle_after_snapshot_recall_keeps_other_bars_history(site, page):
+    _mixer(site, page)
+    p = "CRATE.MX.slots.bass"
+    a = page.evaluate(p + ".bar0")
+    b = 0 if a != 0 else 4
+    page.click("#sncap")
+    page.evaluate(f"CRATE.TR.setLoop('bass',{b},2)")
+    page.click('[data-sn="0"]')
+    page.wait_for_function(f"{p}.bar0==={a}&&{p}.buf")
+    page.click('[data-mxhk="bass"]')
+    page.wait_for_function(f"!{p}.hk")
+    page.click('[data-mxhist="bass:-1"]')
+    page.wait_for_function(f"{p}.bar0==={a}&&{p}.buf")
+    page.click('[data-mxhist="bass:1"]')
+    page.wait_for_function(f"{p}.bar0==={b}&&{p}.buf")
+    assert page.evaluate(p + ".hk") == "oct"
+
+
+def test_trimmed_octave_one_shot_keeps_level_at_playback_pitch(site, page):
+    _mixer(site, page)
+    slot = _one_shot(page)
+    page.evaluate("""async id=>{
+      const p=CRATE.MX.slots[id], sr=44100;
+      const buf=new AudioBuffer({numberOfChannels:1,length:sr,sampleRate:sr}), data=buf.getChannelData(0);
+      for(let i=0;i<sr;i++){
+        const t=i/sr*2*Math.PI;
+        data[i]=i<sr/5 ? 0.2*Math.sin(55*t)+0.1*Math.sin(110*t+3*Math.PI/4) : 0.2*Math.sin(440*t);
+      }
+      p.buf=buf;p.trim=null;p.off=p.ct=0;p._hc=await BLEND.harmMeasure(buf,'oct');
+      CRATE.TR.set(id,'harm',100);
+    }""", slot)
+    canvas = page.locator(f'canvas[data-mxtrim="{slot}"]').first
+    box = canvas.bounding_box()
+    y = box["y"] + box["height"] / 2
+    page.mouse.move(box["x"] + 1, y)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 0.2 * box["width"], y, steps=6)
+    page.mouse.up()
+    for pitch in (0, 12):
+        page.evaluate("([id,pitch])=>CRATE.TR.set(id,'st',pitch)", [slot, pitch])
+        target = page.evaluate("""async id=>{
+          const p=CRATE.MX.slots[id], [a,b]=p.trim, rate=2**(p.off/12);
+          const ctx=new OfflineAudioContext(1,Math.ceil((b-a)*p.buf.length/rate),p.buf.sampleRate);
+          const source=ctx.createBufferSource();source.buffer=p.buf;source.playbackRate.value=rate;
+          source.connect(ctx.destination);source.start(0,a*p.buf.duration,(b-a)*p.buf.duration);
+          const played=await ctx.startRendering(), hc=await BLEND.harmMeasure(played,'oct');
+          return 10**(p.db/20)*BLEND.harmComp(p,hc);
+        }""", slot)
+        page.wait_for_function(f"Math.abs(20*Math.log10(CRATE.MX.slots['{slot}']._c.vol.gain.value/{target}))<0.05", timeout=3000)
+
+
+def test_other_take_keeps_driven_harmonics_if_render_fails(site, page):
+    _mixer(site, page)
+    p = "CRATE.MX.slots.other"
+    page.click('[data-mxhk="other"]')
+    page.wait_for_function(f"!{p}.hk")
+    page.evaluate("""()=>{
+      const p=CRATE.MX.slots.other;
+      window.oldOther={buf:p.buf,hc:p._hc};
+      const api=CRATE.api;
+      CRATE.api=(path,body)=>{
+        if(path==='api/stems/alts')return Promise.resolve({alts:[{bar0:p.bar0},{bar0:(p.bar0+1)%12}]});
+        if(path==='api/stems/render'&&body.stem==='other')return Promise.reject(Error('take unavailable'));
+        return api(path,body);
+      };
+    }""")
+    _more(page, "other")
+    page.click('[data-mxalt="other"]')
+    page.wait_for_function(f"{p}.err==='take unavailable'")
+    page.evaluate("CRATE.TR.set('other','harm',100)")
+    assert page.evaluate(f"!{p}.hk&&{p}.buf===oldOther.buf&&{p}._hc===oldOther.hc")
+    page.wait_for_function(f"Math.abs({p}._c.hg.gain.value-0.35)<0.001&&{p}._c.hgo.gain.value<0.001")

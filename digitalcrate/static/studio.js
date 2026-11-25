@@ -2603,7 +2603,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       if (!H.isOS(id) || p.warp) {
         p._loading = true;
         pending = H.sync();
-      }
+      } else pending = H.refreshShot(id);
     } else H.apply(id);
     H.save();
     H.mark();
@@ -3294,8 +3294,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const osTrim=p=>{const t=p.trim;return t&&t[1]-t[0]>0.005?t:[0,1]};
  // what a hit plays: {buf, from, len (s of buffer), rate, out (s it sounds)}. Warped: the server stretched your piece to
  // the length you chose, pitch kept, so it plays whole at normal speed. Else your trimmed piece, at your pitch offset.
- const osPlay=p=>{if(p.wbuf)return {buf:p.wbuf,from:0,len:p.wbuf.duration,rate:1,out:p.wbuf.duration};
-  const rate=2**(TR.semis(p.off||0,p)/12),[a,b]=osTrim(p),d=p.buf.duration;return {buf:p.buf,from:a*d,len:(b-a)*d,rate,out:(b-a)*d/rate}};
+ const osPlay=(p,dry=p.buf,warped=p.wbuf)=>{if(warped)return {buf:warped,from:0,len:warped.duration,rate:1,out:warped.duration};
+  const rate=2**(TR.semis(p.off||0,p)/12),[a,b]=osTrim(p),d=dry.duration;return {buf:dry,from:a*d,len:(b-a)*d,rate,out:(b-a)*d/rate}};
  function osHit(id,p,when){const q=osPlay(p),fi=Math.min(q.out/2,Math.max(0.003,(p.fin||0)/1000)),fo=Math.min(q.out/2,Math.max(0.003,(p.fout||0)/1000));
   const src=AC.createBufferSource(),g=AC.createGain();src.buffer=q.buf;src.playbackRate.value=q.rate;src.connect(g);g.connect(p._c.in);
   g.gain.setValueAtTime(0,when);g.gain.linearRampToValueAtTime(1,when+fi);g.gain.setValueAtTime(1,when+q.out-fo);g.gain.linearRampToValueAtTime(0,when+q.out);
@@ -3316,20 +3316,45 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(!response.ok)throw new Error(`audio request failed (${response.status})`);
   return AC.decodeAudioData(await response.arrayBuffer());
  }
- // The driven one-shot historically played without level compensation.
- const measurePart=(buf,kind,os)=>os&&kind==='drive'?null:BLEND.harmMeasure(buf,kind);
- async function acceptAudio(p,buf,os,owns,accept){
-  // A kind switch can finish while a new render is being measured.
+ const shotMeasures=new WeakMap();
+ const sameInput=(a,b)=>a.buf===b.buf&&a.from===b.from&&a.len===b.len&&a.rate===b.rate;
+ function measureInput(input,kind){
+  const {buf,from,len,rate,out}=input;
+  if(from===undefined)return BLEND.harmMeasure(buf,kind);
+  if(kind==='drive')return null;  // driven one-shots historically play without level compensation
+  if(from===0&&len===buf.duration&&rate===1)return BLEND.harmMeasure(buf,kind);
+  const cached=shotMeasures.get(buf);
+  if(cached&&sameInput(input,cached.input))return cached.measure;
+  // Measure the same piece at the same playback rate as the hit, before its effects.
+  const measure=(async()=>{
+   const ctx=new OfflineAudioContext(buf.numberOfChannels,Math.max(1,Math.ceil(out*buf.sampleRate)),buf.sampleRate);
+   const source=ctx.createBufferSource();
+   source.buffer=buf;source.playbackRate.value=rate;source.connect(ctx.destination);source.start(0,from,len);
+   return BLEND.harmMeasure(await ctx.startRendering(),kind);
+  })().catch(()=>null);
+  shotMeasures.set(buf,{input,measure});
+  return measure;
+ }
+ async function acceptAudio(audio,kindOf,owns,accept){
+  // A switch, render, pitch or trim edit can finish while a measurement is pending.
   while(owns()){
-   const kind=BLEND.harmKind(p),hc=await measurePart(buf,kind,os);
+   const input=audio(),kind=kindOf(),hc=await measureInput(input,kind);
    if(!owns())return;
-   if(kind!==BLEND.harmKind(p))continue;
-   p._hc=hc;accept();return;
+   if(kind!==kindOf()||!sameInput(input,audio()))continue;
+   accept(hc);return;
   }
  }
+ function refreshShot(id){
+  const p=MX.slots[id];if(!p?.buf)return;
+  if(p.warp)return sync();
+  if(p.hk!=='oct')return;
+  return acceptAudio(()=>osPlay(p),()=>BLEND.harmKind(p),()=>MX.slots[id]===p&&!!p.buf,hc=>{
+   p._hc=hc;apply(id);
+  });
+ }
  async function syncShot(id,p,dry,dryKey,key,bpm,owns){
-  const accept=(warped,warpKey)=>acceptAudio(p,warped||dry,true,owns,()=>{
-   p.buf=dry;p._key=dryKey;p.wbuf=warped;p._wkey=warpKey;
+  const accept=(warped,warpKey)=>acceptAudio(()=>osPlay(p,dry,warped),()=>BLEND.harmKind(p),owns,hc=>{
+   p.buf=dry;p._key=dryKey;p.wbuf=warped;p._wkey=warpKey;p._hc=hc;
    if(MX.on)chain(id);
    apply(id);
   });
@@ -3405,8 +3430,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    if(os)await syncShot(id,p,buf,want,conformKey,bpm,owns);
    else{
     const legacy=p.hup?await BLEND.harmMeasure(buf,'drive'):null;
-    await acceptAudio(p,buf,false,owns,()=>{
-     p.buf=buf;p._key=want;p._legacyHc=legacy;
+    await acceptAudio(()=>({buf}),()=>BLEND.harmKind(p),owns,hc=>{
+     p.buf=buf;p._key=want;p._hc=hc;p._legacyHc=legacy;
      p._playingLoop={track:p.track,bar0:p.bar0,n:p.n,k:p.k};
      p.sub=sub;initHarm(id);startSrc(id);
     });
@@ -3654,7 +3679,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    if(!p._alts||p._altk!==key){try{p._alts=(await api('api/stems/alts',{state:state(),slot:id})).alts;p._altk=key}catch(err){toast('mashup: '+err.message);return}}
    const A=p._alts||[];if(A.length<2){toast('no other good stretch of this in the song');return}
    const k=(Math.max(0,A.findIndex(a=>a.bar0===p.bar0))+1)%A.length,nx=A[k];p.bar0=nx.bar0;p.k=nx.k||1;if(nx.why)p.why=nx.why;
-   delete p._hkRequest;p.hk='oct';p.cond=nx.cond;p.alt=[k+1,A.length];delete p.legacyLoop;delete p._viewKey;p.ct=0;p.since=performance.now();p.harm=null;delete p.hup;hpush(id);await sync();return}
+   delete p._hkRequest;p.cond=nx.cond;p.alt=[k+1,A.length];delete p.legacyLoop;delete p._viewKey;p.ct=0;p.since=performance.now();p.harm=null;delete p.hup;hpush(id);await sync();return}
   if(ds.mxdel){const s=ds.mxdel;if(MX.slots[s]&&MX.slots[s].since&&(performance.now()-MX.slots[s].since)/1000<20)ev('remove',s);retire(s);delete MX.slots[s];await sync();return}
   if(ds.mxfind){if(MX.find&&MX.find.stem===ds.mxfind){MX.find=null;draw();return}MX.find={stem:ds.mxfind,q:''};await refreshSongs();draw();return}  // (songs still being prepared show up as they finish)
   if(ds.mxdup){const id=ds.mxdup,p=MX.slots[id];if(!has(p))return;if(MX.order.length>=8){toast('the mashup is full (8 slots)');return}
@@ -3666,28 +3691,25 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    if(q._loading||q.err)await sync();
    return}
   if(ds.mxtrimopen){MX.trimOpen=MX.trimOpen===ds.mxtrimopen?null:ds.mxtrimopen;draw();return}
-  if(ds.mxtrimall){const p=MX.slots[ds.mxtrimall];p.trim=null;save();draw();if(p.warp)sync();return}
+  if(ds.mxtrimall){const p=MX.slots[ds.mxtrimall];p.trim=null;save();draw();refreshShot(ds.mxtrimall);return}
   if(ds.mxhk){
    const id=ds.mxhk,p=MX.slots[id];if(!p?.buf)return;
    const os=isOS(id),kind=(p._hkRequest?.kind||BLEND.harmKind(p))==='oct'?'drive':'oct';
    const request=p._hkRequest={kind};
-   const audio=()=>os&&p.wbuf?p.wbuf:p.buf;
-   while(MX.slots[id]===p&&p._hkRequest===request){
-    const buf=audio(),hc=await measurePart(buf,kind,os);
-    if(MX.slots[id]!==p||p._hkRequest!==request)return;
-    if(buf!==audio())continue;
+   const audio=()=>os?osPlay(p):{buf:p.buf};
+   await acceptAudio(audio,()=>kind,()=>MX.slots[id]===p&&p._hkRequest===request,hc=>{
     delete p._hkRequest;
     if(kind==='oct')p.hk='oct';else delete p.hk;
     p._hc=hc;
     const previous=MX.hist[id]?.[MX.hpos[id]];
-    if(previous&&previous.track===p.track&&previous.sample===p.sample)previous.hk=p.hk;
-    apply(id);save();markSave();draw();return;
-   }
+    if(sameHistoryPart(previous,snap(id,p)))previous.hk=p.hk;
+    apply(id);save();markSave();draw();
+   });
    return;
   }
   if(ds.mxharm){const p=MX.slots[ds.mxharm];p.harm=!BLEND.harmAmt(p);apply(ds.mxharm);save();draw();return}
   if(ds.mxnudge){const [id,w,d]=ds.mxnudge.split(':'),p=MX.slots[id],D=p.buf?p.buf.duration:1,t=osTrim(p).slice(),stp=(e.shiftKey?0.001:0.005)/D;
-   t[+w]=Math.max(0,Math.min(1,t[+w]+(+d)*stp));if(t[1]-t[0]<0.004/D)return;p.trim=t;save();if(p.warp)sync();osTrimDraw(id,p);const box=document.querySelector(`[data-mxwave="${id}"]`);if(box)osWave(id,p,box);return}
+   t[+w]=Math.max(0,Math.min(1,t[+w]+(+d)*stp));if(t[1]-t[0]<0.004/D)return;p.trim=t;save();refreshShot(id);osTrimDraw(id,p);const box=document.querySelector(`[data-mxwave="${id}"]`);if(box)osWave(id,p,box);return}
   if(ds.mxstep){const [id,k]=ds.mxstep.split(':'),p=MX.slots[id],st2=new Set(p.steps||[]);st2.has(+k)?st2.delete(+k):st2.add(+k);p.steps=[...st2].sort((a,b)=>a-b);save();draw();return}
   if(ds.mxaud){const p=MX.slots[ds.mxaud];if(p&&p.buf){AC.resume();BLEND.out(MX,AC);if(!p._c){chain(ds.mxaud);apply(ds.mxaud)}osLive.add(osHit(ds.mxaud,p,AC.currentTime+0.01))}return}
   if(ds.mxospick){const [id,i]=ds.mxospick.split(':');MX.find=null;await roll(id,false,S[+i][F_.path]);if(!MX.on)play(true);return}
@@ -3751,13 +3773,13 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    dr={c,id,p,anchor:nearA&&(!nearB||Math.abs(f-a)<Math.abs(f-b))?b:nearB?a:f,moved:false,last:f,cur:nearA&&(!nearB||Math.abs(f-a)<Math.abs(f-b))?a:nearB?b:f}});
   window.addEventListener('mousemove',e=>{if(!dr)return;const raw=fr(dr.c,e);dr.cur=Math.max(0,Math.min(1,dr.cur+(raw-dr.last)*(e.shiftKey?0.1:1)));dr.last=raw;const f=dr.cur;  // shift: ten times finer
    dr.moved=true;dr.p.trim=[Math.min(dr.anchor,f),Math.max(dr.anchor,f)];osTrimDraw(dr.id,dr.p);const box=document.querySelector(`[data-mxwave="${dr.id}"]`);if(box)osWave(dr.id,dr.p,box)});
-  window.addEventListener('mouseup',()=>{if(!dr)return;const p=dr.p,moved=dr.moved;dr=null;if(!moved)return;  // a plain click changes nothing (and mustn't redraw: a double-click needs the same canvas twice)
-   if(!p.trim||p.trim[1]-p.trim[0]<0.01||(p.trim[0]<0.005&&p.trim[1]>0.995))p.trim=null;save();draw();if(p.warp)sync()});
-  L.addEventListener('dblclick',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;const p=MX.slots[c.dataset.mxtrim];if(p){p.trim=null;save();draw();if(p.warp)sync()}})}
+  window.addEventListener('mouseup',()=>{if(!dr)return;const {id,p,moved}=dr;dr=null;if(!moved)return;  // a plain click changes nothing (and mustn't redraw: a double-click needs the same canvas twice)
+   if(!p.trim||p.trim[1]-p.trim[0]<0.01||(p.trim[0]<0.005&&p.trim[1]>0.995))p.trim=null;save();draw();refreshShot(id)});
+  L.addEventListener('dblclick',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;const p=MX.slots[c.dataset.mxtrim];if(p){p.trim=null;save();draw();refreshShot(c.dataset.mxtrim)}})}
  L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;t.title=dbv(0)+' · double-click for 0 dB';apply(ds.mxdb)}
   save();markSave()});
  BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,retire,ev,barLenM,refreshSongs,split:splitKits});
- TR.init({MX,AC,role,isOS,part:id=>MX.slots[id],apply,sync,save,mark:markSave,draw,loop:setLoop,pitch:id=>{
+ TR.init({MX,AC,role,isOS,refreshShot,part:id=>MX.slots[id],apply,sync,save,mark:markSave,draw,loop:setLoop,pitch:id=>{
   const p=MX.slots[id];
   hpush(id);
   const entry=MX.hist[id]?.[MX.hpos[id]];
