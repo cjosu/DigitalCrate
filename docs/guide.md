@@ -117,14 +117,10 @@ Hover over the song for the full name and why that part was picked.
   tinted by how well it fits each bar's harmony. **Every time**, **every 2nd** and **every 4th** set how often the
   cycle plays. The waveform at each hit shows its length. Drag across **Trim** to choose the piece that plays, drag
   an edge to adjust it, or double-click for the whole sample. **Shape** opens a full-width waveform with a time
-  axis and exact trim times, **fade in** and **fade out**, and **warp**: fit the piece to ¼, ½, 1 or 2 bars at the
-  tempo, its pitch kept. Hold **Shift** while dragging for finer control. The start and end buttons nudge by
-  5 ms, or 1 ms with **Shift**. The **Harmonics** switch adds overtones to low one-shots.
-- **⇩ Ableton** writes the mashup as a Live set, dry: a track per slot, each part a looping clip at the tempo; with
-  snapshots, they are laid end to end (4, 8 or 16 bars each) with a marker each. A snapshot's own level becomes the
-  clip's gain, and a muted slot has no clip. Parts and set go to `Mashups/<name>/` in your Ableton samples folder.
-  The effects are not exported yet ([the plan](plans/mashup-ableton.md)).
-- **⌘S** on this tab saves the mashup.
+  axis and exact trim times. Hold **Shift** while dragging for finer control. The start and end buttons nudge by
+  5 ms, or 1 ms with **Shift**. Use **fade in** and **fade out** to shape hits, and **warp** to fit the piece
+  to ¼, ½, 1 or 2 bars at the mixer tempo while keeping its pitch. The **Harmonics** switch adds overtones to
+  low one-shots.
 - **💾 save** keeps a named combination (open it again from the menu next to it).
 - **📸 snapshot** keeps the mixer as it is, in a strip above the slots (A, B, C… up to 8). Click one to bring it back;
   **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too. Edits change

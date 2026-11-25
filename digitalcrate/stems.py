@@ -709,6 +709,7 @@ def oneshot_warp(path, key, trim, beats, bpm, semis=0):
     from .conform import render as conform
     from .stretch import signalsmith
     src, _ = conform(path, key=key or None)
+    semis = round(float(semis), 2) or 0.0
     t = trim if trim and trim[1] - trim[0] > 0.005 else [0, 1]
     h = hashlib.sha1(f"{path}|{src.stat().st_mtime}|{key}|{t[0]:.5f}|{t[1]:.5f}|{beats}|{float(bpm):.2f}|{semis}".encode()).hexdigest()[:16]
     out = CACHE / f"os-{h}.wav"
@@ -726,7 +727,8 @@ def oneshot_warp(path, key, trim, beats, bpm, semis=0):
         raise ValueError(f"that would stretch it {ratio:.1f}x: trim it closer to the length, or choose another length")
     y = signalsmith(y, float(semis or 0), ratio)
     y = y[:, :N] if y.shape[1] >= N else np.pad(y, ((0, 0), (0, N - y.shape[1])))
-    sf.write(str(out), y.T, sr, subtype="PCM_24")
+    with _cache_output(out) as tmp:
+        sf.write(str(tmp), y.T, sr, subtype="PCM_24")
     return out
 
 
@@ -737,7 +739,8 @@ def oneshot_loop(p, bpm, key, out):
     from .conform import render as conform
     from .stretch import repitch
     warped = bool(p.get("warp"))
-    src = oneshot_warp(p["sample"], key, p.get("trim"), p["warp"], bpm, (p.get("off") or 0) + float(p.get("ct") or 0) / 100) if warped \
+    semis = float(p.get("off") or 0) + float(p.get("ct") or 0) / 100
+    src = oneshot_warp(p["sample"], key, p.get("trim"), p["warp"], bpm, semis) if warped \
         else conform(p["sample"], key=key or None)[0]
     y, sr = sf.read(str(src), dtype="float32", always_2d=True)
     y = y.T
@@ -750,8 +753,8 @@ def oneshot_loop(p, bpm, key, out):
         t = p.get("trim") or [0, 1]
         if t[1] - t[0] > 0.005:
             y = y[:, int(t[0] * y.shape[1]):int(t[1] * y.shape[1])]
-        if p.get("off") or p.get("ct"):
-            y = repitch(y, float(p.get("off") or 0) + float(p.get("ct") or 0) / 100)  # as the mixer plays it: pitch and length together
+        if semis:
+            y = repitch(y, semis)  # as the mixer plays it: pitch and length together
     y = y.copy()
     for ms, tail in ((p.get("fin") or 3, False), (p.get("fout") or 3, True)):  # your fades (3 ms at least: no clicks)
         f = min(int(max(3.0, float(ms)) / 1000 * C.SR), y.shape[1] // 2)
@@ -812,11 +815,12 @@ def export(name, bpm, key, sections, bars=8, reveal=True):
             elif p.get("track") is not None and int(p["track"]) in lib:
                 m = lib[int(p["track"])]
                 k, n = float(p.get("k") or 1), int(p.get("n") or 4)
-                semis = (inf.get(sid) or {}).get("semis", 0) + float(p.get("ct") or 0) / 100  # as the mixer plays it
-                src = render(p["track"], role, p["bar0"], n, bpm, semis, k, legacy=bool(p.get("legacyLoop")))
+                semis = (inf.get(sid) or {}).get("semis", 0) + float(p.get("ct") or 0) / 100
+                legacy = bool(p.get("legacyLoop"))
+                src = render(p["track"], role, p["bar0"], n, bpm, semis, k, legacy=legacy)
                 b0 = int(p["bar0"])
                 f = dest / "Parts" / (_safe(f"{role.capitalize()} - {m['artist']} - {m['title']}")[:64]
-                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+g}st.wav")
+                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+g}st{' legacy' if legacy else ''}.wav")
                 if not f.exists():
                     shutil.copy2(src, f)
                 beats = n * 4

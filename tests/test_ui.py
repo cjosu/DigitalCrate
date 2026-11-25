@@ -988,11 +988,11 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={before[0]}&&p.bar0==={before[1]}&&p.buf&&!p._loading}})()", timeout=120000)
     page.click(f'[data-mxhist="{stem}:1"]')
     page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={after[0]}&&p.bar0==={after[1]}&&p.buf&&!p._loading}})()", timeout=120000)
-    # a part that is all sub-bass gets harmonics by itself (small speakers can't play it), and says so
-    b = next((k for k in page.evaluate("CRATE.MX.order") if page.evaluate(f"CRATE.MX.roles['{{}}']".format(k)) == "bass" and page.evaluate(f"!!CRATE.MX.slots['{{}}']".format(k))), None)
-    if b:
-        page.wait_for_function(f"CRATE.MX.slots['{b}'].sub>=0.85&&CRATE.MX.slots['{b}'].harm===1", timeout=30000)
-        assert "sub-bass" in page.locator(f'[data-mxrow="{b}"] .mxsrc').inner_text()
+    # Use the C bass at its original pitch. A key-shifted deal can move a bass above the sub-bass cutoff.
+    page.select_option("#mxkey", "C")
+    _roll(page, "bass", 901)
+    page.wait_for_function("CRATE.MX.slots.bass.sub>=0.85&&CRATE.MX.slots.bass.harm===1")
+    assert "sub-bass" in page.locator('[data-mxrow="bass"] .mxsrc').inner_text()
     # the list of prepared songs, and a stem button that puts a song straight into a slot of that kind
     page.click("#mxsongs summary")
     page.wait_for_function("document.querySelectorAll('#mxsongs .mxsong').length===3", timeout=10000)
@@ -1604,8 +1604,12 @@ def test_mashup_one_shot_slot(site, page):
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].fout") == 120
     beat = 60 / page.evaluate("CRATE.MX.bpm")
     fit = next(b for b in (1, 2, 4, 8) if 0.45 < b * beat / dur < 2.4)
+    _calls(page)
     page.select_option(f'[data-mxwarp="{sid}"]', str(fit))
     page.wait_for_function(f"(p=>p.warp==={fit}&&p.wbuf&&Math.abs(p.wbuf.duration-{fit * beat})<0.01)(CRATE.MX.slots['{sid}'])", timeout=120000)
+    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/oswarp').at(-1)[1].semis") == 5.25
+    page.evaluate("id=>CRATE.TR.set(id,'ct',-20)", sid)
+    page.wait_for_function("id=>CRATE.MX.slots[id]._wkey?.endsWith('|4.8')", arg=sid)
     page.select_option(f'[data-mxwarp="{sid}"]', "0")
     page.wait_for_function(f"!CRATE.MX.slots['{sid}'].wbuf", timeout=20000)
     page.click(f'.mxtrimbar [data-mxtrimopen="{sid}"]')              # done
