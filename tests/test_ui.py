@@ -2883,3 +2883,165 @@ def test_delay_loops_are_connected_only_while_in_use(site, page):
     page.wait_for_timeout(3000); assert page.evaluate(on) is True
     page.evaluate(f"({setd})(0)"); page.wait_for_timeout(4400)
     assert page.evaluate(on) is False
+
+
+def test_a_busy_page_does_not_make_drums_late(page):
+    _drums(page, ("Kick",))
+    page.evaluate("CRATE.PROJ.bpm=220;SK.lanes[0].pads[0].steps.fill(1);CRATE.drawSK()")
+    page.evaluate("document.getElementById('skplay').click()")
+    page.wait_for_timeout(700)
+    page.evaluate("(()=>{const e=performance.now()+190;while(performance.now()<e);})()")  # the page blocks for 190 ms
+    page.wait_for_timeout(500)
+    late = page.evaluate("Math.max(...[...SK.lanes[0].live.values()].map(q=>q.src._t-q.t))")
+    page.evaluate("document.getElementById('skplay').click()")
+    assert late < 0.002, late  # every hit was scheduled before its time
+
+
+def test_a_step_switched_on_just_ahead_still_sounds_this_pass(page):
+    _drums(page, ("Kick",))
+    page.evaluate("CRATE.PROJ.bpm=200;SK.lanes[0].pads[0].steps.fill(0);CRATE.drawSK()")
+    page.evaluate("document.getElementById('skplay').click()")
+    page.wait_for_timeout(1000)
+    res = page.evaluate("""(async()=>{const l=SK.lanes[0],st=CRATE.barLen()/16,ac=l.g.context,j=Math.ceil((ac.currentTime+0.05-SK.start)/st)%16;
+        document.querySelector(`[data-dstep="0:0:${j}"]`).click();const t0=ac.currentTime;await new Promise(r=>setTimeout(r,400));
+        const q=l.live.get('0:'+j);return q?q.t-t0:null})()""")
+    page.evaluate("document.getElementById('skplay').click()")
+    assert res is not None and 0.03 < res < 0.25, res  # 50 to 125 ms ahead when clicked: inside the scheduled window
+
+
+def test_restarting_playback_keeps_one_animation_loop(page):
+    _drums(page, ("Kick",))
+    page.evaluate("document.getElementById('skplay').click()")
+    page.wait_for_timeout(300)
+    page.evaluate("for(let k=0;k<3;k++){CRATE.skStop();CRATE.skPlay()}")  # stop and play inside one frame, three times
+    n = page.evaluate("""(async()=>{const a=CRATE.perf.anim;for(let k=0;k<30;k++)await new Promise(r=>requestAnimationFrame(r));return CRATE.perf.anim-a})()""")
+    page.evaluate("CRATE.skStop()")
+    assert 28 <= n <= 33, n  # one loop: one call a frame
+
+
+def test_waveforms_are_computed_once_and_drags_draw_once_a_frame(page):
+    i = idx(page, "s[F.cat]!=='Percussion'")
+    page.evaluate(f"CRATE.skAdd({i})")
+    page.wait_for_function("SK.lanes[0]&&SK.lanes[0].state==='ok'&&document.querySelector('[data-skw=\"0\"]')", timeout=60000)
+    a = page.evaluate("CRATE.perf.peaks")
+    assert a >= 1
+    page.evaluate("""() => {
+        window.waveCanvas = document.querySelector('[data-skw="0"]');
+        window.waveBase = waveCanvas._base;
+        window.waveWidth = waveCanvas.width;
+    }""")
+    page.evaluate("for(let k=0;k<5;k++)CRATE.drawSK()")
+    assert page.evaluate("CRATE.perf.peaks") == a  # redrawing reuses the peaks
+    n = page.evaluate("""(async()=>{const c=document.querySelector('[data-skw="0"]'),r=c.getBoundingClientRect(),y=r.top+r.height/2,
+        ev=(t,x)=>new MouseEvent(t,{bubbles:true,clientX:r.left+x,clientY:y,buttons:1});
+        c.dispatchEvent(ev('mousedown',40));const a=CRATE.perf.skWave;for(let k=0;k<20;k++)window.dispatchEvent(ev('mousemove',60+k*4));
+        for(let k=0;k<2;k++)await new Promise(r=>requestAnimationFrame(r));const n=CRATE.perf.skWave-a;window.dispatchEvent(ev('mouseup',140));return n})()""")
+    assert 1 <= n <= 2, n  # twenty mouse moves, one repaint
+    page.set_viewport_size({"width": 1100, "height": 1000})
+    page.wait_for_function("""() => {
+        const c = document.querySelector('[data-skw="0"]');
+        return c.width !== waveWidth && c.width === Math.floor(c.clientWidth * devicePixelRatio);
+    }""", timeout=3000)
+    b = page.evaluate("CRATE.perf.peaks")
+    page.evaluate("CRATE.drawSK()")
+    assert page.evaluate("CRATE.perf.peaks") == b and b - a == 1  # a new width is computed once
+    assert page.evaluate("document.querySelector('[data-skw=\"0\"]')===waveCanvas&&waveCanvas._base===waveBase")
+
+
+def test_wav_export_bytes(page):
+    r = page.evaluate("""(async()=>{const b=new AudioBuffer({numberOfChannels:1,length:5,sampleRate:44100});b.getChannelData(0).set([0,1,-1,0.5,2]);
+        const u=CRATE.wavBytes(b),v=new DataView(u.buffer,u.byteOffset),s=[];for(let k=0;k<5;k++)s.push(v.getInt16(44+k*4,true),v.getInt16(46+k*4,true));
+        let bin='';u.forEach(x=>bin+=String.fromCharCode(x));
+        return {len:u.length,riff:String.fromCharCode(...u.subarray(0,4)),ch:v.getUint16(22,true),sr:v.getUint32(24,true),bits:v.getUint16(34,true),
+                data:v.getUint32(40,true),s,same:(await CRATE.wavB64(b))===btoa(bin)}})()""")
+    assert r == {"len": 64, "riff": "RIFF", "ch": 2, "sr": 44100, "bits": 16, "data": 20,
+                 "s": [0, 0, 32767, 32767, -32767, -32767, 16383, 16383, 32767, 32767], "same": True}
+
+
+def _lane(page):
+    i = idx(page, "s[F.cat]!=='Percussion'")
+    page.evaluate(f"CRATE.skAdd({i})")
+    page.wait_for_function("SK.lanes[0]&&SK.lanes[0].state==='ok'", timeout=60000)
+
+
+def test_quick_tempo_changes_reload_each_lane_once(page):
+    _lane(page)
+    page.evaluate("document.getElementById('skplay').click()")
+    page.wait_for_timeout(300)
+    urls = []
+    page.on("request", lambda r: urls.append(r.url) if "api/conform?" in r.url else None)
+    page.evaluate("(()=>{const b=CRATE.PROJ.bpm;CRATE.setProj({bpm:b+1});CRATE.setProj({bpm:b+2});CRATE.setProj({bpm:b+3})})()")
+    assert page.evaluate("SK.lanes[0].state") == "loading" and not page.evaluate("SK.playing")
+    page.wait_for_function("SK.lanes[0].state==='ok'&&SK.playing", timeout=60000)
+    page.wait_for_timeout(500)
+    bpm = page.evaluate("String(CRATE.PROJ.bpm)")
+    page.evaluate("CRATE.skStop()")
+    assert len(urls) == 1 and urls[0].endswith("bpm=" + bpm), urls  # one render, at the last tempo; playing again
+
+
+def test_a_superseded_load_does_not_fail_the_lane(page):
+    _lane(page)
+    state = page.evaluate("(async()=>{const l=SK.lanes[0];await Promise.all([CRATE.skLoad(l),CRATE.skLoad(l)]);return l.state})()")
+    assert state == "ok"
+
+
+def test_galaxy_repaints_once_a_frame(page):
+    page.evaluate("document.getElementById('tabG').click()")
+    page.wait_for_function("document.getElementById('gll')&&!/loading/.test(document.getElementById('gll').textContent)", timeout=60000)
+    if "unavailable" in page.evaluate("document.getElementById('gll').textContent"):
+        pytest.skip("no galaxy map in this library")
+    n = page.evaluate("""(async()=>{const c=document.getElementById('galc'),r=c.getBoundingClientRect();
+        await new Promise(q=>requestAnimationFrame(q));const a=CRATE.perf.gal;
+        for(let k=0;k<30;k++)c.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:r.left+50+k*5,clientY:r.top+80}));
+        for(let k=0;k<2;k++)await new Promise(q=>requestAnimationFrame(q));return CRATE.perf.gal-a})()""")
+    assert 1 <= n <= 2, n
+
+
+def test_reverb_impulse_is_built_once_and_caches_are_bounded(page):
+    r = page.evaluate("""(()=>{const ac=new AudioContext(),a=CRATE.perf.ir,n=[1,2,3].map(()=>CRATE.padReverb(ac));
+        const m=CRATE.lruMap(2);m.set('a',1);m.set('b',2);m.get('a');m.set('c',3);
+        return {built:CRATE.perf.ir-a,nodes:n.every(x=>x instanceof ConvolverNode&&Math.abs(x.buffer.duration-3)<0.01),shared:n[0].buffer===n[1].buffer,
+                keys:['a','b','c'].map(k=>m.has(k)),size:m.size}})()""")
+    assert r == {"built": 1, "nodes": True, "shared": True, "keys": [True, False, True], "size": 2}
+
+
+def test_a_swung_step_enabled_by_wheel_sounds_once_before_the_next_pass(page):
+    _drums(page, ("Kick",))
+    page.evaluate("CRATE.PROJ.bpm=120;SK.lanes[0].swing=0.6;SK.lanes[0].pads[0].steps.fill(0);CRATE.drawSK();CRATE.skPlay()")
+    result = page.evaluate("""(async()=>{
+        const l=SK.lanes[0],ac=l.g.context,st=CRATE.barLen()/16;
+        const abs=Math.ceil((ac.currentTime+0.18-SK.start)/st)|1,j=abs%16,grid=SK.start+abs*st;
+        while(ac.currentTime<grid+0.015)await new Promise(r=>setTimeout(r,4));
+        const step=document.querySelector(`[data-dstep="0:0:${j}"]`);
+        const wheel=dy=>step.dispatchEvent(new WheelEvent('wheel',{deltaY:dy,bubbles:true,cancelable:true}));
+        wheel(-1);
+        const hit=l.live.get('0:'+j);
+        if(!hit)return null;
+        const lead=hit.t-ac.currentTime,stop=hit.src.stop.bind(hit.src);
+        let cancelled=false;
+        hit.src.stop=()=>{cancelled=true;stop()};
+        wheel(1);wheel(-1);
+        return {lead,cancelled,replaced:l.live.get('0:'+j).src!==hit.src}
+    })()""")
+    page.evaluate("CRATE.skStop()")
+    assert result is not None and 0.01 < result["lead"] < 0.075, result
+    assert result["cancelled"] and result["replaced"], result
+
+
+def test_a_tempo_reload_waits_for_a_lanes_replacement_request(page):
+    _lane(page)
+    page.evaluate("CRATE.skPlay()")
+    pattern = "**/api/conform?*"
+    pending = []
+    page.route(pattern, lambda route: pending.append(route))
+    with page.expect_request(pattern):
+        page.evaluate("CRATE.setProj({bpm:CRATE.PROJ.bpm+1})")
+    with page.expect_request(pattern):
+        page.evaluate("void CRATE.skLoad(SK.lanes[0])")
+    page.wait_for_timeout(100)
+    resumed_early = page.evaluate("SK.playing")
+    pending[0].abort()
+    pending[1].continue_()
+    page.wait_for_function("SK.lanes[0].state==='ok'&&SK.playing", timeout=60000)
+    page.evaluate("CRATE.skStop()")
+    assert not resumed_early
