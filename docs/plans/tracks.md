@@ -178,12 +178,13 @@ A Drums part from before had its tops in it. It keeps them, on a track of their 
 - That Tops track is the same track in the mixer and in every snapshot of the state (its id comes from its Drums
   track's), so the strip's rows still line up. The eight-track limit does not stop it.
 - If the song's tops are not made yet, the part plays whole, as any such song's drums do, and is split once they are.
-- In a state from before, the vocal duck is off on Other and on the Tops tracks the split made.
+- Other and Tops start with the vocal duck on when there is no saved setting for it. A setting from when the slot
+  played Bass does not carry over.
 - In a state from before, a track with harmonics on has them at 100%, and its volume is raised by what the
   turning-down now takes off, once its part has loaded.
 - Opening and splitting is not a change: nothing is marked unsaved or "changed since" because of it.
 
-So an old combination or snapshot sounds as it did.
+Older combinations and snapshots keep their saved part settings and use the current defaults for the new duck controls.
 
 **9. The server.**
 - `api/stems/peaks` (track, stem): a picture of the whole stem, at least 400 points a second, a byte each, made the
@@ -226,8 +227,8 @@ So an old combination or snapshot sounds as it did.
 - Other dips where the drums are loud, up to its amount in each band. It uses a new 125 Hz filter and shares
   the other six with the vocal duck. The two dips add where a hit lands on a sung note.
 - Other's Duck has one switch for **vocals** and **drums**. The drums amount runs from 0 to 12 dB, with 0 off.
-  It starts at 2 dB in a fresh mixer and at 0 in older combinations and their snapshots. Opening those
-  combinations keeps their saved mark clean.
+  It starts at 2 dB whenever the mix or snapshot has no saved drums amount. Saved amounts and Duck switches
+  stay as set. Opening those combinations keeps their saved mark clean.
 - The detector is smoothed at 30 Hz, with Q 1.92 and scale 12. At a 12 dB setting, a 125 Hz test kick gives
   7.3 dB of reduction at 16–40 ms, 12.7 dB during the hit and 0.1 dB at 60–100 ms after it ends.
 

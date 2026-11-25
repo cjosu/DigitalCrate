@@ -3597,15 +3597,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(v>=5)return;
   const clean=MX.savedSig&&(MX.savedSig===sig(v)||(v<2&&MX.savedSig===sig(1,true)));
   for(const mix of [MX,...MX.snaps]){
-   mix.duck ||= {};
-   for(const id of mix.order||Object.keys(mix.slots||{})){
+   // Before v4, a Duck setting belonged to Bass even if its slot was later reassigned.
+   if(v<4)for(const id of Object.keys(mix.duck||{})){
     const r=mix.roles?.[id]||mix.slots?.[id]?.stem||id;
-    // A slot that used to play Bass may still have its old Duck setting.
-    if(v<4&&(r==='other'||r==='tops'))mix.duck[id]={on:false,db:BLEND.duckDb(mix.duck[id])};
-    if(r==='other'){
-     mix.duck[id]||={on:true,db:BLEND.DUCK.db};
-     mix.duck[id].ddb=0;
-    }
+    if(r==='other'||r==='tops')delete mix.duck[id];
    }
    if(v>=3)continue;
    Object.entries(mix.slots||{}).forEach(([id,p])=>{
@@ -3663,7 +3658,6 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const at=mix.order.indexOf(id);
     mix.order.splice(at<0?mix.order.length:at+1,0,tops);
     mix.roles[tops]='tops';
-    (mix.duck||={})[tops]??={on:false,db:BLEND.VDUCK.db};
    }
   }
   if(clean)MX.savedSig=sig();

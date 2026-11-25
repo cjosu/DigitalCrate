@@ -127,9 +127,9 @@ Hover over the song for the full name and why that part was picked.
   prepared, its gain follows a −8 dBFS peak ceiling on its source kit.
 - **Duck** starts on. Drums lower the Bass track's lows. Vocals lower the whole Tops track and the bands of Other
   where the voice is loud. These amounts start at 3 dB. Other's Duck has **vocals** and **drums** amounts under one
-  switch. The drums amount starts at 2 dB in a new mixer and at 0 in combinations saved before it was added.
+  switch. The drums amount starts at 2 dB when the mix or snapshot has no saved amount.
   Drag either amount from 0 to 12 dB to set how much room Other makes. **FX** leaves Duck as you set it. Muted
-  tracks duck nothing. Combinations saved before vocal ducking open with it off on Tops and Other.
+  tracks duck nothing. Older mixes and snapshots use the defaults for missing settings and keep any saved Duck switches.
 - **One-shot tracks** play a library sample at chosen moments. Set a cycle of 1, 2, 4 or 8 bars and click a step to
   place or remove a hit. The die picks a sample that fits and keeps your steps. **Choose a sample** searches the
   library, **▶** plays it once, and **✦ Mashup** in the sample panel sends the current sample to a one-shot track.

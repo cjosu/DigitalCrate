@@ -1234,7 +1234,7 @@ def test_state_saved_before_blends_still_opens(site, page):
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=120000)
     assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length]") == [0, 0]
-    assert page.evaluate("CRATE.MX.duck") == {"other": {"on": False, "db": 3, "ddb": 0}}
+    assert page.evaluate("CRATE.MX.duck") == {}
     assert page.evaluate("CRATE.MX.duck.bass?.db ?? BLEND.DUCK.db") == 3
 
 
@@ -1746,23 +1746,38 @@ def test_tracks_maths(page):
         assert page.evaluate(f"(()=>{{const TR=CRATE.TR;return {js}}})()") == want, js
 
 
-def _calls(page):
+def _calls(page, *, block_prefetch=False):
     """Record every api call the page makes from now on, as [path, body]."""
-    page.evaluate("(()=>{if(window.__calls)return;window.__calls=[];const a=CRATE.api;CRATE.api=(p,b)=>{__calls.push([p,b]);return a(p,b)}})()")
+    page.evaluate("""blockPrefetch => {
+        if (window.__calls) return;
+        window.__calls = [];
+        // An in-flight recommendation must not add a background render to a drag test.
+        if (blockPrefetch) CRATE.MX.pre = {};
+        const api = CRATE.api;
+        CRATE.api = (path, body) => {
+            if (blockPrefetch && path === 'api/stems/pick' && !Object.hasOwn(body, 'track')) {
+                return Promise.resolve({part: null});
+            }
+            __calls.push([path, body]);
+            return api(path, body);
+        };
+    }""", block_prefetch)
 
 def test_pitch_is_two_numbers_you_drag(site, page):
     _mixer(site, page)
     for slot in ("drums", "bass", "vocals", "other"):
         assert page.locator(f'[data-v="{slot}:st"]').count() == 1 and page.locator(f'[data-v="{slot}:ct"]').count() == 1
-    _calls(page)
+    _calls(page, block_prefetch=True)
     box = page.locator('[data-v="bass:ct"]').bounding_box()
     x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x, y - 20); page.mouse.move(x, y - 40)
     assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').length") == 0     # nothing is asked while dragging
     page.mouse.up()
-    page.wait_for_function("CRATE.MX.slots.bass.ct===25&&CRATE.MX.slots.bass.buf&&!CRATE.MX.slots.bass._loading")
-    key = page.evaluate("CRATE.MX.info.slots.bass.semis")
-    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render'&&c[1].stem==='bass').pop()[1].semis") == key + 0.25
+    page.wait_for_function("""() => {
+        const p = CRATE.MX.slots.bass, key = CRATE.MX.info?.slots.bass?.semis;
+        const bassRender = __calls.filter(([path, body]) => path === 'api/stems/render' && body.stem === 'bass').at(-1);
+        return p.ct === 25 && p.buf && !p._loading && bassRender?.[1].semis === key + 0.25;
+    }""")
     page.evaluate("CRATE.TR.set('drums','st',2)")
     page.wait_for_function("__calls.some(c=>c[0]==='api/stems/render'&&c[1].stem==='drums'&&c[1].semis===2)")
     page.focus('[data-v="bass:st"]'); page.keyboard.press("ArrowUp")
@@ -1915,7 +1930,7 @@ def test_loop_drags_and_snaps(site, page):
     page.wait_for_function("['drums','bass','vocals','other'].every(s=>CRATE.TR.has(s))", timeout=20000)
     page.evaluate("CRATE.TR.setLoop('drums',4,4)")
     page.wait_for_function("CRATE.MX.slots.drums.bar0===4&&CRATE.MX.slots.drums.n===4&&CRATE.MX.slots.drums.buf&&!CRATE.MX.slots.drums._loading")
-    _calls(page)
+    _calls(page, block_prefetch=True)
     e = _edge(page, "drums")
     page.mouse.move(e["xb"], e["y"]); page.mouse.down(); page.mouse.move(e["xb"] + e["bar"], e["y"]); page.mouse.move(e["xb"] + 2.2 * e["bar"], e["y"])
     assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').length") == 0 and "6 bars" in page.inner_text('[data-mxwave="drums"] .trtip')
@@ -2401,14 +2416,14 @@ def test_vocals_duck_tops_and_other(site, page):
         assert page.evaluate("[...document.querySelectorAll('.trfx,.trfx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
 
 
-def test_state_saved_before_the_vocal_duck_is_not_ducked(site, page):
+def test_state_saved_before_the_vocal_duck_uses_its_default(site, page):
     _old_state(site, page, 904)                                                      # v 2, clean, one snapshot, old Drums
     page.wait_for_function("CRATE.MX.slots['drums~tops']&&CRATE.MX.slots['drums~tops'].buf&&CRATE.MX.slots.other.buf", timeout=60000)
-    off = "(d=>['other','drums~tops'].every(id=>d[id]&&d[id].on===false)&&!(d.bass&&d.bass.on===false))"
-    assert page.evaluate(f"{off}(CRATE.MX.duck)") and page.evaluate(f"{off}(CRATE.MX.snaps[0].duck)")
+    enabled = "(d=>['other','drums~tops','bass'].every(id=>d[id]?.on!==false))"
+    assert page.evaluate(f"{enabled}(CRATE.MX.duck)") and page.evaluate(f"{enabled}(CRATE.MX.snaps[0].duck)")
     page.click("#mxplay")
     page.wait_for_function("['other','drums~tops','bass'].every(id=>CRATE.MX.slots[id]._c)")
-    assert page.evaluate("!CRATE.MX.slots.other._c.vbanded&&!CRATE.MX.slots['drums~tops']._c.vducked&&CRATE.MX.slots.bass._c.ducked")
+    assert page.evaluate("CRATE.MX.slots.other._c.vbanded&&CRATE.MX.slots['drums~tops']._c.vducked&&CRATE.MX.slots.bass._c.ducked")
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
     page.evaluate("CRATE.MX.snapSel=0"); assert page.evaluate("BLEND.changed()") is False
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 5
@@ -2460,7 +2475,10 @@ def test_vocal_duck_migration_ignores_a_previous_bass_setting(site, page):
     }""")
     page.reload()
     page.wait_for_function("CRATE.MX?.slots.other?.buf", timeout=60000)
-    assert page.evaluate("[CRATE.MX.duck.other, CRATE.MX.snaps[0].duck.other]") == [{"on": False, "db": 12, "ddb": 0}] * 2
+    assert page.evaluate("""[CRATE.MX, CRATE.MX.snaps[0]].map(mix => {
+        const duck = mix.duck?.other;
+        return [duck?.on !== false, BLEND.duckDb(duck), BLEND.gduckDb(duck)];
+    })""") == [[True, 3, 2]] * 2
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
 
 
@@ -3395,17 +3413,17 @@ def test_drums_duck_other(site, page):
         assert page.evaluate("[...document.querySelectorAll('.trfx,.trfx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
 
 
-def test_state_saved_before_the_drum_duck_is_not_ducked_by_the_drums(site, page):
+def test_old_mixes_default_to_drum_duck_and_keep_explicit_settings(site, page):
     _old_state(site, page, 904)                                                      # v 2, clean, one snapshot
     page.wait_for_function("CRATE.MX.slots.other&&CRATE.MX.slots.other.buf", timeout=60000)
-    zero = "(d=>!!d.other&&d.other.ddb===0)"
-    assert page.evaluate(f"{zero}(CRATE.MX.duck)") and page.evaluate(f"{zero}(CRATE.MX.snaps[0].duck)")
+    drum_amount = "(m=>BLEND.gduckDb(m.duck?.other))"
+    assert page.evaluate(f"{drum_amount}(CRATE.MX)") == page.evaluate(f"{drum_amount}(CRATE.MX.snaps[0])") == 2
     page.click("#mxplay")
     page.wait_for_function("CRATE.MX.slots.other._c")
-    assert page.evaluate("CRATE.MX.slots.other._c.gbanded") is False
+    assert page.evaluate("CRATE.MX.slots.other._c.gbanded") is True
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 5
-    # a state saved with the vocal duck, before the drums': Other keeps its vocal duck and gets none from the drums
+    # An earlier vocal duck keeps its amount. A snapshot with the Duck switch off stays off.
     page.click("#mxclear"); page.click("#mxclear")
     _roll(page, "other", 902); _roll(page, "vocals", 901); _roll(page, "drums", 904)
     page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
@@ -3413,13 +3431,22 @@ def test_state_saved_before_the_drum_duck_is_not_ducked_by_the_drums(site, page)
     page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
     page.evaluate("""() => { const s = JSON.parse(localStorage.getItem('dcStems')); s.v = 4;
       for (const mix of [s, ...s.snaps]) for (const d of Object.values(mix.duck || {})) delete d.ddb;
-      s.savedSig = CRATE.mxSig(4); localStorage.setItem('dcStems', JSON.stringify(s)); }""")
+      s.snaps[0].duck.other = {on:false, db:6};
+      const signature = JSON.parse(CRATE.mxSig(4)); signature.snaps = s.snaps;
+      s.savedSig = JSON.stringify(signature); localStorage.setItem('dcStems', JSON.stringify(s)); }""")
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.other&&CRATE.MX.slots.other.buf", timeout=60000)
     mix = page.evaluate("(m=>[m.vband,m.gband])(BLEND.mixOf(CRATE.MX.slots.other,'other',{on:true,fx:true,bar:2,DT:{},duck:CRATE.MX.duck.other}))")
-    assert mix == [3, 0] and page.evaluate("CRATE.MX.duck.other.ddb") == 0
-    assert page.evaluate(f"{zero}(CRATE.MX.snaps[0].duck)")
+    assert mix == [3, 2]
+    assert page.evaluate("CRATE.MX.snaps[0].duck.other") == {"on": False, "db": 6}
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+    page.click("#mxplay")
+    page.wait_for_function("CRATE.MX.slots.other._c?.gbanded")
+    page.click('[data-sn="0"]')
+    page.wait_for_function("""() => {
+        const chain = CRATE.MX.slots.other._c;
+        return CRATE.MX.duck.other?.on === false && chain && !chain.vbanded && !chain.gbanded;
+    }""")
 
 
 def test_playback_groups_the_drums_and_ducks_other_under_them(site, page):
