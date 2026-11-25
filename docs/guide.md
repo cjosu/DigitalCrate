@@ -113,6 +113,9 @@ Hover over the song for the full name and why that part was picked.
   harmonics together.
 - On stem tracks, **Harmonics** adds overtones above 110 Hz while keeping the volume steady. A pure sub-bass starts
   at 100% so it can be heard on small speakers.
+- **Even** holds down stray bass peaks. It eases heavy sub when there is enough bass above it to balance against.
+  It brings bass parts closer in loudness by ear. New bass parts start with Even on, and older parts open with it
+  off. **FX** leaves Even as you set it. The dry Ableton export uses the same bass render.
 - **Duck** starts on at 3 dB. Drums lower the Bass track's lows. Vocals lower the whole Tops track and the bands of
   Other where the voice is loud. Drag the amount from 0 to 12 dB to set the limit for each dip. **FX** leaves
   Duck as you set it. A muted vocal ducks nothing. Combinations saved before vocal ducking open with it off on

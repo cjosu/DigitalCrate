@@ -1765,8 +1765,8 @@ def test_effects_are_numbers_under_every_track(site, page):
     devs = lambda s: page.evaluate(f"[...document.querySelectorAll('[data-mxrow=\"{s}\"] .trfx .trdev')].map(d=>d.dataset.dev)")
     for s in ("drums", "vocals"):
         assert devs(s) == ["eq", "dly", "rev", "harm"], s
-    for s in ("bass", "other"):
-        assert devs(s) == ["eq", "dly", "rev", "harm", "duck"], s
+    assert devs("bass") == ["eq", "dly", "rev", "harm", "even", "duck"]
+    assert devs("other") == ["eq", "dly", "rev", "harm", "duck"]
     page.evaluate("CRATE.TR.set('bass','fb',60)")
     page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.fb.gain.value-0.6)<0.02")
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass.fb") == 0.6
@@ -2415,3 +2415,70 @@ def test_vocal_duck_releases_a_discarded_mixer_chain(site, page):
     page.click('[data-sn="0"]')
     page.wait_for_function("CRATE.MX.slots.other._c?.vbanded && CRATE.MX.slots.other._c !== previousOther")
     page.wait_for_function("!previousOther.vbanded", timeout=1500)
+
+
+def test_bass_is_even_by_default_and_parts_from_before_are_not(site, page):
+    _mixer(site, page)
+    _calls(page)
+    bass = page.evaluate("CRATE.MX.slots.bass.track")
+    _roll(page, "bass", 902 if bass != 902 else 903)
+    asked = lambda: page.evaluate("""() => {
+        const p = CRATE.MX.slots.bass;
+        return __calls.filter(([path, args]) => path === 'api/stems/render' &&
+            args.stem === 'bass' && args.track === p.track && args.bar0 === p.bar0).pop()[1].cond || 0;
+    }""")
+    assert page.evaluate("CRATE.MX.slots.bass.cond") == 1 and asked() == 1
+    assert page.locator("[data-mxeven]").count() == 1 and page.get_attribute('[data-mxeven="bass"]', "aria-pressed") == "true"
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass.cond") == 1
+    page.click("#mxfx")
+    assert page.evaluate("CRATE.MX.fx===false&&CRATE.MX.slots.bass.cond===1")
+    assert page.get_attribute('[data-mxeven="bass"]', "aria-pressed") == "true"
+    page.click("#mxfx")
+    assert page.evaluate("(()=>{const a=CRATE.MX.slots.bass;return BLEND.sameAudio({...a,stem:'bass'},{...a,stem:'bass',cond:undefined})})()") is False
+    for w in (1512, 1280):                                                           # the bass row still fits
+        page.set_viewport_size({"width": w, "height": 800}); page.wait_for_timeout(200)
+        assert page.evaluate("[...document.querySelectorAll('[data-mxrow=\"bass\"] .trfx,[data-mxrow=\"bass\"] .trfx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+    # what counts as a change: a part with Even has one thing more in its signature; a part without has none (4)
+    longer = "(()=>{const s=JSON.parse(CRATE.mxSig()).slots,len=r=>s.find(x=>x[0]===r)[1].length;return len('bass')-len('drums')})()"
+    assert page.evaluate(longer) == 1
+    page.fill("#mxname", "even"); page.click("#mxsave"); page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.evaluate("window.evenBuffer = CRATE.MX.slots.bass.buf")
+    page.click('[data-mxeven="bass"]')                                               # off: a new render, and a change
+    page.wait_for_function("""() => {
+        const p = CRATE.MX.slots.bass;
+        return !p.cond && p.buf && p.buf !== evenBuffer && !p._loading;
+    }""")
+    assert asked() == 0 and "dirty" in page.get_attribute("#mxsave", "class") and page.evaluate(longer) == 0
+    assert "cond" not in page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass")
+    assert page.evaluate("CRATE.MX.hist.bass[CRATE.MX.hpos.bass].cond ?? null") is None
+    page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.reload()                                                                    # a part without it stays without it
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=60000)
+    assert page.get_attribute('[data-mxeven="bass"]', "aria-pressed") == "false"
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+    # 5. the play-strip view asks for the same render as the mixer
+    page.evaluate("window.plainBuffer = CRATE.MX.slots.bass.buf")
+    page.click('[data-mxeven="bass"]')
+    page.wait_for_function("""() => {
+        const p = CRATE.MX.slots.bass;
+        return p.cond === 1 && p.buf && p.buf !== plainBuffer && !p._loading;
+    }""")
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
+    _roll(page, "drums", 902 if page.evaluate("CRATE.MX.slots.drums.track") != 902 else 903)
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===2")
+    _calls(page); page.evaluate("__calls.length=0"); page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready", timeout=90000)
+    strip = page.evaluate("__calls.filter(c=>c[0]==='api/stems/render'&&c[1].stem==='bass').map(c=>c[1].cond||0)")
+    assert strip and all(c == 1 for c in strip)
+
+
+def test_even_bass_prefetch_follows_the_new_role(site, page):
+    _mixer(site, page)
+    page.wait_for_function("CRATE.MX.pre.bass?.ready")
+    assert page.evaluate("CRATE.MX.pre.bass.part.cond") == 1
+    _more(page, "bass")
+    page.select_option('[data-mxrole="bass"]', "other")
+    page.wait_for_function("CRATE.MX.roles.bass === 'other' && !!CRATE.MX.slots.bass?.buf && !CRATE.MX.slots.bass._loading")
+    assert page.evaluate("CRATE.MX.slots.bass.stem") == "other"
+    assert page.evaluate("CRATE.MX.slots.bass.cond ?? null") is None
