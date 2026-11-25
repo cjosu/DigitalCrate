@@ -991,7 +991,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     # a part that is all sub-bass gets harmonics by itself (small speakers can't play it), and says so
     b = next((k for k in page.evaluate("CRATE.MX.order") if page.evaluate(f"CRATE.MX.roles['{{}}']".format(k)) == "bass" and page.evaluate(f"!!CRATE.MX.slots['{{}}']".format(k))), None)
     if b:
-        page.wait_for_function(f"CRATE.MX.slots['{b}'].sub>=0.85&&CRATE.MX.slots['{b}'].harm===true", timeout=30000)
+        page.wait_for_function(f"CRATE.MX.slots['{b}'].sub>=0.85&&CRATE.MX.slots['{b}'].harm===1", timeout=30000)
         assert "sub-bass" in page.locator(f'[data-mxrow="{b}"] .mxsrc').inner_text()
     # the list of prepared songs, and a stem button that puts a song straight into a slot of that kind
     page.click("#mxsongs summary")
@@ -1810,10 +1810,26 @@ def test_loop_drags_and_snaps(site, page):
     page.focus('[data-mxwave="bass"]'); page.keyboard.press("ArrowRight"); page.keyboard.press("Shift+ArrowRight")
     page.wait_for_function("CRATE.MX.slots.bass.bar0===3&&CRATE.MX.slots.bass.n===3")
     assert page.locator("[data-mxpos]").count() == 0 and page.locator('select[data-mxlen="drums"]').count() == 0
-    page.evaluate("CRATE.TR.setLoop('other',1,2);CRATE.TR.setLoop('other',5,4)")             # two changes at once: the last wins
+    # Keep the first render's reply until the next edit is already playing.
+    page.evaluate("""() => {
+      const api = CRATE.api;
+      CRATE.api = (path, b) => {
+        const reply = api(path, b);
+        if (path === 'api/stems/render' && b.stem === 'other' && b.bar0 === 1 && b.n === 2) {
+          return reply.then(r => new Promise(resolve => { window.releaseOldLoop = () => resolve(r); }));
+        }
+        return reply;
+      };
+      window.oldLoop = CRATE.TR.setLoop('other', 1, 2);
+    }""")
+    page.wait_for_function("typeof releaseOldLoop==='function'")
+    page.wait_for_selector('[data-mxwave="other"].busy')
+    page.evaluate("CRATE.TR.setLoop('other',5,4)")
     page.wait_for_function("CRATE.MX.slots.other.bar0===5&&CRATE.MX.slots.other.n===4&&!CRATE.MX.slots.other._loading")
-    page.wait_for_timeout(600)
+    page.evaluate("() => { releaseOldLoop(); return oldLoop; }")
+    assert page.locator('[data-mxwave="other"].busy').count() == 0
     assert abs(page.evaluate("CRATE.MX.slots.other.buf.duration") - 4 * 2.4) < 0.01
+
 
 def test_a_half_time_loop_snaps_to_every_second_bar(site, page):
     _mixer(site, page, bpm=50)                                    # the songs are at 92 to 110: two of their bars to one
@@ -1861,3 +1877,46 @@ def test_zoom_and_the_view_switch(site, page):
     assert page.evaluate("CRATE.MX.slots.bass._v[0]===0&&Math.abs(CRATE.MX.slots.bass._v[1]-CRATE.TR.song(CRATE.MX.slots.bass.track,'bass').dur)<0.01")
     page.click("#tabS"); page.click("#tabM"); page.wait_for_selector(".trfx")                 # away and back: still there, nothing stuck
     assert page.locator(".trfx").count() == 4
+
+
+HARM = r"""async () => {
+  const BL = window.BLEND, SR = 44100, N = 2 * SR, out = {};
+  const sub = c => { const b = c.createBuffer(1, N, SR), d = b.getChannelData(0); for (let i = 0; i < N; i++) d[i] = 0.3 * Math.sin(2 * Math.PI * 55 * i / SR); return b; };
+  const rms = d => { let s = 0; for (let i = SR / 2; i < N; i++) s += d[i] * d[i]; return Math.sqrt(s / (N - SR / 2)); };
+  const probe = new OfflineAudioContext(1, N, SR), hc = await BL.harmMeasure(sub(probe));
+  const run = async (p, withComp) => { const c = new OfflineAudioContext(1, N, SR), ch = BL.mkChain(c, c.destination, BL.duckBus(c)), s = c.createBufferSource();
+    const m = BL.mixOf(p, 'bass', { on: true, fx: true, bar: 2.4, DT: { '1/8': 1 / 8 }, hc: withComp ? hc : null, duck: { on: false } });
+    BL.applyChain(ch, m, 0); s.buffer = sub(c); s.connect(ch.in); s.start(0); return rms((await c.startRendering()).getChannelData(0)); };
+  const base = await run({ db: 0, harm: 0 }, true);
+  out.level = [];
+  for (const a of [0.25, 0.5, 1]) out.level.push(20 * Math.log10((await run({ db: 0, harm: a }, true)) / base));
+  out.raw = 20 * Math.log10((await run({ db: 0, harm: 1 }, false)) / base);        // the switch as it was: louder
+  out.old = 20 * Math.log10((await run({ db: 0, harm: true, hup: true }, true)) / (await run({ db: 0, harm: 1 }, false)));
+  out.amt = [BL.harmAmt({ harm: true }), BL.harmAmt({ harm: false }), BL.harmAmt({ harm: null }), BL.harmAmt({ harm: 0.4 })];
+  return out; }"""
+
+def test_harmonics_amount_keeps_the_level(page):
+    r = page.evaluate(HARM)
+    assert all(abs(x) < 0.3 for x in r["level"]), r          # the level stays where it was at 0 (the spec allows a decibel)
+    assert r["raw"] > 0.8 and abs(r["old"]) < 0.05, r        # the old switch was louder; a part from before plays as it did
+    assert r["amt"] == [1, 0, 0, 0.4]
+
+def test_state_saved_before_tracks_still_opens(site, page):
+    _mixer(site, page)
+    page.evaluate("""(()=>{CRATE.mxPlay(false);const s=JSON.parse(localStorage.getItem('dcStems'));delete s.v;
+      for(const id of Object.keys(s.slots)){const p=s.slots[id];delete p.ct;delete p.fb;p.harm=id==='bass'?true:id==='drums'?false:null;p.db=-2}
+      s.snaps=[{order:s.order,roles:s.roles,slots:JSON.parse(JSON.stringify(s.slots)),duck:{}}];localStorage.setItem('dcStems',JSON.stringify(s))})()""")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX&&CRATE.MX.slots.bass", timeout=30000)
+    assert page.evaluate("CRATE.MX.slots.bass.hup===true&&CRATE.MX.snaps[0].slots.bass.hup===true&&!CRATE.MX.slots.drums.hup")
+    page.click("#mxplay")
+    page.wait_for_function("CRATE.MX.slots.bass._hc&&!CRATE.MX.slots.bass.hup", timeout=60000)
+    want = page.evaluate("-2-20*Math.log10(BLEND.harmComp({harm:1},CRATE.MX.slots.bass._hc))")
+    assert page.evaluate("CRATE.MX.slots.bass.db") == pytest.approx(min(6, want), abs=0.26)      # (the slider moves in half decibels)
+    assert page.evaluate("CRATE.MX.slots.bass.harm") == 1 and page.evaluate("CRATE.MX.slots.drums.db") == -2
+    c = page.evaluate("(()=>{const c=CRATE.MX.slots.vocals._c;return [c.lo.frequency.value,c.mid.frequency.value,c.hi.frequency.value,+c.fb.gain.value.toFixed(2)]})()")
+    assert c == [200, 1000, 5000, 0.35] and page.evaluate("(CRATE.MX.slots.vocals.ct||0)") == 0
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 2
+    page.evaluate("CRATE.TR.set('bass','harm',50)")
+    page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.hg.gain.value-0.175)<0.01")
+    assert page.locator("[data-mxharm]").count() == 0 and page.locator('[data-mxrow="bass"] .trfx [data-v="bass:harm"]').count() == 1

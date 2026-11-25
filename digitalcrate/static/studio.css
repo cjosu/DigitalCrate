@@ -168,7 +168,7 @@ body.mash .projbar{display:none}
 .trh .tbtn:disabled{opacity:.35}.trh select{padding:1px 3px;font-size:11px}
 .trh input[type=range]{width:85px}.trh [data-trmore]{font-size:16px}.trk.open [data-trmore]{border-color:var(--acc)}
 .trk .mxwave{min-width:0;height:58px}.trk .mxwave canvas{height:100%}
-.trmenu{display:none;position:absolute;right:6px;top:28px;width:172px;padding:4px;background:#161a20;border:1px solid var(--line);border-radius:6px;box-shadow:0 5px 16px #0009}
+.trmenu{display:none;position:absolute;z-index:3;right:6px;top:28px;width:172px;padding:4px;background:#161a20;border:1px solid var(--line);border-radius:6px;box-shadow:0 5px 16px #0009}
 .trk.open .trmenu{display:grid;gap:2px}.trmenu button,.trmenu label{padding:5px 6px;border:0;background:none;text-align:left;font-size:12px}
 .trmenu button:hover,.trmenu button:focus-visible{background:#232a34}.trmenu label{display:flex;align-items:center;justify-content:space-between}
 .trmenu [aria-pressed=true]{color:var(--acc)}.trmenu [aria-pressed=true]::after{content:"✓";float:right}
@@ -186,3 +186,4 @@ body.mash .projbar{display:none}
 #trview [aria-pressed=true]{color:var(--acc);border-color:var(--acc)}
 .trzoom{position:absolute;top:4px;right:4px;visibility:hidden}
 .trwave:hover .trzoom,.trwave:focus-within .trzoom{visibility:visible}
+.trfxlabel{text-transform:uppercase;font-size:10px;letter-spacing:.03em;padding:2px 3px}
