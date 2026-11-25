@@ -1602,7 +1602,21 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
   BL.setReverb = (MX, type, decay) => { MX.reverb = { type, decay: decay || BL.REVERBS[type].decay }; if (MX.bus && MX.bus.rev) MX.bus.rev.set(type, MX.reverb.decay); };
 
-  const harmonicsPath = ctx => {
+  BL.HARM = { drive: { gain: 0.35 }, oct: { gain: 1.35, lp: 100, hp: 50, top: 240 } };
+  const harmonicsPath = (ctx, kind = 'drive') => {
+    if (kind === 'oct') {
+      const { lp, hp, top } = BL.HARM.oct;
+      const filter = (type, frequency) => {
+        const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = frequency; f.Q.value = BL.Q; return f;
+      };
+      const shaper = ctx.createWaveShaper(), gain = ctx.createGain();
+      shaper.curve = new Float32Array([1, 0, 1]); // full-wave rectification doubles the bass frequency
+      gain.gain.value = 0;
+      const nodes = [filter('lowpass', lp), filter('lowpass', lp), shaper,
+        filter('highpass', hp), filter('highpass', hp), filter('lowpass', top), gain];
+      nodes.forEach((node, i) => { if (i) nodes[i - 1].connect(node); });
+      return { in: nodes[0], out: gain, nodes };
+    }
     const drive = ctx.createGain(), shaper = ctx.createWaveShaper(), hp = ctx.createBiquadFilter(),
       hp2 = ctx.createBiquadFilter(), gain = ctx.createGain(), curve = new Float32Array(1024);
     for (let k = 0; k < curve.length; k++) curve[k] = Math.tanh(3 * (k / 511.5 - 1));
@@ -1619,14 +1633,19 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return { in: drive, out: gain, nodes: [drive, shaper, hp, hp2, gain] };
   };
   const harmMeasures = new WeakMap();
-  BL.harmMeasure = buf => {
-    if (!harmMeasures.has(buf)) {
+  BL.harmMeasure = (buf, kind = 'drive') => {
+    let byKind = harmMeasures.get(buf);
+    if (!byKind) {
+      byKind = new Map();
+      harmMeasures.set(buf, byKind);
+    }
+    if (!byKind.has(kind)) {
       const measure = (async () => {
         const ctx = new OfflineAudioContext(buf.numberOfChannels, buf.length, buf.sampleRate);
-        const src = ctx.createBufferSource(), path = harmonicsPath(ctx);
+        const src = ctx.createBufferSource(), path = harmonicsPath(ctx, kind);
         src.buffer = buf;
         src.connect(path.in);
-        path.out.gain.value = 0.35;
+        path.out.gain.value = BL.HARM[kind].gain;
         path.out.connect(ctx.destination);
         src.start();
         const wet = await ctx.startRendering();
@@ -1648,9 +1667,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
         }
         return dd ? { r2: hh / dd, c: dh / dd } : { r2: 0, c: 0 };
       })();
-      harmMeasures.set(buf, measure.catch(() => null));
+      byKind.set(kind, measure.catch(() => null));
     }
-    return harmMeasures.get(buf);
+    return byKind.get(kind);
   };
   BL.harmAmt = p => BL.clamp01(Number(p.harm) || 0);
   BL.harmComp = (p, hc) => {
@@ -1662,8 +1681,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   BL.legacyHarmDb = (p, hc) => p.hup ? -20 * Math.log10(BL.harmComp({ harm: p.harm }, hc)) : 0;
 
   // EQ and the bass duck, then the vocal duck, volume and output. The key taps follow the volume.
-  // Harmonics: a sub-bass (everything below 100 Hz) can't be heard on small speakers; a copy of the part driven through
-  // a soft clipper makes overtones above 110 Hz that say where the notes are, mixed in under it (hg: how much, 0 = off)
+  // Harmonics add overtones to help the bass carry on small speakers. The wet paths are the soft clipper (hg) and the octave (hgo).
   BL.mkChain = (ctx, out, bus) => {
     const lo = ctx.createBiquadFilter(), mid = ctx.createBiquadFilter(), hi = ctx.createBiquadFilter(),
       duck = ctx.createBiquadFilter(), dk = ctx.createGain(), vol = ctx.createGain(), key = ctx.createGain(),
@@ -1680,16 +1698,17 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       return filter;
     });
     const vbk = vb.map(() => { const amount = ctx.createGain(); amount.gain.value = 0; return amount; });
-    const inp = ctx.createGain(), harmonics = harmonicsPath(ctx), hg = harmonics.out;
+    const inp = ctx.createGain(), harmonics = harmonicsPath(ctx), octave = harmonicsPath(ctx, 'oct');
+    const hg = harmonics.out, hgo = octave.out;
     const vin = vbus ? ctx.createGain() : vol;
-    inp.connect(lo); inp.connect(harmonics.in); hg.connect(vin);
+    inp.connect(lo); inp.connect(harmonics.in); hg.connect(vin); inp.connect(octave.in); hgo.connect(vin);
     lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vin); vol.connect(out);
     if (vbus) { vin.connect(vol); vol.connect(vkey); }
     vol.connect(send); send.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(out);
     vol.connect(key); key.connect(bus.in); bus.env.connect(dk);
     const rsend = ctx.createGain(); rsend.gain.value = 0;
     if (bus.rev) { vol.connect(rsend); rsend.connect(bus.rev.in); }
-    const c = { in: inp, lo, mid, hi, duck, dk, key, vol, send, dl, fb, hg, rsend, ducked: false,
+    const c = { in: inp, lo, mid, hi, duck, dk, key, vol, send, dl, fb, hg, hgo, rsend, ducked: false,
       vkey, vduck, vdk, vb, vbk, vducked: false, vbanded: false };
     const tops = { filters: [vduck], amounts: [vdk], levels: [vbus?.env] };
     const other = { filters: vb, amounts: vbk, levels: vbus?.bands };
@@ -1723,7 +1742,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       bus.env.disconnect(dk);
       path?.amounts.forEach((amount, i) => path.levels[i].disconnect(amount));
       if (vbus) vin.disconnect();
-      [inp, ...harmonics.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend, vkey, vduck, vdk, ...vb, ...vbk]
+      [inp, ...harmonics.nodes, ...octave.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend, vkey, vduck, vdk, ...vb, ...vbk]
         .forEach(n => n.disconnect());
       c.vducked = c.vbanded = false;
     };
@@ -1732,12 +1751,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
 
   // s: {gain (linear), eq: [lo, mid, hi] dB, send, delay (s), key (feeds the bus), duck (dB taken off the lows, 0 = off)}
   BL.applyChain = (c, s, t) => {
-    const T = 0.02;
+    const T = 0.02, oct = s.hk === 'oct', harm = s.harm || 0;
     c.vol.gain.setTargetAtTime(s.gain, t, T);
     c.lo.gain.setTargetAtTime(s.eq[0], t, T); c.mid.gain.setTargetAtTime(s.eq[1], t, T); c.hi.gain.setTargetAtTime(s.eq[2], t, T);
     c.send.gain.setTargetAtTime(s.send, t, T); c.dl.delayTime.setTargetAtTime(Math.min(1.9, s.delay), t, T);
     c.fb.gain.setTargetAtTime(s.fb ?? 0.35, t, T);
-    c.hg.gain.setTargetAtTime(0.35 * (s.harm || 0), t, T); c.rsend.gain.setTargetAtTime(s.rev || 0, t, T);
+    c.hg.gain.setTargetAtTime(oct ? 0 : BL.HARM.drive.gain * harm, t, T);
+    c.hgo.gain.setTargetAtTime(oct ? BL.HARM.oct.gain * harm : 0, t, T);
+    c.rsend.gain.setTargetAtTime(s.rev || 0, t, T);
     c.key.gain.setTargetAtTime(s.key ? 1 : 0, t, T);
     c.dk.gain.setTargetAtTime(-s.duck, t, T);
     const want = s.duck > 0;
@@ -1746,7 +1767,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
 
   // a part's mix settings as applyChain takes them. stem: what its slot plays.
-  // o: {on (audible: not muted, not soloed out), fx, bar (seconds), hc (harmonics measure), DT (note value -> share of a bar), duck: {on, db} | undefined}
+  // o: {on (audible: not muted, not soloed out), fx, bar (seconds), hc (measure for the part's harmonics kind),
+  // DT (note value -> share of a bar), duck: {on, db} | undefined}
   BL.duckDb = d => d && d.db != null ? Math.max(0, Math.min(BL.DUCK.max, +d.db)) : BL.DUCK.db;
   BL.mixOf = (p, stem, o) => ({
     gain: o.on ? Math.pow(10, (p.db || 0) / 20) * (o.fx ? BL.harmComp(p, o.hc) : 1) : 0,
@@ -1754,6 +1776,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     send: o.fx && p.dlyOn !== false ? (p.dly || 0) : 0,
     fb: p.fb ?? 0.35,
     harm: o.fx ? BL.harmAmt(p) : 0,
+    hk: p.hk === 'oct' ? 'oct' : 'drive',
     rev: o.fx && p.revOn !== false ? (p.rev || 0) : 0,
     delay: o.bar * (o.DT[p.dt || '1/8'] || 1 / 8),
     key: stem === 'drums',

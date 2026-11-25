@@ -1986,6 +1986,50 @@ def test_harmonics_amount_keeps_the_level(page):
     assert r["raw"] > 0.8 and abs(r["old"]) < 0.05, r        # the old switch was louder; a part from before plays as it did
     assert r["amt"] == [1, 0, 0, 0.4]
 
+
+OCTAVE_AUDIO = """async () => {
+  const BL = BLEND, SR = 44100, N = 4 * SR, out = {};
+  const tone = (ctx, f, amp) => { const b = ctx.createBuffer(1, N, SR), d = b.getChannelData(0);
+    for (let i = 0; i < N; i++) d[i] = amp * Math.sin(2 * Math.PI * f * i / SR); return b; };
+  // Measure the level of one frequency over the last two seconds.
+  const at = (d, f) => { let re = 0, im = 0; for (let i = 2 * SR; i < N; i++) { const w = 2 * Math.PI * f * i / SR; re += d[i] * Math.cos(w); im += d[i] * Math.sin(w); }
+    return 20 * Math.log10(2 * Math.hypot(re, im) / (2 * SR) + 1e-12); };
+  const rms = d => { let s = 0; for (let i = 2 * SR; i < N; i++) s += d[i] * d[i]; return 10 * Math.log10(s / (2 * SR) + 1e-24); };
+  const O = { on: true, fx: true, bar: 2, DT: { '1/8': 1 / 8 } };
+  const run = async (f, amp, part, fx = true) => {
+    const c = new OfflineAudioContext(1, N, SR), ch = BL.mkChain(c, c.destination, BL.duckBus(c)), s = c.createBufferSource();
+    s.buffer = tone(c, f, amp);
+    const hc = fx ? await BL.harmMeasure(s.buffer, part.hk === 'oct' ? 'oct' : 'drive') : null;
+    s.connect(ch.in); s.start(0);
+    BL.applyChain(ch, BL.mixOf({ db: 0, ...part }, 'bass', { ...O, fx, hc }), 0); return (await c.startRendering()).getChannelData(0); };
+  const A = 0.113; // Rendered parts have RMS 0.08.
+  const dry = await run(50, A, { harm: 0 }), oct = await run(50, A, { harm: 1, hk: 'oct' }), drv = await run(50, A, { harm: 1 });
+  const rel = (y, f) => at(y, f) - at(y, 50);
+  out.oct = { h2: rel(oct, 100), h3: rel(oct, 150), h4: rel(oct, 200), level: rms(oct) - rms(dry) };
+  out.drive = { h2: rel(drv, 100), h3: rel(drv, 150), level: rms(drv) - rms(dry) };
+  const quiet = await run(50, A / 2, { harm: 1, hk: 'oct' });
+  out.tracks = rel(quiet, 100) - out.oct.h2;
+  const half = await run(50, A, { harm: 0.5, hk: 'oct' }); out.half = rel(half, 100) - out.oct.h2;
+  const mid = await run(220, A, { harm: 1, hk: 'oct' }), mid0 = await run(220, A, { harm: 0 });
+  out.notSub = { added: at(mid, 440) - at(mid, 220), level: rms(mid) - rms(mid0) };
+  out.fxOff = rel(await run(50, A, { harm: 1, hk: 'oct' }, false), 100);
+  return out;
+}"""
+
+
+def test_octave_harmonics_audio(page):
+    """The octave follows the bass level, and both generators keep the track's loudness."""
+    o = page.evaluate(OCTAVE_AUDIO)
+    assert -8 < o["oct"]["h2"] < -4, o
+    assert o["oct"]["h3"] < o["oct"]["h2"] - 30 and o["oct"]["h4"] < o["oct"]["h2"] - 12, o
+    assert abs(o["oct"]["level"]) < 1.0 and abs(o["drive"]["level"]) < 1.0, o
+    assert abs(o["tracks"]) < 0.5, o
+    assert -7.0 < o["half"] < -5.0, o
+    assert o["drive"]["h3"] > -12 and o["drive"]["h2"] < -40, o
+    assert o["notSub"]["added"] < -30 and abs(o["notSub"]["level"]) < 0.3, o
+    assert o["fxOff"] < -50, o
+
+
 @pytest.mark.parametrize("bass_harm", [True, None])
 def test_state_saved_before_tracks_still_opens(site, page, bass_harm):
     _mixer(site, page)
