@@ -3137,3 +3137,13 @@ def test_state_saved_before_the_drum_duck_is_not_ducked_by_the_drums(site, page)
     assert mix == [3, 0] and page.evaluate("CRATE.MX.duck.other.ddb") == 0
     assert page.evaluate(f"{zero}(CRATE.MX.snaps[0].duck)")
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+
+
+def test_playback_groups_the_drums_and_ducks_other_under_them(site, page):
+    _strip(site, page)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    assert page.evaluate("CRATE.PB.voice('drums','a').chain.grouped") is True        # A's drums, in the group
+    assert page.evaluate("CRATE.PB.voice('bass','a').chain.grouped") is False
+    assert page.evaluate("CRATE.PB.voice('other','a').chain.gbanded") is True        # A's Other, under the drums
+    assert page.evaluate("CRATE.PB.voice('bass','a').chain.ducked") is True          # and the bass's own duck is as it was
