@@ -3019,8 +3019,13 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
  const role=id=>MX.roles[id]||id;
  function adopt(sv){const ids=sv.order&&sv.order.length?sv.order:[...new Set([...STEMS,...Object.keys(sv.slots||{})])];MX.order=ids;MX.roles=Object.fromEntries(ids.map(id=>[id,(sv.roles||{})[id]||((sv.slots||{})[id]||{}).stem||(STEMS.includes(id)?id:'other')]))}
- const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:2,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
-   return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined}]}))}))}catch(e){}};
+ // undo: every saved change of the mixer is a step (a drag is one step); ⌘Z / ⌘⇧Z walk them
+ const UN={u:[],r:[],cur:null,t:0,busy:false};
+ function undoNote(J){if(UN.busy)return;const o=JSON.parse(J);delete o.savedSig;delete o.snapsOf;delete o.name;const k=JSON.stringify(o);
+  if(UN.cur===null){UN.cur=k;return}if(k===UN.cur)return;const now=performance.now();
+  if(now-UN.t>600||!UN.u.length){UN.u.push(UN.cur);if(UN.u.length>100)UN.u.shift()}UN.t=now;UN.cur=k;UN.r=[]}
+ const save=()=>{try{const J=JSON.stringify({v:2,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
+   return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined}]}))});localStorage.setItem('dcStems',J);undoNote(J)}catch(e){}};
  const sig=(legacy=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:BLEND.duckSig(MX),
   snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{
    const p=MX.slots[id];
@@ -3543,6 +3548,26 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(xb&&!$('mxosadd'))xb.insertAdjacentHTML('afterend',`<button id="mxosadd" data-i="${i}" title="put it in the Mashup as a one-shot: it plays at the steps you choose, shifted to the mashup's key">✦ Mashup</button>`)};
  document.addEventListener('click',e=>{const b=e.target.closest('#mxosadd');if(b)addOneShot(+b.dataset.i)});
  if(typeof scheduleRefit==='function'){const _sr=scheduleRefit;scheduleRefit=function(){if(st.tab==='M'){MX._refit=true;return}_sr()}}
+ // space on this tab starts / stops the mashup (also with a button focused: a click leaves focus on it); not while typing
+ window.addEventListener('keydown',e=>{if(st.tab!=='M'||e.key!==' '||e.metaKey||e.ctrlKey||e.altKey)return;const t=e.target,tag=t.tagName;
+  if(tag==='TEXTAREA'||tag==='SELECT'||t.isContentEditable||(tag==='INPUT'&&!['range','checkbox','button'].includes(t.type)))return;
+  const b=$('mxplay');if(!b)return;e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)b.click()},true);
+ window.addEventListener('keyup',e=>{if(st.tab==='M'&&e.key===' '&&e.target.tagName==='BUTTON')e.preventDefault()},true);
+ const partId=p=>p?[p.stem,p.track,p.sample,p.bar0,p.n,p.k||1,p.off||0,p.ct||0,!!p.legacyLoop].join('|'):'';
+ async function undoGo(d){save();const from=d<0?UN.u:UN.r,to=d<0?UN.r:UN.u;if(!from.length){toast(d<0?'nothing to undo':'nothing to redo');return}
+  to.push(UN.cur);UN.cur=from.pop();UN.busy=true;
+  try{const sv=JSON.parse(UN.cur),old=MX.slots,keep={};
+   // a slot whose part is the same keeps playing (only its settings change); the others stop and come back in
+   MX.order.forEach(id=>{const o=old[id],n=(sv.slots||{})[id];if(o&&n&&partId(o)===partId(n)&&(sv.roles||{})[id]===MX.roles[id])keep[id]=o;else stopSrc(id)});
+   MX.bpm=sv.bpm||MX.bpm;MX.key=sv.key||'';MX.fx=sv.fx!==false;if(sv.reverb)BLEND.setReverb(MX,sv.reverb.type,sv.reverb.decay);
+   restore(sv);Object.entries(keep).forEach(([id,o])=>{if(MX.slots[id]){MX.slots[id]=Object.assign(o,MX.slots[id])}});
+   MX.info=null;await sync();MX.order.forEach(apply)}catch(e){toast('undo: '+e.message)}finally{UN.busy=false}
+  save();markSave();draw();toast(d<0?'undone · ⌘⇧Z to redo':'redone')}
+ // ⌘Z / ⌘⇧Z on this tab undo and redo in the mashup (not the sketch); while typing, they stay the text field's own
+ window.addEventListener('keydown',e=>{if(st.tab!=='M'||!(e.metaKey||e.ctrlKey)||e.key.toLowerCase()!=='z')return;const t=e.target,tag=t.tagName;
+  if(tag==='TEXTAREA'||t.isContentEditable||(tag==='INPUT'&&!['range','checkbox','button'].includes(t.type)))return;
+  e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)undoGo(e.shiftKey?1:-1)},true);
+ window.CRATE.mxUndo=undoGo;save();
  // ⌘S on this tab saves the mashup (not the sketch)
  window.addEventListener('keydown',e=>{if(st.tab!=='M'||!(e.metaKey||e.ctrlKey)||e.key.toLowerCase()!=='s')return;e.preventDefault();e.stopImmediatePropagation();const b=$('mxsave');if(b&&!b.disabled)b.click()},true);
  window.CRATE.TR=TRACKS;window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync}
