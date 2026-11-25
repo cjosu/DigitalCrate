@@ -2996,3 +2996,84 @@ def test_glue_is_on_by_default_switches_off_and_is_kept(site, page):
     for w in (1512, 1280):                                                           # the longer top row still fits
         page.set_viewport_size({"width": w, "height": 800}); page.wait_for_timeout(200)
         assert page.evaluate("[...document.querySelectorAll('.mxmaster,.mxmaster *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+
+
+GDUCK_AUDIO = """async () => {
+  const BL = BLEND, SR = 44100, N = 4 * SR, out = {}, db = x => 20 * Math.log10(x + 1e-12);
+  const rms = (d, a, b) => { let s = 0; for (let i = Math.round(a); i < Math.round(b); i++) s += d[i] * d[i]; return Math.sqrt(s / (b - a)); };
+  const buffer = (c, fill) => { const b = c.createBuffer(1, N, SR); fill(b.getChannelData(0)); return b; };
+  // a "drum": a burst of one frequency, len seconds long, every `every` seconds, at the loudness the server gives every part
+  const hit = (f, len, every) => d => { for (let i = 0; i < N; i++) { const t = i / SR; d[i] = (t % every) < len ? Math.sin(2 * Math.PI * f * t) : 0; }
+    const g = 0.08 / rms(d, 0, N); for (let i = 0; i < N; i++) d[i] *= g; };
+  const kick = hit(125, 0.1, 0.5), snare = hit(500, 0.1, 0.5), hat = hit(8000, 0.05, 0.25);
+  const sung = d => { for (let i = 0; i < N; i++) d[i] = 0.113 * Math.sin(2 * Math.PI * 500 * i / SR); };   // a held 500 Hz note at 0.08 RMS
+  // what is ducked: four steady tones, so each band's level is easy to read
+  const TONES = [125, 500, 4000, 8000];
+  const bed = d => { for (let i = 0; i < N; i++) { let v = 0; for (const f of TONES) v += 0.03 * Math.sin(2 * Math.PI * f * i / SR); d[i] = v; } };
+  const O = { fx: true, bar: 2, DT: { '1/8': 1 / 8 } };
+  // one track of this role under these keys ([role, fill, dB, on]); -> that track alone
+  const run = async (role, duck, keys) => {
+    const c = new OfflineAudioContext(2, N, SR), merge = c.createChannelMerger(2); merge.connect(c.destination);
+    const MX = {}; BL.out(MX, c); MX.master.disconnect();
+    const outT = c.createGain(), outK = c.createGain(); outT.connect(merge, 0, 0); outK.connect(merge, 0, 1);
+    const play = (fill, ch) => { const s = c.createBufferSource(); s.buffer = buffer(c, fill); s.connect(ch.in); s.start(0); };
+    const ct = BL.mkChain(c, outT, MX.bus);
+    BL.applyChain(ct, BL.mixOf({ db: 0 }, role, { ...O, on: true, duck }), 0); play(bed, ct);
+    for (const [r, fill, level = 0, on = true] of keys) { const ck = BL.mkChain(c, outK, MX.bus);
+      BL.applyChain(ck, BL.mixOf({ db: level }, r, { ...O, on }), 0); play(fill, ck); }
+    return (await c.startRendering()).getChannelData(0); };
+  const band = async (data, f0) => { const c = new OfflineAudioContext(1, data.length, SR), b = c.createBuffer(1, data.length, SR); b.getChannelData(0).set(data);
+    const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = f0; f.Q.value = 4;
+    const s = c.createBufferSource(); s.buffer = b; s.connect(f); f.connect(c.destination); s.start(0);
+    return (await c.startRendering()).getChannelData(0); };
+  const ref = {}, flat = await run('other', { on: false }, []);
+  for (const f of TONES) ref[f] = await band(flat, f);
+  // the dip at f over a window counted from the hit that starts at 2 s (every window is whole cycles of 125 Hz)
+  const dip = async (y, f, a, b) => db(rms(await band(y, f), (2 + a) * SR, (2 + b) * SR)) - db(rms(ref[f], (2 + a) * SR, (2 + b) * SR));
+  const EARLY = [0.016, 0.04], HELD = [0.052, 0.1], SOON = [0.16, 0.2], REST = [0.3, 0.46], HAT = [0.02, 0.048];
+  const D12 = { on: true, db: 0, ddb: 12 }, K = [['drums', kick]];
+  const held = async (role, duck, keys, f = 125) => dip(await run(role, duck, keys), f, ...HELD);
+  { const y = await run('other', D12, K);
+    out.kick = { early: await dip(y, 125, ...EARLY), held: await dip(y, 125, ...HELD), soon: await dip(y, 125, ...SOON), rest: await dip(y, 125, ...REST),
+      top: await dip(y, 4000, ...HELD) }; }
+  out.first = await held('other', undefined, K);                        // no setting yet: on, 2 dB
+  out.off = await held('other', { on: false, db: 0, ddb: 12 }, K);
+  out.zero = await held('other', { on: true, db: 0, ddb: 0 }, K);
+  out.muted = await held('other', D12, [['drums', kick, 0, false]]);
+  out.quiet = await held('other', D12, [['drums', kick, -18]]);
+  out.two = await held('other', D12, [['drums', kick], ['drums', kick]]);
+  { const y = await run('other', D12, [['tops', hat]]);                // hats on a Tops track: Other's top gives way, its lows do not
+    out.hat = { top: await dip(y, 8000, ...HAT), low: await dip(y, 125, ...HAT) }; }
+  { const y = await run('other', { on: true, db: 6, ddb: 6 }, [['vocals', sung], ['drums', snare]]);   // a snare on a sung note: the dips add
+    out.both = { hit: await dip(y, 500, ...HELD), between: await dip(y, 500, ...REST) }; }
+  for (const r of ['drums', 'tops', 'bass', 'vocals', 'oneshot']) out[r] = await held(r, D12, K);
+  // one chain, its track's role and its Duck changed
+  { const c = new OfflineAudioContext(1, SR, SR), MX = {}; BL.out(MX, c); const ch = BL.mkChain(c, c.destination, MX.bus), seen = [];
+    const set = (role, duck) => { BL.applyChain(ch, BL.mixOf({ db: 0 }, role, { ...O, on: true, duck }), 0); seen.push([ch.ducked, ch.vducked, ch.vbanded, ch.gbanded]); };
+    set('bass'); set('other'); set('tops'); set('other', { on: true, db: 0, ddb: 2 }); set('other', { on: true, db: 3, ddb: 0 }); set('other', { on: false, db: 3, ddb: 2 });
+    out.switched = seen; ch.drop(); }
+  // a chain on a bus that has no drum bus
+  { const c = new OfflineAudioContext(1, SR, SR), ch = BL.mkChain(c, c.destination, BL.duckBus(c));
+    BL.applyChain(ch, BL.mixOf({ db: 0 }, 'other', { ...O, on: true }), 0); ch.drop(); out.bare = ch.gbanded; }
+  return out;
+}"""
+
+
+def test_drum_duck_audio(page):
+    """Other under the drums, measured offline. It gives way where the drums are, by close to its amount, quickly,
+    and is back quickly; the dips add to the vocals'; nothing else is ducked by the drums."""
+    o = page.evaluate(GDUCK_AUDIO)
+    k = o["kick"]
+    assert -15.0 < k["held"] < -8.0 and k["top"] > -1.0                # at 12 dB: down at 125 Hz, 4 kHz left alone
+    assert k["early"] < -4.0                                           # quick attack: well on its way within 40 ms
+    assert k["soon"] > -1.5 and k["rest"] > -0.5                       # quick release: back within 100 ms of the hit's end
+    assert -3.0 < o["first"] < -1.2                                    # at 2 dB, the amount it starts with
+    assert o["off"] > -0.1 and o["zero"] > -0.1 and o["muted"] > -0.1
+    assert o["quiet"] > k["held"] + 3                                  # a quieter kit ducks less
+    assert o["two"] > k["held"] - 2.0                                  # two kits: hardly deeper than one
+    assert o["hat"]["top"] < -6.0 and o["hat"]["low"] > -1.0           # Tops feed it too, and it is by frequency
+    b = o["both"]                                                      # 6 dB each: the vocal alone between hits, both on a hit
+    assert -9.0 < b["between"] < -3.0 and -19.0 < b["hit"] < b["between"] - 3.0
+    assert all(o[r] > -0.1 for r in ("drums", "tops", "bass", "vocals", "oneshot"))
+    F, T = False, True
+    assert o["switched"] == [[T, F, F, F], [F, F, T, T], [F, T, F, F], [F, F, F, T], [F, F, T, F], [F, F, F, F]] and o["bare"] is False
