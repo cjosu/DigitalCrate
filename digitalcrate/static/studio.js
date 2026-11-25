@@ -2493,7 +2493,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       if (!H.isOS(id) || p.warp) {
         p._loading = true;
         pending = H.sync();
-      } else if (p.warp) pending = H.sync();   // a one-shot fitted to a length: the server stretches it again
+      }
     } else H.apply(id);
     H.save();
     H.mark();
