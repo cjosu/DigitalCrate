@@ -2956,3 +2956,43 @@ def test_glue_audio(page):
     assert o["early"] == [0, 1] and o["failed"] == [0, 1]
     assert o["moved"] == [True, False, True, False] and o["own"] is False and o["bare"] is False
     assert o["interrupted"] == pytest.approx([0.8, 0.6, 0.5, 0.6], abs=0.002)
+
+
+def test_glue_is_on_by_default_switches_off_and_is_kept(site, page):
+    page.evaluate("""() => {
+        const render = OfflineAudioContext.prototype.startRendering;
+        const probe = new Promise(resolve => { window.releaseGlueProbe = resolve; });
+        OfflineAudioContext.prototype.startRendering = function () {
+            if (this.length === 48000 && this.sampleRate === 48000) return probe.then(() => render.call(this));
+            return render.call(this);
+        };
+    }""")
+    _kits(site); _mixer(site, page); _roll(page, "drums", 904); _roll(page, "tops", 905)
+    assert page.locator(".mxmaster:has(#mxmaster) + .mxmaster #mxglue").count() == 1
+    assert page.is_checked("#mxglue")
+    page.wait_for_function("(()=>{const g=CRATE.MX.bus&&CRATE.MX.bus.g,c=id=>CRATE.MX.slots[id]._c;return g&&g.on&&['drums','tops'].every(id=>c(id)&&c(id).grouped)&&['bass','vocals','other'].every(id=>c(id)&&!c(id).grouped)})()")
+    assert page.inner_text("#mxglgr") == ""
+    page.evaluate("releaseGlueProbe()")
+    page.wait_for_function("CRATE.MX.bus.g.wet.gain.value>0.5&&CRATE.MX.bus.g.dry.gain.value<0.01")   # the make-up is measured and taken out (about 0.67)
+    page.wait_for_function(r"/^-?\d+\.\d dB$/.test(document.getElementById('mxglgr').textContent)")
+    with_glue = page.evaluate("CRATE.mxSig()")
+    assert '"glue"' not in with_glue                                                 # on is not a change: older saves still match
+    page.click("#mxfx")                                                              # the glue is not an effect
+    page.wait_for_function("CRATE.MX.fx===false&&CRATE.MX.bus.g.on===true&&CRATE.MX.bus.g.wet.gain.value>0.5")
+    page.click("#mxfx")
+    page.uncheck("#mxglue")
+    page.wait_for_function("CRATE.MX.glue.on===false&&CRATE.MX.bus.g.wet.gain.value<0.01&&CRATE.MX.bus.g.dry.gain.value>0.99")
+    assert page.inner_text("#mxglgr") == "" and page.evaluate("CRATE.mxSig()") != with_glue
+    page.check("#mxglue")
+    for s in ("drums", "tops"):                                                      # no drums: nothing to read
+        _more(page, s); page.click(f'[data-mxdel="{s}"]'); page.wait_for_function(f"!CRATE.MX.slots['{s}']")
+        if s == "drums":
+            assert page.inner_text("#mxglgr").endswith(" dB")                        # Tops alone still use the group
+    page.wait_for_function("document.getElementById('mxglgr').textContent===''")
+    page.uncheck("#mxglue")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&document.getElementById('mxglue')", timeout=30000)
+    assert not page.is_checked("#mxglue") and page.evaluate("JSON.parse(localStorage.getItem('dcStems')).glue.on") is False
+    for w in (1512, 1280):                                                           # the longer top row still fits
+        page.set_viewport_size({"width": w, "height": 800}); page.wait_for_timeout(200)
+        assert page.evaluate("[...document.querySelectorAll('.mxmaster,.mxmaster *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w

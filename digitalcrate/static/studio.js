@@ -3276,12 +3276,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const isOS=id=>role(id)==='oneshot',has=p=>!!p&&(p.track!=null||!!p.sample);  // a one-shot slot plays a library sample at steps of a cycle; has: the slot holds something
  const KEYS=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'].flatMap(k=>[k,k+'m']);
  // slots have ids; MX.roles[id] is the stem a slot plays (several slots can play one stem); MX.slots[id] is its part
- const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},mast:{on:true,chain:null,built:0},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
+ const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},mast:{on:true,chain:null,built:0},glue:{on:true},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
  const role=id=>MX.roles[id]||id;
  function adopt(sv){const ids=sv.order&&sv.order.length?sv.order:[...new Set([...STEMS,...Object.keys(sv.slots||{})])];MX.order=ids;MX.roles=Object.fromEntries(ids.map(id=>[id,(sv.roles||{})[id]||((sv.slots||{})[id]||{}).stem||(STEMS.includes(id)?id:'other')]))}
- const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:4,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,master:{on:MX.mast.on},duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
+ const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:4,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,master:{on:MX.mast.on},glue:{on:MX.glue.on},duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
    return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined,kit:p.kit||undefined,hk:p.hk==='oct'?'oct':undefined,cond:p.cond||undefined}]}))}))}catch(e){}};
- const sig=(v=4,legacyShape=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:v<4?BLEND.duckSig(MX,['bass']):BLEND.duckSig(MX),...(MX.mast.on?{}:{master:{on:false}}),
+ const sig=(v=4,legacyShape=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:v<4?BLEND.duckSig(MX,['bass']):BLEND.duckSig(MX),...(MX.mast.on?{}:{master:{on:false}}),...(MX.glue.on?{}:{glue:{on:false}}),
   snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{
    const p=MX.slots[id];
    if(!has(p))return [role(id),null];
@@ -3300,6 +3300,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function restore(sv){
   const {order,roles,slots,snaps,trans,duck}=sv;
   MX.mast.on=sv.master?.on!==false;BLEND.mxRoute(MX);
+  MX.glue.on=sv.glue?.on!==false;MX.bus?.g?.set(MX.glue.on);
   MX.slots=slots||{};
   adopt({order,roles,slots});
   BLEND.adopt(MX,{snaps,trans,duck});
@@ -3712,10 +3713,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  window.addEventListener('resize',()=>{if(st.tab==='M')waves()});
  function mxMeter(){
   const el=$('mxgr');if(!el)return;
-  const chain=MX.mast.chain,text=st.tab==='M'&&MX.on&&MX.mast.on&&chain?`${chain.glue.reduction.toFixed(1)} dB`:'';
+  const playing=st.tab==='M'&&MX.on,chain=MX.mast.chain,text=playing&&MX.mast.on&&chain?`${chain.glue.reduction.toFixed(1)} dB`:'';
   if(el.textContent!==text)el.textContent=text;
+  const gl=$('mxglgr'),group=MX.bus?.g;
+  const drums=playing&&MX.glue.on&&group?.wet.gain.value>0&&MX.order.some(id=>(role(id)==='drums'||role(id)==='tops')&&has(MX.slots[id]));
+  const reduction=drums?`${group.comp.reduction.toFixed(1)} dB`:'';
+  if(gl&&gl.textContent!==reduction)gl.textContent=reduction;
  }
- let phRaf=0;function playheads(){phRaf=0;if(MX.mast.on)mxMeter();if(!MX.on||st.tab!=='M')return;MX.order.forEach(id=>{
+ let phRaf=0;function playheads(){phRaf=0;if(MX.mast.on||MX.glue.on)mxMeter();if(!MX.on||st.tab!=='M')return;MX.order.forEach(id=>{
   const p=MX.slots[id],el=document.querySelector(`[data-mxwave="${id}"] i`);if(!p?.buf||!el)return;
   const os=isOS(id),d=os?(p.n||1)*barLenM()*(p.every||1):p.buf.duration;
   const phase=(((AC.currentTime-MX.t0)%d)+d)%d/d,x=os?phase:TR.playhead(id,phase);
@@ -3775,6 +3780,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     <label>tempo <input id="mxbpm" type="number" min="50" max="200" step="1" value="${MX.bpm}" style="width:64px"> bpm</label>
     <label>key <select id="mxkey"><option value="">auto${!MX.key&&I.key?` (${I.key})`:''}</option>${KEYS.map(k=>`<option ${MX.key===k?'selected':''}>${k}</option>`).join('')}</select></label>
     <span class="mxmaster"><label><input id="mxmaster" type="checkbox" ${MX.mast.on?'checked':''}> MASTER</label><span id="mxgr"></span></span>
+    <span class="mxmaster"><label title="light compression on Drums and Tops together"><input id="mxglue" type="checkbox" ${MX.glue.on?'checked':''}> GLUE</label><span id="mxglgr"></span></span>
     <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">${TR.DIE} all</button>
     <span class="mxrate"><button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button></span>
     <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ, delay, reverb and harmonics on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
@@ -3902,6 +3908,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   else if(t.id==='mxrvdecay'){t.parentNode.querySelector('output').textContent=(+t.value).toFixed(1)+' s'}markSave()});
  L.addEventListener('change',async e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset;
   if(t.id==='mxmaster'){MX.mast.on=t.checked;BLEND.mxRoute(MX);mxMeter();save();markSave();return}
+  if(t.id==='mxglue'){MX.glue.on=t.checked;MX.bus?.g?.set(MX.glue.on);mxMeter();save();markSave();return}
   if(t.id==='mxbpm'){MX.bpm=Math.max(50,Math.min(200,+t.value||100));const was=MX.on;if(was)play(false);await sync();MX.order.forEach(apply);if(was)play(true);return}
   if(t.id==='mxkey'){MX.key=t.value;await sync();return}
   if(t.id==='mxexbars'){MX.exBars=+t.value;return}
