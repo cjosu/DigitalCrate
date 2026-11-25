@@ -1651,6 +1651,17 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return { order: sv.order || [], roles: sv.roles || {}, slots: sv.slots || {}, duck: sv.duck || {} };
   };
 
+  // has the mixer moved on from the selected snapshot? (what you set: parts, bars, pitch, volume, mute, EQ, delay, duck)
+  BL.snapSig = s => JSON.stringify([(s.order || []).map(id => { const p = (s.slots || {})[id];
+    return [(s.roles || {})[id] || id, p && p.track != null ? [p.track, p.bar0, p.n, p.k || 1, p.off || 0, p.db || 0, !!p.mute,
+      p.eq || [0, 0, 0], p.dly || 0, p.dt || '1/8', p.eqOn !== false, p.dlyOn !== false] : null]; }), s.duck || {}]);
+  BL.changed = () => { const MX = H.MX, i = MX.snapSel; return i != null && !!MX.snaps[i] && BL.snapSig(BL.snapNow()) !== BL.snapSig(MX.snaps[i]); };
+  // edits change the mixer, not the snapshot it came from: say so, and point at ↻ (sliders don't redraw the strip)
+  BL.markSnap = () => { const b = document.getElementById('snrep'), n = document.getElementById('snnote'); if (!b) return;
+    const d = BL.changed(), L = BL.LETTERS[H.MX.snapSel];
+    b.classList.toggle('dirty', d); b.textContent = `↻ replace ${L}${d ? ' •' : ''}`;
+    if (n) n.textContent = d ? `the mixer has changed since ${L}: ↻ keeps the change in ${L}, 📸 makes it a new snapshot` : ''; };
+
   BL.capture = async () => {
     const MX = H.MX;
     if (MX.snaps.length >= BL.MAX_SNAPS) { toast('8 snapshots at most: delete one first'); return false; }
@@ -1697,7 +1708,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return `<div class="snbar" id="snbar"><span class="snlab">snapshots</span>${MX.snaps.map((s, i) =>
       `${i ? '<span class="snsep">›</span>' : ''}<button class="snchip${sel === i ? ' on' : ''}" data-sn="${i}" title="bring snapshot ${L[i]} back into the mixer"><b>${L[i]}</b>${label(i)}</button>`).join('')}
      ${sel != null && sel < n ? `<button class="tbtn" id="snrep" title="write what is playing now over snapshot ${L[sel]}">↻ replace ${L[sel]}</button><button class="tbtn" id="sndel" title="delete snapshot ${L[sel]}">🗑</button>` : ''}
-     <button class="tbtn" id="sncap" title="keep every slot as it is now, as the next snapshot">📸 snapshot</button><span style="flex:1"></span>
+     <button class="tbtn" id="sncap" title="keep every slot as it is now, as the next snapshot">📸 snapshot</button><span class="sub" id="snnote"></span><span style="flex:1"></span>
      ${n ? '<span class="sub">tempo and key belong to the strip</span>' : ''}<button class="pill" id="snplay" title="play the snapshots side by side and move from one to the next" ${n < 2 ? 'disabled' : ''}>▶ play strip</button></div>`;
   };
 
@@ -2243,7 +2254,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,harm:p.harm==null?null:!!p.harm}]}))}))}catch(e){}};
  const sig=()=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{const p=MX.slots[id];return [role(id),p&&p.track!=null?[p.track,p.bar0,p.n,p.k||1,p.off||0,p.db||0,!!p.mute,p.eq||[0,0,0],p.dly||0,p.dt||'1/8',p.eqOn!==false,p.dlyOn!==false]:null]})});
  const dirty=()=>MX.savedSig?sig()!==MX.savedSig:MX.order.some(id=>MX.slots[id]&&MX.slots[id].track!=null);
- function markSave(){const b=$('mxsave');if(!b)return;const d=dirty();b.classList.toggle('dirty',d);b.textContent=d?'💾 save •':'💾 save';b.title=d?'unsaved changes: save to keep this combination (it also counts as a strong 👍)':'saved'}
+ function markSave(){const b=$('mxsave');if(!b)return;const d=dirty();b.classList.toggle('dirty',d);b.textContent=d?'💾 save •':'💾 save';b.title=d?'unsaved changes: save to keep this combination (it also counts as a strong 👍)':'saved';BLEND.markSnap()}
  const state=()=>({bpm:MX.bpm,key:MX.key||null,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>[s,{stem:role(s),track:MX.slots[s].track,bar0:MX.slots[s].bar0,n:MX.slots[s].n,k:MX.slots[s].k||1,off:MX.slots[s].off||0}]))});
  const barLenM=()=>240/MX.bpm,DT={'1/4':1/4,'1/8':1/8,'3/16':3/16,'1/16':1/16};
  // audio: source -> low shelf -> mid -> high shelf -> volume -> out, and volume -> send -> delay (with feedback) -> out

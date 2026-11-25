@@ -1405,3 +1405,30 @@ def test_changing_the_length_during_auto_does_not_jump(site, page):
     page.select_option("#pbbars", "2")
     page.wait_for_timeout(150)
     assert page.evaluate("CRATE.PB.m") < 0.6 and page.evaluate("CRATE.PB.i") == 0
+
+
+def test_snapshot_says_when_the_mixer_has_moved_on(site, page):
+    """Edits change the mixer, not the snapshot it came from: the strip says so and points at ↻ replace."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&window.CRATE&&CRATE.MX", timeout=30000)
+    page.click("#tabM")
+    page.wait_for_selector("#mxall")
+    page.click("#mxall")
+    page.wait_for_function("Object.values(CRATE.MX.slots).some(p=>p&&p.buf)", timeout=90000)
+    page.click("#sncap")
+    page.wait_for_selector("#snrep")
+    assert "dirty" not in (page.locator("#snrep").get_attribute("class") or "")
+    sid = page.evaluate("CRATE.MX.order.find(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id].buf)")
+    page.click(f'[data-mxmute="{sid}"]')
+    page.wait_for_function("document.querySelector('#snrep').classList.contains('dirty')", timeout=5000)
+    assert "has changed since A" in page.inner_text("#snnote")
+    assert page.evaluate(f"CRATE.MX.snaps[0].slots['{sid}'].mute") is False      # the snapshot itself is untouched
+    page.click("#snrep")
+    page.wait_for_function("!document.querySelector('#snrep').classList.contains('dirty')", timeout=5000)
+    assert page.evaluate(f"CRATE.MX.snaps[0].slots['{sid}'].mute") is True       # ↻ wrote the change into it
+    page.evaluate("CRATE.mxPlay(false)")
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.click("#tabS")

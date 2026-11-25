@@ -102,7 +102,8 @@ all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md]
 - **DUCK** on bass slots (on to begin with): the drums' low end pushes the bass's low end down a few dB, so a kick and
   a bass line from different songs don't pile up. The slider is how many dB at most.
 - **📸 snapshot** keeps the mixer as it is, in a strip above the slots (A, B, C… up to 8). Click one to bring it back;
-  **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too.
+  **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too. Edits change
+  the mixer, not the snapshot it came from: the strip says when the mixer has moved on, and **↻** keeps the change.
 - **▶ play strip** shows two snapshots side by side, every slot of both, with the transition between them: for each
   layer that differs a style (filter handoff or crossfade), the bars it changes over, and its own slider. The
   **master** moves them all. Fully on the right snapshot, the arrow moves the view on. **auto** holds each snapshot,
