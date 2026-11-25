@@ -704,18 +704,18 @@ def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
     stems.make_tops(1, split=split, embed=lambda _: np.ones(512, np.float32))
     _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)
     part = lambda stem, track, **kw: dict(dict(stem=stem, track=track, bar0=4, n=4, k=1, off=0, db=-2), **kw)
-    A = dict(label="A", order=["drums", "other", "tops"], roles={},
-             slots=dict(drums=part("drums", 1), other=part("other", 2, ct=25), tops=part("tops", 1)))
-    B = dict(label="B", order=["drums", "other"], roles={},
-             slots=dict(drums=part("drums", 1, db=-8), other=part("other", 2, mute=True)))
+    A = dict(label="A", order=["drums", "other", "tops", "bass"], roles={},
+             slots=dict(drums=part("drums", 1), other=part("other", 2, ct=25), tops=part("tops", 1), bass=part("bass", 1, cond=1)))
+    B = dict(label="B", order=["drums", "other", "bass"], roles={},
+             slots=dict(drums=part("drums", 1, db=-8), other=part("other", 2, mute=True), bass=part("bass", 1)))
     r = stems.export("Unit mash", 100, "C", [A, B], bars=8, reveal=False)
-    assert (r["tracks"], r["clips"], r["sections"]) == (3, 4, 2)
+    assert (r["tracks"], r["clips"], r["sections"]) == (4, 6, 2)
     dest = tmp_path / "ableton" / "Mashups" / "Unit mash"
     ls = ET.parse(gzip.open(dest / r["als"])).getroot().find("LiveSet")
     assert [(l.find("Time").get("Value"), l.find("Name").get("Value")) for l in ls.iter("Locator")] == [("0", "A"), ("32", "B")]
     tr = [t for t in ls.find("Tracks") if t.tag == "AudioTrack"]
     clips = [list(t.iter("AudioClip")) for t in tr]
-    assert [len(c) for c in clips] == [2, 1, 1]                                 # the muted "other" has no clip in B
+    assert [len(c) for c in clips] == [2, 1, 1, 2]                              # the muted "other" has no clip in B
     d0, d1 = clips[0]
     assert (d0.get("Time"), d0.find("CurrentEnd").get("Value"), d0.find("Loop/LoopEnd").get("Value"), d0.find("Loop/LoopOn").get("Value")) == ("0", "32", "16", "true")
     assert abs(float(d1.find("SampleVolume").get("Value")) - 10 ** (-6 / 20)) < 1e-3   # 6 dB lower in B: the clip's gain
@@ -726,6 +726,9 @@ def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
     assert "-1.75st" in next(f.name for f in (dest / "Parts").glob("Other*"))  # D major to C plus 25 cents
     assert tr[2].find("Name/EffectiveName").get("Value").startswith("Tops")
     assert next((dest / "Parts").glob("Tops*")).read_bytes() == stems.render(1, "tops", 4, 4, 100).read_bytes()
+    bass_files = {f.read_bytes() for f in (dest / "Parts").glob("Bass*")}
+    assert bass_files == {stems.render(1, "bass", 4, 4, 100, cond=cond).read_bytes() for cond in (0, 1)}
+    assert len(bass_files) == 2
 
 
 def test_one_shot_export_uses_warp_length_and_fractional_pitch(tmp_path, monkeypatch):
@@ -931,3 +934,31 @@ def test_bass_parts_are_evened_out():
         z = _bass("both", secs); assert BC.condition(z, SR).shape == z.shape
     t0 = time.perf_counter(); BC.condition(_bass("spiky", 19.2), SR)
     assert time.perf_counter() - t0 < 1.0                                           # (8 bars at 100 bpm; the aim is 0.25 s)
+
+
+def test_new_bass_parts_are_rendered_even_and_old_ones_as_before(tmp_path, monkeypatch):
+    import soundfile as sf, sqlite3
+    from digitalcrate import stems, basscond
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    def _con():
+        c = sqlite3.connect(tmp_path / "t.sqlite"); c.row_factory = sqlite3.Row
+        return c
+    monkeypatch.setattr(stems, "connect", _con)
+    stems._LIB.update(n=-1, lib={}); stems._EMB.clear()
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    _fake_stem_song(tmp_path, 2, 100, 0, "major", 0)
+    y = _bass("spiky", 24 * 2.4)                                                     # song 1's bass has stray peaks
+    sf.write(str(stems.DIR / "t1" / "bass.flac"), y.T, SR, format="FLAC", subtype="PCM_16")
+    raw = stems.render(1, "bass", 0, 4, 100)
+    before = raw.read_bytes()
+    even = stems.render(1, "bass", 0, 4, 100, cond=1)
+    read = lambda f: sf.read(str(f), dtype="float32", always_2d=True)[0]
+    crest = lambda a: 20 * np.log10(np.abs(a).max() / np.sqrt(np.mean(a ** 2)))
+    assert even != raw and crest(read(even)) < crest(read(raw)) - 4 and len(read(even)) == len(read(raw))
+    assert stems.render(1, "bass", 0, 4, 100) == raw and raw.read_bytes() == before  # 4. an old part: the same file
+    assert stems.render(1, "other", 0, 4, 100, cond=1) == stems.render(1, "other", 0, 4, 100)
+    st = dict(bpm=100, key="C", slots={})
+    assert stems.pick("bass", st, slot="bass")["cond"] == basscond.VERSION and "cond" not in stems.pick("other", st, slot="other")
+    st["slots"]["bass"] = dict(stems.pick("bass", st, track=1, slot="bass"))
+    assert all(a.get("cond") == basscond.VERSION for a in stems.alts(st, "bass"))

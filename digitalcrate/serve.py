@@ -616,7 +616,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if what == "render":
                     with_tops = req["stem"] in SM.DRUM_ROLES and SM.tops_ready(req["track"])
                     f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
-                                  req.get("k") or 1, legacy=req.get("legacy") is True, with_tops=with_tops)
+                                  req.get("k") or 1, legacy=req.get("legacy") is True, with_tops=with_tops, cond=req.get("cond"))
                     return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f),
                                            whole=req["stem"] == "drums" and not with_tops))
                 if what == "peaks":

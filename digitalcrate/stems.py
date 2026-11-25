@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import config as C
+from . import basscond, config as C
 from .db import connect
 
 DIR = C.DATA_DIR / "stems"
@@ -320,12 +320,15 @@ def _cache_output(out):
         path.unlink(missing_ok=True)
 
 
-def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops=None):
+def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops=None, cond=0):
     """n mixer bars of a stem from the song's bar bar0 (n * k of its bars), as a WAV exactly n bars long at bpm,
     shifted by semis. Legacy saves retain the source span they played before track editing. -> path"""
     import soundfile as sf
     from .stretch import signalsmith
     track, requested = int(track), int(bar0)
+    cond = int(cond or 0) if stem == "bass" else 0
+    if cond not in (0, basscond.VERSION):
+        raise ValueError(f"unknown bass conditioning version {cond}")
     m = library()[track]
     split = stem in DRUM_ROLES and (tops_ready(track, m) if with_tops is None else with_tops)
     if stem == "tops" and not split:
@@ -340,6 +343,8 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
 
     def cached(start, pitch, version):
         key = f"{track}|{stem}|{start}|{n}|{k}|{float(bpm):.2f}|{pitch}|{version}"
+        if cond:
+            key += f"|c{cond}"
         return CACHE / f"{hashlib.sha1(key.encode()).hexdigest()[:16]}.wav"
 
     old_geometry = legacy and ns != min(src_bars(n, k), nb)
@@ -349,7 +354,7 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
         return out
     source = DIR / f"t{track}" / f"{stem}.flac"
     # A prepared stem may have vanished while its previously rendered loop is still playable.
-    if not split and (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
+    if not (split or cond) and (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
         old = cached(bar0, int(semis), "v3")
         if old.is_file():
             return old
@@ -373,8 +378,11 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
         y = fit_length(kit - tops if stem == "drums" else tops)
     else:
         y = ref = fit_length(read(source))
-    rms, peak = float(np.sqrt(np.mean(ref ** 2) + 1e-12)), float(np.abs(ref).max() + 1e-9)
-    y = y * min(TARGET_RMS / rms, 0.9 / peak, 60.0)  # equally loud parts: a quiet recording isn't lost under a loud one
+    if cond:
+        y = basscond.condition(y, C.SR)
+    else:
+        rms, peak = float(np.sqrt(np.mean(ref ** 2) + 1e-12)), float(np.abs(ref).max() + 1e-9)
+        y = y * min(TARGET_RMS / rms, 0.9 / peak, 60.0)
     f = int(0.002 * C.SR)  # 2 ms in and out: the loop point never clicks
     ramp = np.linspace(0, 1, f, dtype=np.float32)
     y[:, :f] *= ramp
@@ -699,9 +707,12 @@ def pick(stem, state, avoid=(), n=None, rng=None, track=None, slot=None):
         k_ = int(rng.choice(len(top), p=p / p.sum()))
     sc, tid, b, semis, x, k = top[k_]
     m = lib[tid]
-    return dict(stem=stem, track=tid, bar0=b, n=n, k=k, off=0, artist=m["artist"], title=m["title"], semis=semis,
+    part = dict(stem=stem, track=tid, bar0=b, n=n, k=k, off=0, artist=m["artist"], title=m["title"], semis=semis,
                 bars=len(m["bars"]) - 1, why=dict(zip(FEATURES, [round(float(v), 3) for v in x])), score=round(sc, 3),
                 rated=n_rated, of=len(cands))
+    if stem == "bass":
+        part["cond"] = basscond.VERSION
+    return part
 
 
 def alts(state, slot):
@@ -723,6 +734,9 @@ def alts(state, slot):
     if not any(o["bar0"] == int(cur["bar0"]) for o in out):
         out.insert(0, dict(stem=stem, track=tid, bar0=int(cur["bar0"]), n=n, k=float(cur.get("k") or 1), artist=m["artist"],
                            title=m["title"], bars=len(m["bars"]) - 1))
+    if stem == "bass":
+        for part in out:
+            part["cond"] = basscond.VERSION
     return out
 
 
@@ -968,10 +982,12 @@ def export(name, bpm, key, sections, bars=8, reveal=True):
                 k, n = float(p.get("k") or 1), int(p.get("n") or 4)
                 semis = (inf.get(sid) or {}).get("semis", 0) + float(p.get("ct") or 0) / 100
                 legacy = bool(p.get("legacyLoop"))
-                src = render(p["track"], role, p["bar0"], n, bpm, semis, k, legacy=legacy)
+                cond = int(p.get("cond") or 0) if role == "bass" else 0
+                src = render(p["track"], role, p["bar0"], n, bpm, semis, k, legacy=legacy, cond=cond)
                 b0 = int(p["bar0"])
+                variant = (" legacy" if legacy else "") + (f" even{cond}" if cond else "")
                 f = dest / "Parts" / (_safe(f"{role.capitalize()} - {m['artist']} - {m['title']}")[:64]
-                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+g}st{' legacy' if legacy else ''}.wav")
+                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+g}st{variant}.wav")
                 if not f.exists():
                     shutil.copy2(src, f)
                 beats = n * 4
