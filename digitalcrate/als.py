@@ -64,7 +64,7 @@ def _set(el, path, value):
 
 
 CLIP = """<AudioClip Id="{id}" Time="{a}"><LomId Value="0" /><LomIdView Value="0" /><CurrentStart Value="{a}" /><CurrentEnd Value="{b}" />
-<Loop><LoopStart Value="{a}" /><LoopEnd Value="{b}" /><StartRelative Value="0" /><LoopOn Value="false" /><OutMarker Value="{b}" /><HiddenLoopStart Value="{a}" /><HiddenLoopEnd Value="{b}" /></Loop>
+<Loop><LoopStart Value="{ls}" /><LoopEnd Value="{le}" /><StartRelative Value="0" /><LoopOn Value="{loop}" /><OutMarker Value="{le}" /><HiddenLoopStart Value="{ls}" /><HiddenLoopEnd Value="{le}" /></Loop>
 <Name Value="" /><Annotation Value="" /><Color Value="{color}" /><LaunchMode Value="0" /><LaunchQuantisation Value="0" />
 <TimeSignature><TimeSignatures><RemoteableTimeSignature Id="0"><Numerator Value="4" /><Denominator Value="4" /><Time Value="0" /></RemoteableTimeSignature></TimeSignatures></TimeSignature>
 <Envelopes><Envelopes /></Envelopes><ScrollerTimePreserver><LeftTime Value="0" /><RightTime Value="0" /></ScrollerTimePreserver>
@@ -79,7 +79,7 @@ CLIP = """<AudioClip Id="{id}" Time="{a}"><LomId Value="0" /><LomIdView Value="0
 <TransientResolution Value="6" /><TransientLoopMode Value="2" /><TransientEnvelope Value="100" /><ComplexProFormants Value="100" /><ComplexProEnvelope Value="128" />
 <Sync Value="true" /><HiQ Value="true" /><Fade Value="true" />
 <Fades><FadeInLength Value="0" /><FadeOutLength Value="0" /><ClipFadesAreInitialized Value="true" /><CrossfadeInState Value="0" /><FadeInCurveSkew Value="0" /><FadeInCurveSlope Value="0" /><FadeOutCurveSkew Value="0" /><FadeOutCurveSlope Value="0" /><IsDefaultFadeIn Value="true" /><IsDefaultFadeOut Value="true" /></Fades>
-<PitchCoarse Value="0" /><PitchFine Value="0" /><SampleVolume Value="1" />
+<PitchCoarse Value="0" /><PitchFine Value="0" /><SampleVolume Value="{gain}" />
 <WarpMarkers><WarpMarker Id="0" SecTime="0" BeatTime="0" /><WarpMarker Id="1" SecTime="{sec1}" BeatTime="{beat1}" /></WarpMarkers>
 <SavedWarpMarkersForStretched /><MarkersGenerated Value="false" /><IsSongTempoLeader Value="false" /><AutoWarpPending Value="false" /><WasMuted Value="false" /></AudioClip>"""
 
@@ -114,7 +114,8 @@ def write_set(dest, name, lanes, bpm, bars):
         for j, (a, b) in enumerate(spans(y, sr, bpm, total)):
             if b - a < 0.25:
                 continue
-            clip = ET.fromstring(CLIP.format(id=j, a=f"{a:g}", b=f"{b:g}", color=color, frames=len(y), sr=sr,
+            clip = ET.fromstring(CLIP.format(id=j, a=f"{a:g}", b=f"{b:g}", ls=f"{a:g}", le=f"{b:g}", loop="false", gain="1",
+                                             color=color, frames=len(y), sr=sr,
                                              warp=WARP["beats" if lane.get("drums") else "complex"],
                                              sec1=f"{secs:.6f}", beat1=f"{secs * bpm / 60:.6f}"))
             _set(clip, "Name", lane["label"])
@@ -140,4 +141,75 @@ def write_set(dest, name, lanes, bpm, bars):
     xml = ET.tostring(root, encoding="unicode")
     with gzip.open(out, "wb") as f:
         f.write(('<?xml version="1.0" encoding="UTF-8"?>\n' + xml).encode("utf-8"))
+    return out
+
+
+def write_arrangement(dest, name, tracks, bpm, total_beats, locators=()):
+    """An arrangement of looping clips, for the Mashup export (stems.export).
+
+    tracks: [{label, category, volume (linear, 1 = 0 dB), mute, drums,
+              clips: [{file (a WAV exactly `beats` long at bpm), start, end (beats in the arrangement), beats, gain,
+                       label}]}]
+    locators: [(beat, name)]. Each clip loops its file from its start to its end, warped 1:1 at the set's tempo.
+    -> dest/<name>.als"""
+    root = ET.parse(gzip.open(template())).getroot()
+    ls = root.find("LiveSet")
+    tr_el = ls.find("Tracks")
+    proto = tr_el.find("AudioTrack")
+    for t in list(tr_el):
+        if t.tag in ("AudioTrack", "MidiTrack", "GroupTrack"):
+            tr_el.remove(t)
+    nxt = int(ls.find("NextPointeeId").get("Value"))
+    returns = [i for i, t in enumerate(list(tr_el)) if t.tag == "ReturnTrack"]
+    cid = 0
+    for k, tr in enumerate(tracks):
+        t = copy.deepcopy(proto)
+        t.set("Id", str(1000 + k))
+        for el in t.iter():
+            if "Id" in el.attrib and (el.tag.endswith("Target") or el.tag == "Pointee"):
+                el.set("Id", str(nxt)); nxt += 1
+        _set(t, "Name/EffectiveName", tr["label"])
+        _set(t, "Name/UserName", tr["label"])
+        color = COLORS.get(tr.get("category"), 0)
+        _set(t, "Color", color)
+        dc = t.find("DeviceChain")
+        _set(dc, "Mixer/Speaker/Manual", "false" if tr.get("mute") else "true")
+        _set(dc, "Mixer/Volume/Manual", f"{min(1.99, max(0.0004, float(tr.get('volume', 1)))):.6f}")
+        events = dc.find("MainSequencer/Sample/ArrangerAutomation/Events")
+        for c in sorted(tr["clips"], key=lambda c: c["start"]):
+            info = sf.info(str(c["file"]))
+            secs = info.frames / info.samplerate
+            clip = ET.fromstring(CLIP.format(id=cid, a=f"{c['start']:g}", b=f"{c['end']:g}", ls="0", le=f"{c['beats']:g}",
+                                             loop="true", gain=f"{float(c.get('gain', 1)):.6f}", color=color,
+                                             frames=info.frames, sr=info.samplerate,
+                                             warp=WARP["beats" if tr.get("drums") else "complex"],
+                                             sec1=f"{secs:.6f}", beat1=f"{c['beats']:g}"))
+            cid += 1
+            _set(clip, "Name", c.get("label") or tr["label"])
+            _set(clip, "SampleRef/FileRef/RelativePath", str(Path(c["file"]).relative_to(dest)))
+            _set(clip, "SampleRef/FileRef/Path", str(c["file"]))
+            _set(clip, "SampleRef/FileRef/OriginalFileSize", Path(c["file"]).stat().st_size)
+            _set(clip, "SampleRef/LastModDate", int(Path(c["file"]).stat().st_mtime))
+            events.append(clip)
+        tr_el.insert(len(tr_el) - len(returns), t)
+    lo = ls.find("Locators/Locators")
+    if lo is not None:
+        for k, (beat, nm) in enumerate(locators):
+            e = ET.SubElement(lo, "Locator", Id=str(k))
+            for tag, v in (("LomId", "0"), ("Time", f"{beat:g}"), ("Name", nm), ("Annotation", ""), ("IsSongStart", "false")):
+                ET.SubElement(e, tag, Value=v)
+    ls.find("NextPointeeId").set("Value", str(nxt))
+    main = ls.find("MainTrack") if ls.find("MainTrack") is not None else ls.find("MasterTrack")
+    tempo = main.find("DeviceChain/Mixer/Tempo")
+    _set(tempo, "Manual", f"{bpm:g}")
+    tid = tempo.find("AutomationTarget").get("Id")
+    for env in main.iter("AutomationEnvelope"):
+        if env.find("EnvelopeTarget/PointeeId").get("Value") == tid:
+            for ev in env.iter("FloatEvent"):
+                ev.set("Value", f"{bpm:g}")
+    tp = ls.find("Transport")
+    _set(tp, "LoopStart", 0); _set(tp, "LoopLength", f"{total_beats:g}"); _set(tp, "LoopOn", "true")
+    out = Path(dest) / f"{name}.als"
+    with gzip.open(out, "wb") as fh:
+        fh.write(('<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode")).encode("utf-8"))
     return out

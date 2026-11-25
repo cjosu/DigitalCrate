@@ -632,6 +632,158 @@ def oneshot(state, n=1, avoid=(), rng=None, path=None):
                 why=dict(fit=round(float(F[k].max()), 3), taste=round(float(z[k]), 2)))
 
 
+# ---------------------------------------------------------------- to Ableton Live (docs/plans/mashup-ableton.md)
+
+ROLE_CAT = dict(drums="Percussion", bass="Bass & Sub", vocals="Vocals", other="Chords & Keys", oneshot="Vocal Atmospheres")
+
+
+def oneshot_warp(path, key, trim, beats, bpm, semis=0):
+    """A one-shot's piece (trim: [from, to] as fractions of the sample shifted to the key) stretched to exactly
+    `beats` at bpm, its pitch kept (plus `semis`, your own offset, also without changing the length). -> cached WAV.
+    Stretches beyond 2.5x or under 0.4x smear: refused."""
+    import soundfile as sf
+    from .conform import render as conform
+    from .stretch import signalsmith
+    src, _ = conform(path, key=key or None)
+    t = trim if trim and trim[1] - trim[0] > 0.005 else [0, 1]
+    h = hashlib.sha1(f"{path}|{src.stat().st_mtime}|{key}|{t[0]:.5f}|{t[1]:.5f}|{beats}|{float(bpm):.2f}|{semis}".encode()).hexdigest()[:16]
+    out = CACHE / f"os-{h}.wav"
+    if out.exists():
+        return out
+    CACHE.mkdir(parents=True, exist_ok=True)
+    y, sr = sf.read(str(src), dtype="float32", always_2d=True)
+    y = y.T
+    if y.shape[0] == 1:
+        y = np.repeat(y, 2, 0)
+    y = np.ascontiguousarray(y[:, int(t[0] * y.shape[1]):int(t[1] * y.shape[1])])
+    N = int(round(float(beats) * 60.0 / float(bpm) * sr))
+    ratio = N / max(1, y.shape[1])
+    if not 0.4 <= ratio <= 2.5:
+        raise ValueError(f"that would stretch it {ratio:.1f}x: trim it closer to the length, or choose another length")
+    y = signalsmith(y, float(semis or 0), ratio)
+    y = y[:, :N] if y.shape[1] >= N else np.pad(y, ((0, 0), (0, N - y.shape[1])))
+    sf.write(str(out), y.T, sr, subtype="PCM_24")
+    return out
+
+
+def oneshot_loop(p, bpm, key, out):
+    """A one-shot slot's pattern as a loop: its sample (shifted to the key, trimmed, at your pitch offset) at each of
+    its steps, in a file exactly as long as the pattern takes to come round (cycle x every). -> beats"""
+    import soundfile as sf
+    from .conform import render as conform
+    from .stretch import repitch
+    warped = bool(p.get("fit"))
+    src = oneshot_warp(p["sample"], key, p.get("trim"), p["fit"], bpm, p.get("off") or 0) if warped \
+        else conform(p["sample"], key=key or None)[0]
+    y, sr = sf.read(str(src), dtype="float32", always_2d=True)
+    y = y.T
+    if y.shape[0] == 1:
+        y = np.repeat(y, 2, 0)
+    if sr != C.SR:
+        from scipy.signal import resample_poly
+        y = resample_poly(y, C.SR, sr, axis=1).astype(np.float32)
+    if not warped:
+        t = p.get("trim") or [0, 1]
+        if t[1] - t[0] > 0.005:
+            y = y[:, int(t[0] * y.shape[1]):int(t[1] * y.shape[1])]
+        if p.get("off"):
+            y = repitch(y, float(p["off"]))  # as the mixer plays it: pitch and length together
+    y = y.copy()
+    for ms, tail in ((p.get("fin") or 3, False), (p.get("fout") or 3, True)):  # your fades (3 ms at least: no clicks)
+        f = min(int(max(3.0, float(ms)) / 1000 * C.SR), y.shape[1] // 2)
+        if f:
+            ramp = np.linspace(0, 1, f, dtype=np.float32)
+            if tail:
+                y[:, -f:] *= ramp[::-1]
+            else:
+                y[:, :f] *= ramp
+    n, every = int(p.get("n") or 1), int(p.get("every") or 1)
+    beats = n * every * 4
+    N = int(round(beats * 60.0 / float(bpm) * C.SR))
+    loop = np.zeros((2, N), np.float32)
+    step = 60.0 / float(bpm) / 4 * C.SR
+    for st in p.get("steps") or []:
+        a = int(round(st * step))
+        seg = y[:, :max(0, N - a)]
+        loop[:, a:a + seg.shape[1]] += seg
+        if y.shape[1] > N - a:  # it rings past the end: into the start of the next time round
+            tail = y[:, N - a:N - a + N]
+            loop[:, :tail.shape[1]] += tail
+    sf.write(str(out), np.clip(loop, -1, 1).T, C.SR, subtype="PCM_24")
+    return beats
+
+
+def export(name, bpm, key, sections, bars=8, reveal=True):
+    """The mashup as a Live set, dry: a track per slot; the sections (the snapshots in order, or just the mixer as it
+    is) laid end to end with a locator each; every part a looping clip of exactly its bars at the tempo. Parts and
+    the set go to <Ableton samples>/Mashups/<name>/.
+
+    sections: [{label, order: [slot ids], roles: {id: stem}, slots: {id: part with its mix settings}}]"""
+    import shutil
+    from .als import write_arrangement
+    from .export import _safe
+    lib = library()
+    dest = C.ABLETON_SAMPLES / "Mashups" / _safe(name)
+    (dest / "Parts").mkdir(parents=True, exist_ok=True)
+    bars = max(1, int(bars))
+    tracks, order = {}, []
+    locators, n_clips = [], 0
+    for si, sec in enumerate(sections):
+        start = si * bars * 4
+        locators.append((start, sec.get("label") or "ABCDEFGH"[si % 8]))
+        slots = sec.get("slots") or {}
+        state = dict(bpm=bpm, key=key, slots={i: p for i, p in slots.items() if p and p.get("track") is not None})
+        inf = info(state)["slots"]
+        for sid in sec.get("order") or list(slots):
+            p = slots.get(sid)
+            if not p or p.get("mute"):
+                continue
+            role = (sec.get("roles") or {}).get(sid) or p.get("stem") or sid
+            if role == "oneshot":
+                if not p.get("sample") or not p.get("steps"):
+                    continue
+                f = dest / "Parts" / (_safe(f"One-shot - {p.get('artist', '')} - {p.get('title', '')}")[:70] + f" {sid[-4:]}{si}.wav")
+                beats = oneshot_loop(p, bpm, key, f)
+                label = f"{p.get('artist', '')} — {p.get('title', '')} (one-shot)"
+            elif p.get("track") is not None and int(p["track"]) in lib:
+                m = lib[int(p["track"])]
+                k, n = float(p.get("k") or 1), int(p.get("n") or 4)
+                semis = (inf.get(sid) or {}).get("semis", 0)
+                src = render(p["track"], role, p["bar0"], n, bpm, semis, k)
+                b0 = int(p["bar0"])
+                f = dest / "Parts" / (_safe(f"{role.capitalize()} - {m['artist']} - {m['title']}")[:64]
+                                      + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+d}st.wav")
+                if not f.exists():
+                    shutil.copy2(src, f)
+                beats = n * 4
+                label = f"{m['artist']} — {m['title']} · bars {b0 + 1}–{b0 + src_bars(n, k)}"
+            else:
+                continue
+            db = float(p.get("db") or 0)
+            if sid not in tracks:
+                order.append(sid)
+                tracks[sid] = dict(label=role.capitalize() if role != "oneshot" else "One-shot", category=ROLE_CAT.get(role),
+                                   volume=10 ** (db / 20), db=db, drums=role == "drums", clips=[], names=set())
+            tr = tracks[sid]
+            tr["names"].add(label.split(" · ")[0])
+            tr["clips"].append(dict(file=f, start=start, end=start + bars * 4, beats=beats, gain=10 ** ((db - tr["db"]) / 20),
+                                    label=label))
+            n_clips += 1
+    if not n_clips:
+        raise ValueError("nothing to export: the mashup has no parts playing")
+    out_tracks = []
+    for sid in order:
+        tr = tracks[sid]
+        if len(tr["names"]) == 1:  # one song throughout: name the track after it
+            tr["label"] = f"{tr['label']} · {next(iter(tr['names']))}"[:80]
+        out_tracks.append(tr)
+    als = write_arrangement(dest, _safe(name), out_tracks, float(bpm), len(sections) * bars * 4, locators)
+    if reveal:
+        import subprocess
+        subprocess.run(["open", "-R", str(als)])
+    return dict(dest=str(dest), als=als.name, tracks=len(out_tracks), clips=n_clips, sections=len(sections), bars=bars)
+
+
 # ---------------------------------------------------------------- saved combinations
 
 def _mixes(con):
