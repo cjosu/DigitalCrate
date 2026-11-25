@@ -800,7 +800,15 @@ def test_now_playing_does_not_move_the_page(page):
     """Starting and stopping playback never shifts the list (the now-playing strip floats over it)."""
     page.evaluate("CRATE.setTab('S')")
     row = page.locator("#list .row").nth(1)
-    y0 = row.bounding_box()["y"]
+    # let the list settle first (takes tags and fresh scores arrive just after the page loads and redraw it)
+    y0, same = row.bounding_box()["y"], 0
+    for _ in range(40):
+        page.wait_for_timeout(250)
+        y = row.bounding_box()["y"]
+        same = same + 1 if abs(y - y0) < 0.5 else 0
+        y0 = y
+        if same >= 6:
+            break
     page.locator("#list .row [data-play]").first.click()
     page.wait_for_function("!document.querySelector('#np').hidden", timeout=10000)
     y1 = row.bounding_box()["y"]
