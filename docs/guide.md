@@ -87,6 +87,10 @@ all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md]
 - **🎲** on a slot pulls another part that fits what's playing; **🎲 all** deals every unlocked slot; **🔒** keeps a
   part; **✕** takes one out; **clear all** empties the mixer. A slot avoids songs already playing in another slot.
 - **🔍** on a slot lets you choose the song: the mixer takes its best-fitting bars.
+- **↶ ↷** step back and forward through the parts a slot has held, so trying something else never loses one you
+  liked. **⇄** steps through other stretches of the same stem in the same song.
+- **Sub-bass:** a part that is all below 100 Hz is marked, and gets **HARM** (overtones above 110 Hz) switched on,
+  because laptop and other small speakers can't play it otherwise.
 - **Slots:** each slot's menu sets what it plays (drums, bass, vocals, other); **＋ add slot** adds more, up to 8 (a
   second vocal, two drum layers); an empty slot can be removed.
 - **💾 save** keeps a named combination (open it again from the menu next to it).

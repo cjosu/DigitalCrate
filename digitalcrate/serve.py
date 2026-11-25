@@ -484,6 +484,14 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json(related_artists())
                 except Exception as e:
                     return self._json(dict(seeds=[], artists=[], error=str(e)[:200]))
+            if u.path == "/api/takes":  # alternate-take groups, by sample id: for samples newer than the page too
+                from .takes import groups as take_groups
+                con = _db()
+                n = con.execute("SELECT COUNT(*), MAX(rowid) FROM samples").fetchone()
+                key = (n[0], n[1])
+                if _SLOW.get("takes_key") != key:
+                    _SLOW.update(takes_key=key, takes=take_groups(con))
+                return self._json(dict(groups=_SLOW["takes"]))
             if u.path == "/api/drums/takes":
                 from .drumkit import takes
                 return self._json(dict(takes=takes(q.get("path", ""))))
@@ -608,7 +616,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if what == "render":
                     f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
                                   req.get("k") or 1)
-                    return self._json(dict(url=str(f.relative_to(C.LIB_ROOT))))
+                    return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f)))
                 if what == "info":
                     return self._json(SM.info(state))
                 if what == "alts":

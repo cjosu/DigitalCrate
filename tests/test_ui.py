@@ -971,6 +971,20 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function("CRATE.MX.rated>0", timeout=10000)
     # the waveform and its play line
     page.wait_for_function(f"(()=>{{const b=document.querySelector('[data-mxwave=\"{stem}\"]');return b&&b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'}})()", timeout=10000)
+    # ↶ goes back to the part a slot held before a 🎲, ↷ forward again
+    before = page.evaluate(f"[CRATE.MX.slots['{stem}'].track,CRATE.MX.slots['{stem}'].bar0]")
+    page.click(f'[data-mxroll="{stem}"]')
+    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p&&p.buf&&!p._loading&&(p.track!=={before[0]}||p.bar0!=={before[1]})}})()", timeout=60000)
+    after = page.evaluate(f"[CRATE.MX.slots['{stem}'].track,CRATE.MX.slots['{stem}'].bar0]")
+    page.click(f'[data-mxhist="{stem}:-1"]')
+    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={before[0]}&&p.bar0==={before[1]}&&p.buf&&!p._loading}})()", timeout=60000)
+    page.click(f'[data-mxhist="{stem}:1"]')
+    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={after[0]}&&p.bar0==={after[1]}&&p.buf&&!p._loading}})()", timeout=60000)
+    # a part that is all sub-bass gets harmonics by itself (small speakers can't play it), and says so
+    b = next((k for k in page.evaluate("CRATE.MX.order") if page.evaluate(f"CRATE.MX.roles['{{}}']".format(k)) == "bass" and page.evaluate(f"!!CRATE.MX.slots['{{}}']".format(k))), None)
+    if b:
+        page.wait_for_function(f"CRATE.MX.slots['{b}'].sub>=0.85&&CRATE.MX.slots['{b}'].harm===true", timeout=30000)
+        assert "sub-bass" in page.locator(f'[data-mxrow="{b}"] .mxsrc').inner_text()
     # the list of prepared songs, and a stem button that puts a song straight into a slot of that kind
     page.click("#mxsongs summary")
     page.wait_for_function("document.querySelectorAll('#mxsongs .mxsong').length===3", timeout=10000)

@@ -215,6 +215,17 @@ def render(track, stem, bar0, n, bpm, semis=0, k=1):
     return out
 
 
+def sub_share(path):
+    """The share of a rendered part's energy below 100 Hz: near 1 for a pure sub-bass, which small speakers can't
+    play (it looks loud and sounds silent on a laptop)."""
+    import soundfile as sf
+    y, sr = sf.read(str(path), dtype="float32", always_2d=True)
+    m = y.mean(1)
+    S = np.abs(np.fft.rfft(m)) ** 2
+    f = np.fft.rfftfreq(len(m), 1 / sr)
+    return round(float(S[f < 100].sum() / (S.sum() + 1e-12)), 3)
+
+
 # ---------------------------------------------------------------- harmony
 
 def parse_key(key):
