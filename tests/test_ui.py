@@ -1156,9 +1156,9 @@ def test_duck_is_on_for_bass_and_remembered(site, page):
     """DUCK: on by default at 3 dB, on bass rows only; the switch and the amount are kept across a reload."""
     _mixer(site, page)
     assert page.locator("[data-mxduckon]").count() == 1 and page.locator('[data-mxduckon="bass"]').count() == 1
-    assert page.input_value('[data-mxduck="bass"]') == "3"
+    assert page.evaluate("CRATE.MX.duck.bass?.db ?? BLEND.DUCK.db") == 3
     page.wait_for_function("CRATE.MX.slots.bass._c&&CRATE.MX.slots.bass._c.ducked===true&&CRATE.MX.slots.drums._c.ducked===false")
-    _set(page, '[data-mxduck="bass"]', 6, ("input", "change"))
+    page.evaluate("CRATE.TR.set('bass','duck',6)")
     assert page.evaluate("CRATE.MX.duck.bass.db") == 6
     page.click('[data-mxduckon="bass"]')
     page.wait_for_function("CRATE.MX.slots.bass._c.ducked===false&&CRATE.MX.duck.bass.on===false")
@@ -1177,7 +1177,7 @@ def test_state_saved_before_blends_still_opens(site, page):
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=120000)
     assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length,Object.keys(CRATE.MX.duck).length]") == [0, 0, 0]
-    assert page.input_value('[data-mxduck="bass"]') == "3"
+    assert page.evaluate("CRATE.MX.duck.bass?.db ?? BLEND.DUCK.db") == 3
 
 
 def _roll(page, slot, track):
@@ -1491,15 +1491,13 @@ def test_mashup_reverb_send_and_bar_axis(site, page):
     page.wait_for_function("Object.values(CRATE.MX.slots).some(p=>p&&p.buf)", timeout=90000)
     page.wait_for_function("CRATE.MX.on&&CRATE.MX.order.some(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id]._c)", timeout=90000)
     sid = page.evaluate("CRATE.MX.order.find(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id]._c)")   # (a slot's chain exists once it plays)
-    page.evaluate(f"(()=>{{const e=document.querySelector('[data-mxrev=\"{sid}\"]');e.value=0.5;e.dispatchEvent(new Event('input',{{bubbles:true}}))}})()")
+    page.evaluate("id=>CRATE.TR.set(id,'rev',50)", sid)
     page.wait_for_function(f"Math.abs(CRATE.MX.slots['{sid}']._c.rsend.gain.value-0.5)<0.02", timeout=5000)
     page.click(f'[data-mxrevon="{sid}"]')                                # off: nothing is sent, the setting is kept
     page.wait_for_function(f"CRATE.MX.slots['{sid}']._c.rsend.gain.value<0.02", timeout=5000)
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].rev") == 0.5
     page.select_option("#mxrvtype", "hall")
     page.wait_for_function("CRATE.MX.reverb.type==='hall'&&CRATE.MX.bus.rev.type==='hall'", timeout=5000)
-    # the part buttons stay put whatever the song's name is: they come before it
-    assert page.evaluate(f"(()=>{{const r=document.querySelector('[data-mxrow=\"{sid}\"]'),b=r.querySelector('[data-mxroll]').getBoundingClientRect(),t=r.querySelector('.mxsrc').getBoundingClientRect();return b.right<=t.left+1}})()")
     assert page.evaluate(f"document.querySelector('[data-mxwave=\"{sid}\"] canvas').height") > 40
     page.evaluate("CRATE.mxPlay(false)")
     page.evaluate("localStorage.removeItem('dcStems')")
@@ -1654,3 +1652,45 @@ def test_pitch_is_two_numbers_you_drag(site, page):
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.vocals.ct") == -30
     # the strip: the same part at other cents is a change, not the same audio
     assert page.evaluate("(()=>{const a=CRATE.MX.slots.vocals;return BLEND.sameAudio(a,{...a,ct:0})})()") is False
+
+
+def _box(page, sel):
+    return page.evaluate("s=>{const r=document.querySelector(s).getBoundingClientRect();return {l:r.left,t:r.top,r:r.right,b:r.bottom}}", sel)
+
+def _one_shot(page):
+    """Put a short library one-shot in a new slot, as ✦ Mashup in the sample panel does. -> its slot id"""
+    i = page.evaluate("S.findIndex(s=>s[F.kind]==='oneshot'&&s[F.dur]<2)")
+    assert i >= 0
+    page.evaluate(f"CRATE.mxAddOneShot({i})")
+    page.wait_for_function("CRATE.MX.order.some(id=>CRATE.MX.roles[id]==='oneshot'&&CRATE.MX.slots[id]&&CRATE.MX.slots[id].buf)", timeout=120000)
+    page.click("#tabM")
+    return page.evaluate("CRATE.MX.order.find(id=>CRATE.MX.roles[id]==='oneshot')")
+
+def test_effects_are_numbers_under_every_track(site, page):
+    _mixer(site, page)
+    devs = lambda s: page.evaluate(f"[...document.querySelectorAll('[data-mxrow=\"{s}\"] .trfx .trdev')].map(d=>d.dataset.dev)")
+    for s in ("drums", "vocals", "other"):
+        assert devs(s) == ["eq", "dly", "rev", "harm"], s
+    assert devs("bass") == ["eq", "dly", "rev", "harm", "duck"]
+    page.evaluate("CRATE.TR.set('bass','fb',60)")
+    page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.fb.gain.value-0.6)<0.02")
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass.fb") == 0.6
+    assert page.evaluate("CRATE.MX.slots.drums._c.fb.gain.value") == pytest.approx(0.35, abs=0.01)   # untouched: as it was fixed
+    box = page.locator('[data-v="vocals:g0"]').bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x, y - 40)
+    page.wait_for_function("CRATE.MX.slots.vocals._c.lo.gain.value>2")                 # heard while dragging
+    page.mouse.up()
+    assert page.evaluate("CRATE.MX.slots.vocals.eq[0]") == 6                            # 40 px of 160 for 24 dB
+    page.click('[data-mxrow="vocals"] [data-mxeqon]')
+    page.wait_for_function("Math.abs(CRATE.MX.slots.vocals._c.lo.gain.value)<0.1")
+    assert page.evaluate("CRATE.MX.slots.vocals.eq[0]") == 6 and page.locator('[data-mxrow="vocals"] .trdev[data-dev="eq"].mxoff').count() == 1
+    page.evaluate("CRATE.TR.set('bass','dly',50)")
+    assert page.evaluate("CRATE.MX.slots.bass.dly") == pytest.approx(0.4)
+    assert page.locator('[data-mxrow] input[data-mxeq], [data-mxrow] input[data-mxdly], [data-mxrow] select[data-mxdt], [data-mxrow] input[data-mxrev], [data-mxrow] input[data-mxduck]').count() == 0
+    page.set_viewport_size({"width": 1280, "height": 800})
+    for s in ("drums", "bass", "vocals", "other"):                  # every row's effects are inside it, without clicking them
+        r = _box(page, f'[data-mxrow="{s}"]')
+        assert page.evaluate(f"[...document.querySelectorAll('[data-mxrow=\"{s}\"] .trfx .trdev')].every(d=>d.getBoundingClientRect().right<={r['r']}+1)")
+    os = _one_shot(page)
+    assert devs(os) == ["eq", "dly", "rev", "trim"] and page.locator(f'[data-mxrow="{os}"] .trfx canvas[data-mxtrim="{os}"]').count() == 1

@@ -168,3 +168,11 @@ body.mash .projbar{display:none}
 .trnum{display:inline-flex;align-items:center;gap:4px;padding:2px 5px;border:1px solid var(--line);border-radius:4px;background:#0e1013;color:var(--mute);font-size:11px;white-space:nowrap;cursor:ns-resize;touch-action:none;user-select:none}
 .trnum output{font:11px ui-monospace,Menlo,monospace;color:var(--ink)}
 .trnum:focus-visible{outline:1px solid var(--acc);outline-offset:1px}
+.trfx{grid-column:1/-1;display:flex;align-items:center;gap:5px;height:28px;min-width:0;color:var(--mute)}
+.trdev{display:flex;align-items:center;gap:3px;min-width:0;padding:2px 4px;border:1px solid var(--line);border-radius:5px;font-size:11px;white-space:nowrap}
+.trdev.mxoff{opacity:.55}
+.trtoggle{display:inline-flex;align-items:center;gap:4px;padding:2px 3px;border:0;background:none;font-size:10px;letter-spacing:.03em;text-transform:uppercase}
+.trtoggle::before{content:"";width:6px;height:6px;border-radius:50%;border:1px solid var(--mute)}
+.trtoggle[aria-pressed=true]::before{background:var(--acc);border-color:var(--acc)}
+.trdev .mxtrim{height:19px}
+.trdev>output{min-width:42px;font:10px ui-monospace,Menlo,monospace}
