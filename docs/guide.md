@@ -85,7 +85,8 @@ Hover over the song for the full name and why that part was picked.
 
 - **Prepare songs first.** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
   (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used. Hip-hop gives
-  vocals only. Open **songs prepared for Mashup** to put a song's stem straight into a track.
+  vocals only. `digitalcrate stems --new-artists --random 100` takes songs by artists Mashup has nothing from yet,
+  one song an artist. Open **songs prepared for Mashup** to put a song's stem straight into a track.
 - **The die** pulls another part that fits what's playing. Each track's next part is picked and rendered ahead of time,
   and the mixer tries to avoid songs it is already using. **All** deals every unlocked track. **↶ ↷** go back and
   forward through its parts. **S** solos the track, **M** mutes it, and the volume slider resets to 0 dB on a double-click.

@@ -95,6 +95,8 @@ def main():
     sm = sub.add_parser("stems", help="prepare songs for Mashup, the stem mixer (separate and keep their stems)")
     sm.add_argument("--random", type=int, default=40, help="random mined songs on top of your favorites' sources")
     sm.add_argument("--limit", type=int, help="at most N songs this run")
+    sm.add_argument("--new-artists", action="store_true",
+                    help="--random N songs by artists Mashup has nothing from yet, one song an artist (favorites' artists first)")
     sm.add_argument("--no-separate", action="store_true", help="tests: rough stand-in stems, no separator")
     gr = sub.add_parser("grain", help="check stem samples for separation grain (grainy ones rank lower)")
     gr.add_argument("--redo", action="store_true")
@@ -289,7 +291,7 @@ def main():
         sections(a.limit)
     elif a.cmd == "stems":
         from .stems import prepare
-        prepare(a.random, a.limit, separate=not a.no_separate)
+        prepare(a.random, a.limit, separate=not a.no_separate, new_artists=a.new_artists)
     elif a.cmd == "grain":
         if a.recut:
             from .grain import recut
