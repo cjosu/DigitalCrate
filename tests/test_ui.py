@@ -2883,3 +2883,76 @@ def test_delay_loops_are_connected_only_while_in_use(site, page):
     page.wait_for_timeout(3000); assert page.evaluate(on) is True
     page.evaluate(f"({setd})(0)"); page.wait_for_timeout(4400)
     assert page.evaluate(on) is False
+
+
+GLUE_AUDIO = """async () => {
+  const BL = BLEND, out = {}, db = x => 20 * Math.log10(x + 1e-12);
+  const rms = (d, a, b) => { let s = 0; for (let i = Math.round(a); i < Math.round(b); i++) s += d[i] * d[i]; return Math.sqrt(s / (b - a)); };
+  const O = { fx: false, on: true, bar: 2, DT: { '1/8': 1 / 8 }, duck: { on: false, ddb: 0 } };   // no effects, no ducks: the group alone
+  const buffer = (c, fill) => { const b = c.createBuffer(1, c.length, c.sampleRate); fill(b.getChannelData(0), c.sampleRate); return b; };
+  const click = at => (d, sr) => { d[Math.round(at * sr)] = 0.05; };
+  const tone = (f, a) => (d, sr) => { for (let i = 0; i < d.length; i++) d[i] = a * Math.sin(2 * Math.PI * f * i / sr); };
+  // a kit as the server gives it: a decaying 100 Hz hit every half second, at 0.08 RMS, its peaks held at -8 dBFS
+  const kit = (d, sr) => { for (let i = 0; i < d.length; i++) { const t = (i / sr) % 0.5; d[i] = Math.sin(2 * Math.PI * 100 * t) * Math.exp(-t / 0.05); }
+    const g = 0.08 / rms(d, 0, d.length); for (let i = 0; i < d.length; i++) d[i] = Math.max(-0.398, Math.min(0.398, d[i] * g)); };
+  // the mixer's own output on an offline context. parts: [role, fill]; -> the mix
+  const mix = async (parts, glue, SR = 44100, secs = 4) => {
+    const c = new OfflineAudioContext(1, secs * SR, SR), MX = { glue: { on: glue } }; BL.out(MX, c);
+    await MX.bus.g.ready;
+    for (const [role, fill] of parts) { const ch = BL.mkChain(c, MX.master, MX.bus);
+      BL.applyChain(ch, BL.mixOf({ db: 0 }, role, O), 0);
+      const s = c.createBufferSource(); s.buffer = buffer(c, fill); s.connect(ch.in); s.start(0); }
+    return (await c.startRendering()).getChannelData(0); };
+  // 1. timing: a drum click and a bass click a tenth of a second apart stay a tenth of a second apart
+  const peakAt = (y, a, b) => { let k = Math.round(a); for (let i = k; i < Math.round(b); i++) if (Math.abs(y[i]) > Math.abs(y[k])) k = i; return k; };
+  for (const SR of [44100, 48000]) for (const glue of [true, false]) {
+    const y = await mix([['drums', click(0.1)], ['bass', click(0.2)]], glue, SR, 1);
+    const d = peakAt(y, 0, 0.15 * SR), b = peakAt(y, 0.15 * SR, SR), k = SR + (glue ? 'on' : 'off');
+    out['gap' + k] = (b - d) - 0.1 * SR; out['late' + k] = d - 0.1 * SR; }
+  // 2. how much it takes off, in 10 ms steps over the last two seconds
+  const taken = async parts => { const on = await mix(parts, true), off = await mix(parts, false), w = 441; let most = -99, least = 99;
+    for (let i = 2 * 44100; i + w < on.length; i += w) { const a = rms(off, i, i + w); if (db(a) < -40) continue;
+      const r = db(a) - db(rms(on, i, i + w)); most = Math.max(most, r); least = Math.min(least, r); }
+    return { most, least }; };
+  out.kit = await taken([['drums', kit]]);
+  out.pair = await taken([['drums', kit], ['tops', kit]]);              // Tops go through the same compressor
+  // 3. levels: a quiet drum is not raised, a loud one is held, nothing else is touched
+  const lv = async (role, fill, glue) => db(rms(await mix([[role, fill]], glue), 2 * 44100, 4 * 44100));
+  const change = async (role, fill) => await lv(role, fill, true) - await lv(role, fill, false);
+  out.quiet = await change('drums', tone(1000, 0.01)); out.loud = await change('drums', tone(200, 0.5));
+  for (const r of ['bass', 'vocals', 'other', 'oneshot']) out[r] = await change(r, tone(200, 0.5));
+  // 4. before the make-up is measured, a failed measurement, a role that changes, and chains that are not on the group
+  { const c = new OfflineAudioContext(1, 44100, 44100), MX = {}; BL.out(MX, c); const g = MX.bus.g;
+    out.early = [g.wet.gain.value, g.dry.gain.value];
+    const ch = BL.mkChain(c, MX.master, MX.bus), seen = [];
+    for (const role of ['drums', 'other', 'tops', 'bass']) { BL.applyChain(ch, BL.mixOf({ db: 0, dly: 0.3 }, role, { ...O, fx: true }), 0); seen.push(ch.grouped); }
+    out.moved = seen; ch.drop();
+    const own = BL.mkChain(c, c.createGain(), MX.bus); BL.applyChain(own, BL.mixOf({ db: 0 }, 'drums', O), 0); out.own = own.grouped;
+    const bare = BL.mkChain(c, c.destination, BL.duckBus(c)); BL.applyChain(bare, BL.mixOf({ db: 0 }, 'drums', O), 0); bare.drop(); out.bare = bare.grouped;
+    const failed = BL.drumGroup(c, c.destination, () => Promise.reject(new Error('no probe')));
+    await failed.ready; out.failed = [failed.wet.gain.value, failed.dry.gain.value]; }
+  // 5. A switch during a fade carries on from that fade's current gain.
+  { const sr = 48000, c = new OfflineAudioContext(1, sr, sr);
+    const g = BL.drumGroup(c, c.destination); g.set(false); await g.ready;
+    const signal = new ConstantSourceNode(c); signal.connect(g.dry); signal.start();
+    g.set(true, 0.020); g.set(false, 0.025);
+    const dry = (await c.startRendering()).getChannelData(0);
+    out.interrupted = [0.022, 0.024, 0.025, 0.027].map(t => dry[Math.round(t * sr)]); }
+  return out;
+}"""
+
+
+def test_glue_audio(page):
+    """The drum group, measured offline. Drums and Tops are held a little and never raised; nothing else is touched;
+    nothing moves in time, with the glue on or off; and the drums play before the make-up gain is known."""
+    o = page.evaluate(GLUE_AUDIO)
+    for sr, late in ((44100, 264), (48000, 288)):
+        for sw in ("on", "off"):
+            assert abs(o[f"gap{sr}{sw}"]) <= 1 and abs(o[f"late{sr}{sw}"] - late) <= 1, (sr, sw, o)
+    assert 0.3 < o["kit"]["most"] < 2.5 and o["kit"]["least"] > -0.2, o["kit"]   # light, and never louder
+    assert o["pair"]["most"] > o["kit"]["most"] + 0.5
+    assert abs(o["quiet"]) < 0.3 and o["loud"] < -1.5                             # no make-up gain; a loud tone is held
+    assert all(abs(o[r]) < 0.05 for r in ("bass", "vocals", "other", "oneshot"))
+    assert o["early"] == [0, 1] and o["failed"] == [0, 1]
+    assert o["moved"] == [True, False, True, False] and o["own"] is False and o["bare"] is False
+    assert o["interrupted"] == pytest.approx([0.8, 0.6, 0.5, 0.6], abs=0.002)

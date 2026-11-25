@@ -1545,10 +1545,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       bands: bands.map(f => duckEnv(ctx, input, 'bandpass', f, q, smooth, bscale)) };
   };
 
+  BL.GLUE = { set: { threshold: -18, knee: 12, ratio: 2, attack: 0.03, release: 0.25 }, fade: 0.01 };
   const MASTER_SET={
    bottom:{type:'highpass',frequency:30,Q:0.707},
    top:{type:'highshelf',frequency:12000,gain:-1.5},
-   glue:{threshold:-18,knee:12,ratio:2,attack:0.03,release:0.25},
+   glue:BL.GLUE.set,
    limiter:{threshold:-3,knee:0,ratio:20,attack:0.001,release:0.1}
   };
   const masterProbes=new Map();
@@ -1622,13 +1623,51 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.CRATE.masterProbe = masterProbe;
   window.CRATE.masterChain = masterChain;
 
+  BL.drumGroup = (ctx, out, probe = masterProbe) => {
+    const { set, fade } = BL.GLUE;
+    const delay = Math.floor(0.006 * ctx.sampleRate) / ctx.sampleRate;
+    const input = ctx.createGain(), comp = new DynamicsCompressorNode(ctx, set),
+      wet = new GainNode(ctx, { gain: 0 }), dry = ctx.createGain(),
+      hold = new DelayNode(ctx, { delayTime: delay }), rest = new DelayNode(ctx, { delayTime: delay });
+    input.connect(comp).connect(wet).connect(out);
+    input.connect(hold).connect(dry).connect(out);
+    rest.connect(out);
+    const g = { in: input, comp, wet, dry, rest, out, on: true };
+    let makeup, from = 0, to = 0, start = 0;
+    g.set = (on, t = ctx.currentTime) => {
+      g.on = on;
+      const next = on ? 1 : 0;
+      if (!makeup || next === to) return;
+      // Pick up an interrupted crossfade at its current position.
+      const mix = from + (to - from) * BL.clamp01((t - start) / fade);
+      const interrupting = from !== to && t > start && t <= start + fade;
+      for (const [param, value, target] of [[wet.gain, mix / makeup, next / makeup], [dry.gain, 1 - mix, 1 - next]]) {
+        param.cancelScheduledValues(t);
+        if (interrupting) param.linearRampToValueAtTime(value, t);
+        else param.setValueAtTime(value, t);
+        param.linearRampToValueAtTime(target, t + fade);
+      }
+      from = mix; to = next; start = t;
+    };
+    g.ready = Promise.resolve().then(() => probe(set)).then(value => {
+      if (Number.isFinite(value) && value > 0) {
+        makeup = Math.max(1, value);
+        g.set(g.on);
+      }
+      return g;
+    }, () => g);
+    return g;
+  };
+
   // the mixer's output and the duck bus, made once (MX.master, MX.bus)
   BL.out = (MX, ctx) => {
     if (!MX.master) {
       MX.master = ctx.createGain(); MX.master.gain.value = MASTER_LEVEL; BL.mxRoute(MX);
       MX.bus = BL.duckBus(ctx);
       MX.bus.v = BL.vduckBus(ctx);
-      MX.bus.rev = BL.reverb(ctx, MX.master, MX.reverb);   // every chain made on this bus gets a send to it
+      MX.bus.g = BL.drumGroup(ctx, MX.master);
+      MX.bus.g.set(MX.glue?.on !== false);
+      MX.bus.rev = BL.reverb(ctx, MX.bus.g.rest, MX.reverb);   // every chain made on this bus gets a send to it
     }
     return MX;
   };
@@ -1761,6 +1800,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // EQ and the bass duck, then the vocal duck, volume and output. The key taps follow the volume.
   // Harmonics add overtones to help the bass carry on small speakers. The wet paths are the soft clipper (hg) and the octave (hgo).
   BL.mkChain = (ctx, out, bus) => {
+    const group = bus.g?.out === out ? bus.g : null, dest = group ? group.rest : out;
     const lo = ctx.createBiquadFilter(), mid = ctx.createBiquadFilter(), hi = ctx.createBiquadFilter(),
       duck = ctx.createBiquadFilter(), dk = ctx.createGain(), vol = ctx.createGain(), key = ctx.createGain(),
       send = ctx.createGain(), dl = ctx.createDelay(2), fb = ctx.createGain(), lp = ctx.createBiquadFilter();
@@ -1780,14 +1820,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const hg = harmonics.out, hgo = octave.out;
     const vin = vbus ? ctx.createGain() : vol;
     inp.connect(lo); inp.connect(harmonics.in); hg.connect(vin); inp.connect(octave.in); hgo.connect(vin);
-    lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vin); vol.connect(out);
+    lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vin); vol.connect(dest);
     if (vbus) { vin.connect(vol); vol.connect(vkey); }
     send.gain.value = 0;
     send.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl);
     vol.connect(key); key.connect(bus.in); bus.env.connect(dk);
     const rsend = ctx.createGain(); rsend.gain.value = 0;
     if (bus.rev) { vol.connect(rsend); rsend.connect(bus.rev.in); }
-    const c = { in: inp, out, lo, mid, hi, duck, dk, key, vol, send, dl, fb, lp, hg, hgo, rsend, ducked: false,
+    const c = { in: inp, out, dest, group, grouped: false, lo, mid, hi, duck, dk, key, vol, send, dl, fb, lp, hg, hgo, rsend, ducked: false,
       dlyOn: false, dlyTimer: null,
       vkey, vduck, vdk, vb, vbk, vducked: false, vbanded: false };
     const tops = { filters: [vduck], amounts: [vdk], levels: [vbus?.env] };
@@ -1835,15 +1875,24 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // s: {gain (linear), eq: [lo, mid, hi] dB, send, delay (s), key (feeds the bus), duck (dB taken off the lows, 0 = off)}
   BL.applyChain = (c, s, t) => {
     const T = 0.02, oct = s.hk === 'oct', harm = s.harm || 0;
+    if (c.group && !!s.grouped !== c.grouped) {
+      const dest = s.grouped ? c.group.in : c.group.rest;
+      for (const node of c.dlyOn ? [c.vol, c.lp] : [c.vol]) {
+        node.disconnect(c.dest);
+        node.connect(dest);
+      }
+      c.dest = dest;
+      c.grouped = !!s.grouped;
+    }
     c.vol.gain.setTargetAtTime(s.gain, t, T);
     c.lo.gain.setTargetAtTime(s.eq[0], t, T); c.mid.gain.setTargetAtTime(s.eq[1], t, T); c.hi.gain.setTargetAtTime(s.eq[2], t, T);
     c.send.gain.setTargetAtTime(s.send, t, T); c.dl.delayTime.setTargetAtTime(Math.min(1.9, s.delay), t, T);
     if (s.send > 0) {
       if (c.dlyTimer !== null) { clearTimeout(c.dlyTimer); c.dlyTimer = null; }
-      if (!c.dlyOn) { c.vol.connect(c.send); c.lp.connect(c.out); c.dlyOn = true; }
+      if (!c.dlyOn) { c.vol.connect(c.send); c.lp.connect(c.dest); c.dlyOn = true; }
     } else if (c.dlyOn && c.dlyTimer === null) {
       c.dlyTimer = setTimeout(() => {
-        try { c.vol.disconnect(c.send); c.lp.disconnect(c.out); } catch (e) {}
+        try { c.vol.disconnect(c.send); c.lp.disconnect(c.dest); } catch (e) {}
         c.dlyOn = false;
         c.dlyTimer = null;
       }, 4000);
@@ -1872,6 +1921,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     hk: BL.harmKind(p),
     rev: o.fx && p.revOn !== false ? (p.rev || 0) : 0,
     delay: o.bar * (o.DT[p.dt || '1/8'] || 1 / 8),
+    grouped: stem === 'drums' || stem === 'tops',
     key: stem === 'drums',
     duck: stem === 'bass' && !(o.duck && o.duck.on === false) ? BL.duckDb(o.duck) : 0,
     vkey: stem === 'vocals',
