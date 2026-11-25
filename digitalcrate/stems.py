@@ -17,6 +17,7 @@ import hashlib
 import json
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -178,7 +179,19 @@ def prepare(n_random=40, limit=None, separate=True):
 
 def src_bars(n, k):
     """How many of the song's bars a part of n mixer bars takes."""
-    return max(1, int(round(n * k)))
+    return max(1, int(n * k + 0.5))
+
+
+@contextmanager
+def _cache_output(out):
+    """Publish completed audio and picture files even when requests overlap."""
+    with tempfile.NamedTemporaryFile(dir=out.parent, suffix=out.suffix, delete=False) as tmp:
+        path = Path(tmp.name)
+    try:
+        yield path
+        path.replace(out)
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def render(track, stem, bar0, n, bpm, semis=0.0, k=1):
@@ -190,7 +203,7 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1):
     semis = round(float(semis), 2) or 0.0
     bt = m["bars"]
     n, k = max(1, int(n)), float(k or 1)
-    ns = min(src_bars(n, k), len(bt) - 2)
+    ns = min(src_bars(n, k), len(bt) - 1)
     bar0 = max(0, min(int(bar0), len(bt) - 1 - ns))
     h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis:.2f}|v4".encode()).hexdigest()[:16]
     out = CACHE / f"{h}.wav"
@@ -213,7 +226,8 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1):
     ramp = np.linspace(0, 1, f, dtype=np.float32)
     y[:, :f] *= ramp
     y[:, -f:] *= ramp[::-1]
-    sf.write(str(out), y.T, C.SR, subtype="PCM_16")
+    with _cache_output(out) as tmp:
+        sf.write(str(tmp), y.T, C.SR, subtype="PCM_16")
     return out
 
 
@@ -245,14 +259,8 @@ def peaks(track, stem):
                 peak[offset:offset + len(values)] = values
             scale = (np.percentile(peak, 99.9) or peak.max()) if n else 0
             raw = (np.clip(peak / scale, 0, 1) * 255).astype(np.uint8) if scale else np.zeros(n, dtype=np.uint8)
-            tmp = tempfile.NamedTemporaryFile(dir=out.parent, delete=False)
-            temp = Path(tmp.name)
-            try:
-                with tmp:
-                    tmp.write(raw.tobytes())
-                temp.replace(out)
-            finally:
-                temp.unlink(missing_ok=True)
+            with _cache_output(out) as tmp:
+                tmp.write_bytes(raw.tobytes())
     return dict(path=out, rate=PEAK_RATE, n=n, dur=dur, bars=m["bars"])
 
 

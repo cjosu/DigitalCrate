@@ -175,3 +175,9 @@ body.mash .projbar{display:none}
 #mxall{display:inline-flex;align-items:center;gap:5px}
 .mxrvb{display:inline-flex;gap:6px;align-items:center}.mxrvb input[type=range]{width:64px}.mxrvb output{font:11px ui-monospace,Menlo,monospace;color:var(--mute);min-width:36px}
 .trk .trwave canvas{opacity:1}
+.trwave{touch-action:none;user-select:none}
+.trwave:focus-visible{outline:1px solid var(--acc);outline-offset:-1px}
+.trtip{position:absolute;top:12px;z-index:1;pointer-events:none;padding:2px 6px;border-radius:4px;background:#11141a;color:var(--ink);font-size:11px}
+.trwave.busy::before,.trwave.busy::after{content:"";position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;animation:trloading .65s ease-in-out infinite alternate}
+.trwave.busy::before{left:var(--loop-left)}.trwave.busy::after{left:var(--loop-right)}
+@keyframes trloading{from{opacity:.2}to{opacity:1}}

@@ -973,7 +973,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
         if p["dur"]:
             assert abs(p["dur"] - p["n"] * 2.4) < 0.01, (k, p)   # n bars at 100 bpm, whatever the song's tempo
     stem = next(k for k, p in slots.items() if p["dur"])
-    page.select_option(f'[data-mxlen="{stem}"]', "2")
+    page.evaluate(f"CRATE.TR.setLoop('{stem}',CRATE.MX.slots['{stem}'].bar0,2)")
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     page.click("#mxup")
     page.wait_for_function("CRATE.MX.rated>0", timeout=10000)
@@ -1028,7 +1028,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     assert page.evaluate("Object.keys(CRATE.MX.slots).length") == 0
     page.select_option("#mxload", "ui mix")
     page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=120000)
-    page.select_option(f'[data-mxlen="{stem}"]', "2")
+    page.evaluate(f"CRATE.TR.setLoop('{stem}',CRATE.MX.slots['{stem}'].bar0,2)")
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     # ↺ revert: changes made to an open saved combination are dropped, and it's back as saved
     saved_track = page.evaluate(f"CRATE.MX.slots['{stem}'].track")
@@ -1038,7 +1038,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.click("#mxrevert")
     page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track==={saved_track}&&CRATE.MX.slots['{stem}'].buf", timeout=120000)
     page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
-    page.select_option(f'[data-mxlen="{stem}"]', "2")   # (the saved one had 4 bars: 2 again, for the reload check below)
+    page.evaluate(f"CRATE.TR.setLoop('{stem}',CRATE.MX.slots['{stem}'].bar0,2)")   # (the saved one had 4 bars: 2 again, for the reload check below)
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     # another slot (a second "other"), then its role changed to vocals: a part of the new kind comes in
     page.select_option("#mxaddrole", "other")
@@ -1771,3 +1771,55 @@ def test_track_plays_without_its_picture(site, page):
     page.wait_for_function("CRATE.MX.on&&['drums','bass','vocals','other'].every(s=>CRATE.MX.slots[s]&&CRATE.MX.slots[s].buf)", timeout=90000)
     assert page.evaluate("CRATE.TR.has('drums')") is False
     page.wait_for_function("(()=>{const b=document.querySelector('[data-mxwave=\"drums\"]');return b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'})()")
+
+
+def _edge(page, slot):
+    """Where a stem track's loop is on the page: its two edges and the row's middle height, and px per bar."""
+    return page.evaluate("""slot=>{const p=CRATE.MX.slots[slot],s=CRATE.TR.song(p.track,CRATE.MX.roles[slot]),r=document.querySelector(`[data-mxwave="${slot}"]`).getBoundingClientRect(),
+      [v0,v1]=p._v,X=t=>r.left+(t-v0)/(v1-v0)*r.width,e=p.bar0+CRATE.TR.srcBars(p.n,p.k||1);
+      return {xa:X(s.bars[p.bar0]),xb:X(s.bars[e]),y:r.top+r.height/2,bar:X(s.bars[1])-X(s.bars[0]),left:r.left,bar0:p.bar0,n:p.n,nb:s.bars.length-1}}""", slot)
+
+def _drag(page, x0, x1, y):
+    page.mouse.move(x0, y); page.mouse.down()
+    for k in range(1, 6):
+        page.mouse.move(x0 + (x1 - x0) * k / 5, y)
+    page.mouse.up()
+
+def test_loop_drags_and_snaps(site, page):
+    _mixer(site, page)
+    page.wait_for_function("['drums','bass','vocals','other'].every(s=>CRATE.TR.has(s))", timeout=20000)
+    page.evaluate("CRATE.TR.setLoop('drums',4,4)")
+    page.wait_for_function("CRATE.MX.slots.drums.bar0===4&&CRATE.MX.slots.drums.n===4&&CRATE.MX.slots.drums.buf&&!CRATE.MX.slots.drums._loading")
+    _calls(page)
+    e = _edge(page, "drums")
+    page.mouse.move(e["xb"], e["y"]); page.mouse.down(); page.mouse.move(e["xb"] + e["bar"], e["y"]); page.mouse.move(e["xb"] + 2.2 * e["bar"], e["y"])
+    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').length") == 0 and "6 bars" in page.inner_text('[data-mxwave="drums"] .trtip')
+    page.mouse.up()
+    page.wait_for_function("CRATE.MX.slots.drums.n===6&&CRATE.MX.slots.drums.bar0===4&&!CRATE.MX.slots.drums._loading")
+    assert abs(page.evaluate("CRATE.MX.slots.drums.buf.duration") - 6 * 2.4) < 0.01          # six bars at 100 bpm
+    e = _edge(page, "drums"); _drag(page, e["xa"], e["xa"] + 2 * e["bar"], e["y"])              # the start: the end stays
+    page.wait_for_function("CRATE.MX.slots.drums.bar0===6&&CRATE.MX.slots.drums.n===4")
+    e = _edge(page, "drums"); _drag(page, e["xa"] + 1.5 * e["bar"], e["xa"] - 1.5 * e["bar"], e["y"])   # the whole loop, three bars back
+    page.wait_for_function("CRATE.MX.slots.drums.bar0===3&&CRATE.MX.slots.drums.n===4")
+    e = _edge(page, "drums"); _drag(page, e["xb"], e["xb"] + 40 * e["bar"], e["y"])             # past the song's end: it stops there
+    page.wait_for_function("CRATE.MX.slots.drums.bar0===3&&CRATE.MX.slots.drums.n===13")
+    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').every(c=>c[1].bar0+c[1].n<=16)")
+    e = _edge(page, "drums"); page.mouse.click(e["left"] + 0.4 * e["bar"], e["y"])              # the gray: the loop goes there
+    page.wait_for_function("CRATE.MX.slots.drums.bar0===0&&CRATE.MX.slots.drums.n===13")
+    page.evaluate("CRATE.TR.setLoop('bass',2,2)"); page.wait_for_function("CRATE.MX.slots.bass.bar0===2&&!CRATE.MX.slots.bass._loading")
+    page.focus('[data-mxwave="bass"]'); page.keyboard.press("ArrowRight"); page.keyboard.press("Shift+ArrowRight")
+    page.wait_for_function("CRATE.MX.slots.bass.bar0===3&&CRATE.MX.slots.bass.n===3")
+    assert page.locator("[data-mxpos]").count() == 0 and page.locator('select[data-mxlen="drums"]').count() == 0
+    page.evaluate("CRATE.TR.setLoop('other',1,2);CRATE.TR.setLoop('other',5,4)")             # two changes at once: the last wins
+    page.wait_for_function("CRATE.MX.slots.other.bar0===5&&CRATE.MX.slots.other.n===4&&!CRATE.MX.slots.other._loading")
+    page.wait_for_timeout(600)
+    assert abs(page.evaluate("CRATE.MX.slots.other.buf.duration") - 4 * 2.4) < 0.01
+
+def test_a_half_time_loop_snaps_to_every_second_bar(site, page):
+    _mixer(site, page, bpm=50)                                    # the songs are at 92 to 110: two of their bars to one
+    page.wait_for_function("CRATE.TR.has('drums')&&CRATE.MX.slots.drums.k===2", timeout=20000)
+    page.evaluate("CRATE.TR.setLoop('drums',2,2)"); page.wait_for_function("CRATE.MX.slots.drums.bar0===2&&!CRATE.MX.slots.drums._loading")
+    e = _edge(page, "drums"); _drag(page, e["xb"], e["xb"] + 0.8 * e["bar"], e["y"])
+    page.wait_for_timeout(300); assert page.evaluate("CRATE.MX.slots.drums.n") == 2          # one of the song's bars: not a step
+    e = _edge(page, "drums"); _drag(page, e["xb"], e["xb"] + 2 * e["bar"], e["y"])
+    page.wait_for_function("CRATE.MX.slots.drums.n===3")
