@@ -1612,10 +1612,13 @@ def test_mashup_one_shot_slot(site, page):
     harmonics = page.locator(f'[data-mxharm="{sid}"]')
     harmonics.click()
     assert harmonics.get_attribute("aria-pressed") == "true"
+    # Audition after each change so the browser is pulling audio through the harmonics path.
+    page.click(f'[data-mxaud="{sid}"]')
     page.wait_for_function("id=>Math.abs(CRATE.MX.slots[id]._c.hg.gain.value-0.35)<0.01", arg=sid)
     assert page.evaluate("id=>JSON.parse(localStorage.getItem('dcStems')).slots[id].harm", sid) == 1
     harmonics.click()
     assert harmonics.get_attribute("aria-pressed") == "false"
+    page.click(f'[data-mxaud="{sid}"]')
     page.wait_for_function("id=>CRATE.MX.slots[id]._c.hg.gain.value<0.01", arg=sid)
     # ⤢ the large trim view: the same drag on a much wider waveform, shift for fine, nudges of 5 ms
     page.click(f'[data-mxtrimopen="{sid}"]')
