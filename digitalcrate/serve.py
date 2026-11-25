@@ -617,6 +617,10 @@ class Handler(SimpleHTTPRequestHandler):
                     f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
                                   req.get("k") or 1)
                     return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f)))
+                if what == "peaks":
+                    picture = SM.peaks(req["track"], req["stem"])
+                    picture["url"] = str(picture.pop("path").relative_to(C.LIB_ROOT))
+                    return self._json(picture)
                 if what == "oneshot":
                     return self._json(dict(part=SM.oneshot(state, req.get("n") or 1, set(req.get("avoid") or []),
                                                            path=req.get("path")), info=SM.info(state)))

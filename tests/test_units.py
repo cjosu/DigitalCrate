@@ -607,3 +607,19 @@ def test_stem_snapshot_counts_as_a_weak_yes(tmp_path, monkeypatch):
     rows = stems._db().execute("SELECT kind, stem, y, w FROM stem_events ORDER BY rowid").fetchall()
     assert [(r["kind"], r["y"], r["w"]) for r in rows] == [("snap", 1, 0.6)] * 3
     assert rows[0]["stem"] == "bass"
+
+
+def test_stem_picture_is_the_whole_stem(tmp_path, monkeypatch):
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    stems._LIB.update(n=-1, lib={})
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    m = stems.library()[1]
+    r = stems.peaks(1, "other")
+    pk = np.fromfile(r["path"], dtype=np.uint8)
+    assert r["rate"] == 400 and r["n"] == len(pk) and abs(len(pk) - r["dur"] * 400) <= 1
+    assert abs(r["dur"] - m["bars"][-1]) < 0.5 and r["bars"] == m["bars"] and pk.max() == 255
+    made = r["path"].stat().st_mtime_ns
+    assert stems.peaks(1, "other")["path"].stat().st_mtime_ns == made          # made once, then kept
+    with pytest.raises(KeyError):
+        stems.peaks(999, "other")

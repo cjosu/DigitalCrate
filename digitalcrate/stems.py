@@ -15,6 +15,7 @@ shift). There can be any number of slots, several of one stem; a slot without "s
 """
 import hashlib
 import json
+import tempfile
 import time
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from .db import connect
 
 DIR = C.DATA_DIR / "stems"
 CACHE = DIR / "cache"
+PEAK_RATE = 400
 STEMS = ("drums", "bass", "vocals", "other")
 PITCHED = ("bass", "vocals", "other")
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -213,6 +215,45 @@ def render(track, stem, bar0, n, bpm, semis=0, k=1):
     y[:, -f:] *= ramp[::-1]
     sf.write(str(out), y.T, C.SR, subtype="PCM_16")
     return out
+
+
+def peaks(track, stem):
+    """The whole stem's waveform, one normalized peak byte per 1/400 second."""
+    import soundfile as sf
+
+    track = int(track)
+    m = library()[track]
+    if stem not in STEMS:
+        raise KeyError(stem)
+    source = DIR / f"t{track}" / f"{stem}.flac"
+    out = source.with_suffix(".pk")
+    modified = source.stat().st_mtime_ns
+    with sf.SoundFile(source) as audio:
+        sr = audio.samplerate
+        dur = audio.frames / sr
+        n = (audio.frames * PEAK_RATE + sr - 1) // sr
+        try:
+            cached = out.stat()
+        except FileNotFoundError:
+            cached = None
+        if not cached or cached.st_size != n or cached.st_mtime_ns < modified:
+            peak = np.empty(n, dtype=np.float32)
+            starts = np.arange(PEAK_RATE) * sr // PEAK_RATE
+            for i, block in enumerate(audio.blocks(blocksize=sr, dtype="float32", always_2d=True)):
+                values = np.maximum.reduceat(np.abs(block.mean(axis=1)), starts[starts < len(block)])
+                offset = i * PEAK_RATE
+                peak[offset:offset + len(values)] = values
+            scale = (np.percentile(peak, 99.9) or peak.max()) if n else 0
+            raw = (np.clip(peak / scale, 0, 1) * 255).astype(np.uint8) if scale else np.zeros(n, dtype=np.uint8)
+            tmp = tempfile.NamedTemporaryFile(dir=out.parent, delete=False)
+            temp = Path(tmp.name)
+            try:
+                with tmp:
+                    tmp.write(raw.tobytes())
+                temp.replace(out)
+            finally:
+                temp.unlink(missing_ok=True)
+    return dict(path=out, rate=PEAK_RATE, n=n, dur=dur, bars=m["bars"])
 
 
 def sub_share(path):
