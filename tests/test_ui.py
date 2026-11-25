@@ -1591,3 +1591,36 @@ def test_saving_under_a_new_name_asks_about_another_ones_snapshots(site, page):
     page.evaluate("CRATE.mxPlay(false)")
     page.evaluate("localStorage.removeItem('dcStems')")
     page.click("#tabS")
+
+
+TRACKS_MATHS = [
+    ("TR.resizeEnd({bar0:104,n:8,k:1},114,177)", {"bar0": 104, "n": 10}),
+    ("TR.resizeEnd({bar0:104,n:8,k:1},100,177)", {"bar0": 104, "n": 1}),
+    ("TR.resizeEnd({bar0:104,n:8,k:1},130,177)", {"bar0": 104, "n": 16}),
+    ("TR.resizeEnd({bar0:170,n:4,k:1},190,177)", {"bar0": 170, "n": 7}),      # stops at the song's last bar line
+    ("TR.resizeEnd({bar0:10,n:4,k:2},21,100)", {"bar0": 10, "n": 6}),         # half-time: every second line
+    ("TR.resizeEnd({bar0:10,n:4,k:0.5},13,100)", {"bar0": 10, "n": 6}),       # double-time: two mixer bars a line
+    ("TR.resizeEnd({bar0:10,n:4,k:0.5},30,100)", {"bar0": 10, "n": 16}),
+    ("TR.resizeStart({bar0:104,n:8,k:1},108,177)", {"bar0": 108, "n": 4}),
+    ("TR.resizeStart({bar0:104,n:8,k:1},120,177)", {"bar0": 111, "n": 1}),
+    ("TR.resizeStart({bar0:4,n:8,k:1},-3,177)", {"bar0": 0, "n": 12}),
+    ("TR.moveTo({bar0:104,n:8,k:1},175,177)", {"bar0": 169, "n": 8}),
+    ("TR.moveTo({bar0:104,n:8,k:1},-5,177)", {"bar0": 0, "n": 8}),
+    ("TR.nudge({bar0:104,n:8,k:1},1,177)", {"bar0": 105, "n": 8}),
+    ("TR.grow({bar0:104,n:8,k:1},-1,177)", {"bar0": 104, "n": 7}),
+    ("TR.grow({bar0:104,n:1,k:1},-1,177)", {"bar0": 104, "n": 1}),
+    ("[3.9,-1,99].map(t=>TR.floorBar([0,2,4,6,8],t))", [1, 0, 3]),
+    ("[2.9,3.1,99,-1].map(t=>TR.nearLine([0,2,4,6,8],t))", [1, 2, 4, 0]),
+    ("[[100,160,158],[100,160,104],[100,160,130],[100,160,50],[100,106,104],[100,106,101]].map(a=>TR.hit(...a))",
+     ["end", "start", "move", "out", "end", "start"]),
+    ("TR.zoom(0,300,0.5,0.5,300,4)", [75, 225]), ("TR.zoom(0,300,0.5,4,300,4)", [0, 300]), ("TR.zoom(100,104,0,0.1,300,4)", [100, 104]),
+    ("TR.pan(100,200,150,300)", [200, 300]), ("TR.pan(100,200,-500,300)", [0, 100]),
+    ("TR.loopView(100,116,2,300)", [84, 132]), ("TR.loopView(2,6,2,300)", [0, 10]),
+    ("[{bar0:104,n:8,k:1},{bar0:43,n:1,k:1},{bar0:10,n:4,k:2}].map(TR.barsText)",
+     ["bars 105–112 · 8 bars", "bar 44 · 1 bar", "bars 11–18 · 4 bars"]),
+    ("[TR.semis(4,{ct:25}),TR.semis(0,{}),TR.srcBars(4,2),TR.srcBars(1,0.5),TR.MAXN]", [4.25, 0, 8, 1, 16]),
+]
+
+def test_tracks_maths(page):
+    for js, want in TRACKS_MATHS:
+        assert page.evaluate(f"(()=>{{const TR=CRATE.TR;return {js}}})()") == want, js

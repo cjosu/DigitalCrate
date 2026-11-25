@@ -2308,6 +2308,78 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.BLEND = BL;
 })();
 // ---------- end of stem blends
+// ---------- Mashup tracks: loop, waveform and controls
+(() => {
+  const TR = {};
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const step = k => k === 2 ? 2 : 1;
+  const nOf = (s, k) => s / k;
+
+  TR.MAXN = 16;
+  TR.srcBars = (n, k = 1) => Math.max(1, Math.round(n * k));
+  TR.floorBar = (bars, t) => {
+    let lo = 0, hi = bars.length - 1;
+    while (hi - lo > 1) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (bars[mid] <= t) lo = mid;
+      else hi = mid;
+    }
+    return lo;
+  };
+  TR.nearLine = (bars, t) => {
+    const i = TR.floorBar(bars, t);
+    return t - bars[i] < bars[i + 1] - t ? i : i + 1;
+  };
+  const snapped = (length, available, k) => {
+    const stride = step(k);
+    const limit = Math.min(TR.MAXN * k, Math.floor(available / stride) * stride);
+    return clamp(Math.round(length / stride) * stride, Math.min(stride, available), limit || available);
+  };
+  TR.resizeEnd = (p, line, nb) => {
+    const k = p.k || 1, bar0 = clamp(p.bar0, 0, nb - 1);
+    const s = snapped(line - bar0, nb - bar0, k);
+    return { bar0, n: Math.max(1, nOf(s, k)) };
+  };
+  TR.resizeStart = (p, line, nb) => {
+    const k = p.k || 1, end = Math.min(nb, p.bar0 + TR.srcBars(p.n, k));
+    const s = snapped(end - line, end, k);
+    return { bar0: end - s, n: Math.max(1, nOf(s, k)) };
+  };
+  TR.moveTo = (p, bar, nb) => {
+    const k = p.k || 1;
+    const n = clamp(p.n, 1, Math.min(TR.MAXN, Math.floor(nb / k)));
+    return { bar0: clamp(bar, 0, nb - TR.srcBars(n, k)), n };
+  };
+  TR.nudge = (p, d, nb) => TR.moveTo(p, p.bar0 + d * step(p.k), nb);
+  TR.grow = (p, d, nb) => TR.resizeEnd(p, p.bar0 + TR.srcBars(p.n, p.k) + d * step(p.k), nb);
+  TR.hit = (xa, xb, px) => {
+    const a = Math.abs(px - xa), b = Math.abs(px - xb);
+    if (b <= 7 && b <= a) return 'end';
+    if (a <= 7) return 'start';
+    return px > xa && px < xb ? 'move' : 'out';
+  };
+  TR.pan = (v0, v1, dt, dur) => {
+    const w = Math.min(v1 - v0, dur), a = clamp(v0 + dt, 0, dur - w);
+    return [a, a + w];
+  };
+  TR.zoom = (v0, v1, at, f, dur, minSpan) => {
+    const w = v1 - v0, span = clamp(w * f, Math.min(minSpan, dur), dur);
+    const a = v0 + at * (w - span);
+    return TR.pan(a, a + span, 0, dur);
+  };
+  TR.loopView = (a, b, barLen, dur) => {
+    const pad = Math.max(barLen * 2, b - a);
+    return [Math.max(0, a - pad), Math.min(dur, b + pad)];
+  };
+  TR.barsText = p => {
+    const s = TR.srcBars(p.n, p.k);
+    const bars = s === 1 ? `bar ${p.bar0 + 1}` : `bars ${p.bar0 + 1}–${p.bar0 + s}`;
+    return `${bars} · ${p.n} bar${p.n === 1 ? '' : 's'}`;
+  };
+  TR.semis = (keySemis, p) => keySemis + (p.ct || 0) / 100;
+
+  window.TRACKS = TR;
+})();
 // ---------- 🎛 Mashup (the stem mixer; the tab was called Stems): drums, bass, vocals and "other" from different songs, on one tempo and key
 // (digitalcrate/stems.py, docs/plans/stems.md). Parts are rendered by the server to exactly n bars at the tempo and
 // looped here on one bar clock; volume, EQ and delay are live Web Audio.
@@ -2615,7 +2687,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(xb&&!$('mxosadd'))xb.insertAdjacentHTML('afterend',`<button id="mxosadd" data-i="${i}" title="put it in the Mashup as a one-shot: it plays at the steps you choose, shifted to the mashup's key">✦ Mashup</button>`)};
  document.addEventListener('click',e=>{const b=e.target.closest('#mxosadd');if(b)addOneShot(+b.dataset.i)});
  if(typeof scheduleRefit==='function'){const _sr=scheduleRefit;scheduleRefit=function(){if(st.tab==='M'){MX._refit=true;return}_sr()}}
- window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync}
+ window.CRATE.TR=TRACKS;window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync}
 // ---------- sliders: keep each one's fill (--a .. --b, see studio.css) in step with its value. The fill runs from the
 // minimum, or from zero when the range spans it (EQ, tune, dB), so "all the way down" and "0" both look off.
 {const paint=el=>{const mn=+el.min||0,mx=el.max===''?100:+el.max,v=+el.value,span=mx-mn||1,p=Math.max(0,Math.min(1,(v-mn)/span)),z=mn<0&&mx>0?(0-mn)/span:0;
