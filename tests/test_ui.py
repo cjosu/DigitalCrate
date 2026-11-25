@@ -1624,3 +1624,33 @@ TRACKS_MATHS = [
 def test_tracks_maths(page):
     for js, want in TRACKS_MATHS:
         assert page.evaluate(f"(()=>{{const TR=CRATE.TR;return {js}}})()") == want, js
+
+
+def _calls(page):
+    """Record every api call the page makes from now on, as [path, body]."""
+    page.evaluate("(()=>{if(window.__calls)return;window.__calls=[];const a=CRATE.api;CRATE.api=(p,b)=>{__calls.push([p,b]);return a(p,b)}})()")
+
+def test_pitch_is_two_numbers_you_drag(site, page):
+    _mixer(site, page)
+    for slot in ("drums", "bass", "vocals", "other"):
+        assert page.locator(f'[data-v="{slot}:st"]').count() == 1 and page.locator(f'[data-v="{slot}:ct"]').count() == 1
+    _calls(page)
+    box = page.locator('[data-v="bass:ct"]').bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    page.mouse.move(x, y); page.mouse.down(); page.mouse.move(x, y - 20); page.mouse.move(x, y - 40)
+    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').length") == 0     # nothing is asked while dragging
+    page.mouse.up()
+    page.wait_for_function("CRATE.MX.slots.bass.ct===25&&CRATE.MX.slots.bass.buf&&!CRATE.MX.slots.bass._loading")
+    key = page.evaluate("CRATE.MX.info.slots.bass.semis")
+    assert page.evaluate("__calls.filter(c=>c[0]==='api/stems/render'&&c[1].stem==='bass').pop()[1].semis") == key + 0.25
+    page.evaluate("CRATE.TR.set('drums','st',2)")
+    page.wait_for_function("__calls.some(c=>c[0]==='api/stems/render'&&c[1].stem==='drums'&&c[1].semis===2)")
+    page.focus('[data-v="bass:st"]'); page.keyboard.press("ArrowUp")
+    page.wait_for_function("CRATE.MX.slots.bass.off===1")
+    page.dblclick('[data-v="bass:ct"]')
+    page.wait_for_function("(CRATE.MX.slots.bass.ct||0)===0")
+    assert "+1 st" in page.inner_text('[data-v="bass:st"]')
+    page.evaluate("CRATE.TR.set('vocals','ct',-30)")
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.vocals.ct") == -30
+    # the strip: the same part at other cents is a change, not the same audio
+    assert page.evaluate("(()=>{const a=CRATE.MX.slots.vocals;return BLEND.sameAudio(a,{...a,ct:0})})()") is False
