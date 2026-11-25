@@ -10,10 +10,12 @@
 """
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 import urllib.request
 
 import numpy as np
@@ -176,6 +178,12 @@ def page(site, browser):
     pg.evaluate("localStorage.removeItem('atlasSketchDraft')")
     yield pg
     ctx.close()
+    # These songs are specific to the Tops tests. The other mixer tests use 901–903.
+    for path in site.pop("tops_cleanup", []):
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
     assert not errors, errors  # every test also fails on a page error
 
 
@@ -1063,8 +1071,8 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     # another slot (a second "other"), then its role changed to vocals: a part of the new kind comes in
     page.select_option("#mxaddrole", "other")
     page.click("#mxadd")
-    page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.slots[CRATE.MX.order[4]]&&CRATE.MX.slots[CRATE.MX.order[4]].buf", timeout=120000)
-    new = page.evaluate("CRATE.MX.order[4]")
+    page.wait_for_function("CRATE.MX.order.length===6&&CRATE.MX.slots[CRATE.MX.order[5]]&&CRATE.MX.slots[CRATE.MX.order[5]].buf", timeout=120000)
+    new = page.evaluate("CRATE.MX.order[5]")
     assert page.evaluate(f"CRATE.MX.slots['{new}'].stem") == "other"
     _more(page, new)
     page.select_option(f'[data-mxrole="{new}"]', "vocals")
@@ -1074,7 +1082,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.reload()                                   # the tab and the combination come back
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'", timeout=30000)
     page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].n===2", timeout=10000)
-    assert page.evaluate("CRATE.MX.order.length") == 5 and page.evaluate(f"CRATE.MX.roles['{new}']") == "vocals"
+    assert page.evaluate("CRATE.MX.order.length") == 6 and page.evaluate(f"CRATE.MX.roles['{new}']") == "vocals"
     page.evaluate("localStorage.removeItem('dcStems')")   # the next tests start with the default four slots
     page.click("#tabS")
 
@@ -1309,8 +1317,8 @@ def test_playback_shows_both_sets_and_blends_by_hand(site, page):
     page.click("#snplay")
     page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
     assert page.evaluate("CRATE.MX.on") is False and page.is_visible("#pb")
-    assert page.locator('#pb [data-pbside="a"]').count() == 4 and page.locator('#pb [data-pbside="b"]').count() == 4   # all eight slots
-    assert page.evaluate("CRATE.PB.rows.map(r=>[r.id,r.kind])") == [["drums", "change"], ["bass", "same"], ["vocals", "same"], ["other", "exit"]]
+    assert page.locator('#pb [data-pbside="a"]').count() == 5 and page.locator('#pb [data-pbside="b"]').count() == 5
+    assert page.evaluate("CRATE.PB.rows.map(r=>[r.id,r.kind])") == [["drums", "change"], ["tops", "empty"], ["bass", "same"], ["vocals", "same"], ["other", "exit"]]
     a, b = _voice(page, "drums", "a"), _voice(page, "drums", "b")
     assert a["gain"] == 1 and b["gain"] == 0 and abs(b["dur"] - 9.6) < 0.01                 # 4 bars at 100 bpm, loaded but silent
     assert page.evaluate("CRATE.PB.voice('bass','a')===CRATE.PB.voice('bass','b')")          # a layer that stays is one voice
@@ -1808,7 +1816,7 @@ def test_track_header_holds_every_control(site, page):
     page.keyboard.press("Escape")
     assert page.locator('[data-mxrow="bass"].open').count() == 0
     _more(page, "bass"); page.click('[data-mxrow="bass"] [data-mxdup]')
-    page.wait_for_function("CRATE.MX.order.length===5")
+    page.wait_for_function("CRATE.MX.order.length===6")
     # a one-shot: the same header, its own part under it
     os = _one_shot(page)
     assert page.inner_text(f'[data-mxrow="{os}"] .trname').strip() == "One-shot"
@@ -1916,8 +1924,8 @@ def test_a_half_time_loop_snaps_to_every_second_bar(site, page):
 
 
 def test_tracks_fit_the_window(site, page):
+    _kits(site)
     _mixer(site, page)
-    page.select_option("#mxaddrole", "other"); page.click("#mxadd")
     page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.order.every(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id].buf)", timeout=60000)
     page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
     for w, h in ((1512, 857), (1280, 800)):
@@ -1950,7 +1958,7 @@ def test_zoom_and_the_view_switch(site, page):
     page.click('[data-trview="song"]'); page.wait_for_timeout(400)
     assert page.evaluate("CRATE.MX.slots.bass._v[0]===0&&Math.abs(CRATE.MX.slots.bass._v[1]-CRATE.TR.song(CRATE.MX.slots.bass.track,'bass').dur)<0.01")
     page.click("#tabS"); page.click("#tabM"); page.wait_for_selector(".trfx")                 # away and back: still there, nothing stuck
-    assert page.locator(".trfx").count() == 4
+    assert page.locator(".trfx").count() == 5
 
 
 HARM = r"""async () => {
@@ -1997,7 +2005,7 @@ def test_state_saved_before_tracks_still_opens(site, page, bass_harm):
     assert page.evaluate("CRATE.MX.slots.bass.harm") == 1 and page.evaluate("CRATE.MX.slots.drums.db") == -2
     c = page.evaluate("(()=>{const c=CRATE.MX.slots.vocals._c;return [c.lo.frequency.value,c.mid.frequency.value,c.hi.frequency.value,+c.fb.gain.value.toFixed(2)]})()")
     assert c == [200, 1000, 5000, 0.35] and page.evaluate("(CRATE.MX.slots.vocals.ct||0)") == 0
-    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 2
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 3
     page.evaluate("CRATE.TR.set('bass','harm',50)")
     page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.hg.gain.value-0.175)<0.01")
     assert page.locator("[data-mxharm]").count() == 0 and page.locator('[data-mxrow="bass"] .trfx [data-v="bass:harm"]').count() == 1
@@ -2043,3 +2051,144 @@ def test_pitch_after_snapshot_recall_keeps_the_other_parts_pitch(site, page):
     page.wait_for_function("bar=>CRATE.MX.slots.drums.bar0===bar&&!CRATE.MX.slots.drums._loading", arg=original)
     page.evaluate("CRATE.TR.set('drums','ct',-20)")
     assert page.evaluate("bar=>CRATE.MX.hist.drums.find(p=>p.bar0===bar).ct", alternate) == 7
+
+
+TOPS_SONGS = r'''
+import json, numpy as np, soundfile as sf
+from digitalcrate import stems, config as C
+SR = C.SR
+for tid, bpm in ((904, 100), (905, 104)):
+    d = stems.DIR / f"t{tid}"; d.mkdir(parents=True, exist_ok=True)
+    bar, nb = 240.0 / bpm, 16
+    t = np.arange(int(nb * bar * SR)) / SR
+    kick = (0.5 * (np.modf(t / (bar / 4))[0] < 0.25) * np.sin(2 * np.pi * 60 * t)).astype(np.float32)
+    hat = (0.2 * (np.modf(t / (bar / 4) + 0.5)[0] < 0.1) * np.sin(2 * np.pi * 8000 * t)).astype(np.float32)
+    tone = lambda f: (0.25 * np.sin(2 * np.pi * f * t)).astype(np.float32)
+    parts = dict(drums=kick + hat, tops=hat, bass=tone(110), vocals=tone(440), other=tone(220) + tone(277) + tone(330))
+    for k, y in parts.items():
+        sf.write(str(d / f"{k}.flac"), np.stack([y, y]).T, SR, format="FLAC", subtype="PCM_16")
+    ch = np.zeros(12); ch[[9, 1, 4]] = 1; ch /= np.linalg.norm(ch)
+    e = np.zeros((5, 512), np.float16); e[:, tid % 512] = 1; np.save(d / "emb.npy", e)
+    (d / "meta.json").write_text(json.dumps(dict(track=tid, artist=f"Kit Artist {tid}", title="Song", bpm=bpm, pc=9,
+        scale="major", camelot="11B", bars=[round(b * bar, 4) for b in range(nb + 1)], act={k: [1.0] * nb for k in stems.ROLES},
+        chroma=[ch.round(3).tolist()] * nb, stems=list(stems.ROLES), separated=False)))
+print("TOPS OK", stems.DIR)
+'''
+
+
+def _kits(site):
+    r = subprocess.run([sys.executable, "-c", TOPS_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "TOPS OK" in r.stdout, r.stderr[-2000:]
+    directory = site["tops_dir"] = Path(r.stdout.split("TOPS OK ", 1)[1].strip())
+    site["tops_cleanup"] = [directory / f"t{tid}" for tid in (904, 905)]
+
+
+def test_tops_is_a_track(site, page):
+    _kits(site)
+    _mixer(site, page)
+    assert page.evaluate("CRATE.MX.order") == ["drums", "tops", "bass", "vocals", "other"]
+    _calls(page)
+    _roll(page, "drums", 904); _roll(page, "tops", 905)
+    assert page.inner_text('[data-mxrow="tops"] .trname') == "Tops" and "🥢" not in page.inner_text('[data-mxrow="tops"]')
+    assert page.evaluate("document.querySelector('[data-mxrow=\"tops\"]').style.getPropertyValue('--trcol').trim()") == "var(--MEL)"
+    stems_asked = page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').map(c=>c[1].stem)")
+    assert "tops" in stems_asked and "drums" in stems_asked
+    assert page.evaluate("CRATE.MX.slots.tops.db") == -2 and page.locator('[data-mxduckon="tops"]').count() == 0
+    page.select_option("#mxkey", "E")
+    page.wait_for_function("!CRATE.MX.slots.tops._loading&&CRATE.MX.info&&CRATE.MX.info.slots.tops")
+    assert page.evaluate("CRATE.MX.info.slots.tops.semis") == 0                       # never shifted to the key
+    page.evaluate("CRATE.TR.set('tops','st',2)")
+    page.wait_for_function("__calls.some(c=>c[0]==='api/stems/render'&&c[1].stem==='tops'&&c[1].semis===2)")
+    page.evaluate("document.getElementById('mxsongs').open=true")
+    page.wait_for_selector('[data-mxput="tops:904"]')
+    assert page.is_disabled('.mxsong:has-text("Stem Artist 901") button >> nth=1')    # that song has no tops
+    # the deal: Tops straight after Drums (the parts fetched ahead are dropped first, so both are asked for)
+    order = page.evaluate("(async()=>{CRATE.MX.pre={};const seen=[],a=CRATE.api;CRATE.api=(p,b)=>{if(p==='api/stems/pick'){if(!Object.hasOwn(b,'track'))return Promise.resolve({part:null});seen.push(b.stem)}return a(p,b)};await CRATE.mxRollAll();return seen})()")
+    assert order[:2] == ["drums", "tops"]
+
+
+GIVE_TOPS = r"""
+import json, soundfile as sf
+from digitalcrate import stems
+p = stems.DIR / "tTID" / "meta.json"
+drums, sr = sf.read(str(p.with_name("drums.flac")), always_2d=True)
+tops = stems._rough_tops(drums.T)["hh"].T
+sf.write(str(p.with_name("tops.flac")), tops, sr, subtype="PCM_16")
+m = json.loads(p.read_text())
+m["act"]["tops"] = m["act"]["drums"]
+m["stems"].append("tops")
+m.pop("level", None)
+p.write_text(json.dumps(m))
+print("GIVEN")
+"""
+
+
+def _old_state(site, page, track, snap_only=False):
+    """A mixer as it was saved before Tops: four tracks, a Drums part with settings of its own, one snapshot, v 2, clean."""
+    _kits(site); _mixer(site, page); _roll(page, "drums", track)
+    page.evaluate("""(async()=>{const M=CRATE.MX;M.order=M.order.filter(id=>id!=='tops');delete M.roles.tops;delete M.slots.tops;
+      Object.assign(M.slots.drums,{db:-5,lock:true,eq:[1,0,2],dly:0.2,rev:0.3});await CRATE.mxSync()})()""")
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
+    page.fill("#mxname", "before tops"); page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig&&CRATE.MX.savedSig===CRATE.mxSig()")
+    page.evaluate("""snapOnly=>{CRATE.mxPlay(false);const s=JSON.parse(localStorage.getItem('dcStems'));s.v=2;
+      [s,...s.snaps].forEach(x=>Object.values(x.slots).forEach(p=>{delete p.kit}));
+      const mark=JSON.parse(CRATE.mxSig());mark.snaps=s.snaps;s.savedSig=JSON.stringify(mark);
+      if(snapOnly)delete s.slots.drums;
+      localStorage.setItem('dcStems',JSON.stringify(s))}""", snap_only)
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX&&CRATE.MX.songs", timeout=30000)
+
+
+def test_drums_saved_before_tops_keep_them_on_their_own_track(site, page):
+    _old_state(site, page, 904)
+    page.wait_for_function("CRATE.MX.slots['drums~tops']&&CRATE.MX.slots['drums~tops'].buf&&CRATE.MX.slots.drums.buf", timeout=60000)
+    assert page.evaluate("CRATE.MX.order.slice(0,2)") == ["drums", "drums~tops"] and page.evaluate("CRATE.MX.roles['drums~tops']") == "tops"
+    same = "['track','bar0','n','k','off','db','mute','lock','dly','rev'].every(f=>(d[f]||0)===(t[f]||0))&&''+d.eq===''+t.eq"
+    assert page.evaluate(f"(()=>{{const d=CRATE.MX.slots.drums,t=CRATE.MX.slots['drums~tops'];return {same}&&!d.kit}})()")
+    assert page.evaluate(f"(()=>{{const s=CRATE.MX.snaps[0],d=s.slots.drums,t=s.slots['drums~tops'];return s.order[1]==='drums~tops'&&{same}}})()")
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")                 # opening and splitting is not a change
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 3
+    page.evaluate("CRATE.MX.snapSel=0"); assert page.evaluate("BLEND.changed()") is False
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===2")            # the play-strip view: the rows line up
+    page.click("#snplay"); page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready", timeout=90000)
+    assert page.evaluate("CRATE.PB.rows.slice(0,2).map(r=>[r.id,r.stem,r.kind])") == [["drums", "drums", "same"], ["drums~tops", "tops", "same"]]
+    assert page.evaluate("!!CRATE.PB.voice('drums~tops','a')")
+    page.reload()                                                                        # and it is split once, not again
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots['drums~tops']", timeout=30000)
+    assert page.evaluate("CRATE.MX.order.filter(id=>CRATE.MX.roles[id]==='tops').length") == 1
+
+
+def test_an_old_drums_part_only_in_a_snapshot(site, page):                              # Review Focus 4
+    _old_state(site, page, 904, snap_only=True)
+    page.wait_for_function("CRATE.MX.order.includes('drums~tops')", timeout=30000)
+    assert page.evaluate("!CRATE.MX.slots['drums~tops']&&!!CRATE.MX.snaps[0].slots['drums~tops']")
+    assert page.evaluate("''+CRATE.MX.order===''+CRATE.MX.snaps[0].order")
+
+
+def test_a_part_split_once_its_song_has_tops(site, page):                               # Review Focus 1 and 5
+    _old_state(site, page, 901)                                                          # 901 has no tops yet
+    page.wait_for_function("CRATE.MX.slots.drums.buf&&!CRATE.MX.slots.drums._loading", timeout=60000)
+    assert page.evaluate("CRATE.MX.slots.drums.kit===true&&!CRATE.MX.order.includes('drums~tops')")
+    _roll(page, "drums", 902)                                                            # a new part of a song without tops
+    assert page.evaluate("CRATE.MX.slots.drums.kit") is True
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.drums.kit") is True
+    site["tops_cleanup"].append(site["tops_dir"] / "t902" / "tops.flac")
+    r = subprocess.run([sys.executable, "-c", GIVE_TOPS.replace("TID", "902")], env=site["env"], capture_output=True, text=True)
+    assert "GIVEN" in r.stdout, r.stderr[-2000:]
+    page.evaluate("CRATE.TR.set('drums','st',1)")                                        # any new render: the list of songs is still stale
+    page.wait_for_function("CRATE.MX.slots['drums~tops']&&CRATE.MX.slots['drums~tops'].track===902&&CRATE.MX.slots['drums~tops'].buf&&!CRATE.MX.slots.drums.kit", timeout=60000)
+    assert page.evaluate("CRATE.MX.slots['drums~tops'].off") == 1
+    _roll(page, "drums", 904)
+    assert page.evaluate("!CRATE.MX.slots.drums.kit")                                    # a song with tops: nothing to keep
+
+
+def test_old_drums_parts_in_a_full_mixer(site, page):
+    _old_state(site, page, 904)
+    page.wait_for_function("JSON.parse(localStorage.getItem('dcStems')).slots['drums~tops']", timeout=60000)
+    page.evaluate("""(()=>{const s=JSON.parse(localStorage.getItem('dcStems'));s.v=2;s.order=s.order.filter(id=>id!=='drums~tops');delete s.slots['drums~tops'];
+      for(let k=0;k<4;k++){const id='x'+k;s.order.push(id);s.roles[id]='drums';s.slots[id]={...s.slots.drums,stem:'drums'}}
+      s.snaps=[];localStorage.setItem('dcStems',JSON.stringify(s))})()""")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.order.length===13", timeout=60000)   # 8 tracks, 5 of them old Drums
+    assert page.locator("#mxadd").count() == 0

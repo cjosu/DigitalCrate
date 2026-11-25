@@ -6,6 +6,7 @@ yourself, saving combinations. Still to do: per-bar warping, grain- and section-
 How a slot looks and is played: [tracks.md](tracks.md).
 
 Snapshots, blends between them and the low-end duck: [blend.md](blend.md).
+Tops are the fifth part of a song. See [tracks.md](tracks.md).
 
 ## The idea
 

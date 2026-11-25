@@ -78,14 +78,18 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
 
 ## Mashup
 
-**🎛 Mashup** recombines songs: drums, bass, vocals and "other" (keys, guitars, pads), each from a different song,
-all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md](plans/stems.md).
+**🎛 Mashup** recombines drums, tops, bass, vocals and "other" (keys, guitars, pads) from different songs on one
+tempo and key. It's a prototype. See the [Mashup plan](plans/stems.md).
 Each track has a header, a waveform and a row of effects. The header shows the stem, the song and the loop's bars.
 Hover over the song for the full name and why that part was picked.
 
 - **Prepare songs first.** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
   (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used. Hip-hop gives
   vocals only. Open **songs prepared for Mashup** to put a song's stem straight into a track.
+- **Tops** holds the hi-hat, ride and crash. Pick them with the Tops button in the song list. Drums plays the
+  rest of the kit once a song has Tops. **digitalcrate stems** makes Tops for earlier songs first, adding about
+  15 to 20 MB per song. Use `digitalcrate stems --tops-only` to prepare just those songs. Until then, Drums plays
+  the whole kit. Old Drums parts get their Tops on a track directly below as soon as the song has them.
 - **The die** pulls another part that fits what's playing. Each track's next part is picked and rendered ahead of time,
   and the mixer tries to avoid songs it is already using. **All** deals every unlocked track. **↶ ↷** go back and
   forward through its parts. **S** solos the track, **M** mutes it, and the volume slider resets to 0 dB on a double-click.

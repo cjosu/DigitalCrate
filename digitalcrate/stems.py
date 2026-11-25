@@ -17,7 +17,7 @@ import hashlib
 import json
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -29,9 +29,13 @@ DIR = C.DATA_DIR / "stems"
 CACHE = DIR / "cache"
 PEAK_RATE = 400
 STEMS = ("drums", "bass", "vocals", "other")
+ROLES = STEMS + ("tops",)
+TOPS_PIECES = ("hh", "ride", "crash")
+DRUM_ROLES = ("drums", "tops")
 PITCHED = ("bass", "vocals", "other")
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 STRETCH = {"drums": (0.8, 1.25), "bass": (0.7, 1.4), "vocals": (0.75, 1.33), "other": (0.7, 1.4)}  # src bpm / bpm
+STRETCH["tops"] = STRETCH["drums"]
 # the score of a candidate part: w . [active, -|log stretch| (and a little for half/double time), -|semitones|,
 # harmony fit, like - dislike sound, how still its own harmony is (1 = one chord)]
 FEATURES = ["active", "stretch", "shift", "fit", "sound", "still"]
@@ -52,42 +56,117 @@ SILENT_DB = -30.0   # a stem this far below its song's loudest stem isn't really
 TARGET_RMS = 0.08   # every rendered part is brought to this loudness (about -22 dBFS), like sketchpad lanes
 
 
+def has_tops(track):
+    return _meta_path(track).with_name("tops.flac").is_file()
+
+
+def _bar_rms(mono, edges):
+    return np.array([np.sqrt(np.mean(mono[a:b] ** 2) + 1e-12) for a, b in zip(edges[:-1], edges[1:]) if b > a])
+
+
+def _activity(rms):
+    return np.clip(rms / (np.quantile(rms, 0.9) + 1e-9), 0, 1).round(3).tolist()
+
+
 def _levels(tid, m):
     """Each stem's loudness (dBFS, the RMS of its loudest bars); stems that are all but silent in the song are
     dropped from what the mixer offers. Worked out once per song and kept in its meta."""
     import soundfile as sf
     lv = {}
-    for k in STEMS:
+    tops = has_tops(tid)
+    for k in ROLES:
         f = DIR / f"t{tid}" / f"{k}.flac"
         if not f.exists():
             continue
         y, sr = sf.read(str(f), dtype="float32", always_2d=True)
+        if k == "drums" and tops:
+            y -= sf.read(str(f.with_name("tops.flac")), dtype="float32", always_2d=True)[0]
         mono = y.mean(1)
         e = (np.array(m["bars"]) * sr).astype(int)
-        rms = np.array([np.sqrt(np.mean(mono[a:b] ** 2) + 1e-12) for a, b in zip(e[:-1], e[1:]) if b > a])
+        rms = _bar_rms(mono, e)
         lv[k] = round(float(20 * np.log10(np.quantile(rms, 0.9) + 1e-9)), 1) if len(rms) else -120.0
     top = max(lv.values()) if lv else 0.0
     m["level"] = lv
     m["stems"] = [k for k in m["stems"] if lv.get(k, -120) >= top + SILENT_DB and lv.get(k, -120) > -55]
-    _meta_path(tid).write_text(json.dumps(m))
+    with _cache_output(_meta_path(tid)) as tmp:
+        tmp.write_text(json.dumps(m))
     return m
 
 
 def library():
-    """Every prepared song's meta, by track id (re-read when a song is added)."""
+    """Every prepared song's meta, by track id (re-read after a song is added or topped up)."""
     files = sorted(DIR.glob("t*/meta.json")) if DIR.exists() else []
-    if len(files) != _LIB["n"]:
+    versions = {}
+    for f in files:
+        try:
+            versions[f] = f.stat().st_mtime_ns
+        except FileNotFoundError:
+            continue
+    if len(versions) != _LIB["n"] or versions != _LIB["at"]:
         lib = {}
-        for f in files:
+        for f in versions:
             try:
                 m = json.loads(f.read_text())
                 if "level" not in m:  # prepared before levels were kept
                     m = _levels(int(m["track"]), m)
+                    versions[f] = f.stat().st_mtime_ns
                 lib[int(m["track"])] = m
             except Exception:
                 pass
-        _LIB.update(n=len(files), lib=lib)
+        _LIB.update(n=len(versions), at=versions, lib=lib)
     return _LIB["lib"]
+
+
+def make_tops(track, split=None, embed=None):
+    """Keep cymbals as their own stem and measure Drums without them."""
+    import soundfile as sf
+    meta = _meta_path(track)
+    m = json.loads(meta.read_text())
+    if "drums" not in m["stems"]:
+        return None
+    if split is None:
+        from .percussion import drumsep
+        split = drumsep
+    if embed is None:
+        from . import models
+        from .audio import to_mono48
+
+        def embed(seg):
+            return models.clap().embed_audio([to_mono48(seg)])[0]
+
+    drums, sr = sf.read(str(meta.with_name("drums.flac")), dtype="float32", always_2d=True)
+    pieces = split(drums.T)
+    zero = np.zeros_like(drums.T)
+    tops = np.clip(sum(pieces.get(k, zero) for k in TOPS_PIECES), -1, 1)
+    edges = (np.asarray(m["bars"]) * sr).round().astype(int)
+    with _cache_output(meta.with_name("tops.flac")) as tmp:
+        sf.write(str(tmp), tops.T, sr, format="FLAC", subtype="PCM_16")
+        stored, _ = sf.read(str(tmp), dtype="float32", always_2d=True)
+        for k, mono in (("drums", (drums - stored).mean(1)), ("tops", stored.mean(1))):
+            rms = _bar_rms(mono, edges)
+            m["act"][k] = _activity(rms)
+        b0 = int(np.argmax(np.convolve(rms, np.ones(4), "valid"))) if len(rms) >= 4 else 0
+        seg = stored[edges[b0]:edges[min(len(edges) - 1, b0 + 4)]].mean(1)[:sr * 10]
+        emb_file = meta.with_name("emb.npy")
+        emb = np.load(emb_file)[:len(STEMS)] if emb_file.exists() else np.zeros((len(STEMS), 512), np.float16)
+        top_emb = embed(seg) if len(seg) > sr and np.any(seg) else np.zeros(512)
+        emb = np.vstack([emb, top_emb]).astype(np.float16)
+        kit = []
+        for piece in [*(pieces.get(k, zero) for k in ("kick", "snare", "toms")), stored.T]:
+            mono = piece.mean(0)
+            hops = np.arange(0, len(mono), 512)
+            kit.append(np.sqrt(np.add.reduceat(mono ** 2, hops) / np.diff(np.r_[hops, len(mono)])))
+        for name, data in (("emb.npy", emb), ("kit.npy", np.asarray(kit, np.float16))):
+            with _cache_output(meta.with_name(name)) as tmp_array:
+                np.save(tmp_array, data)
+    if "tops" not in m["stems"]:
+        m["stems"].append("tops")
+    return _levels(track, m)
+
+
+def _rough_tops(drums):
+    from scipy.signal import butter, sosfiltfilt
+    return {"hh": sosfiltfilt(butter(4, 6000, fs=C.SR, btype="highpass", output="sos"), drums, axis=1).astype(np.float32)}
 
 
 def prepare_track(con, row, separate=True):
@@ -138,7 +217,11 @@ def prepare_track(con, row, separate=True):
     meta = dict(track=row["id"], artist=row["artist"] or "", title=row["title"] or "", bpm=round(float(tk["bpm"]), 2),
                 pc=int(tk["pc"]), scale=tk["scale"], camelot=tk["camelot"], bars=bt.round(4).tolist(), act=act,
                 chroma=chroma, stems=["vocals"] if policy == "vocals_only" else list(STEMS), separated=bool(separate))
-    return _levels(row["id"], meta)
+    meta = _levels(row["id"], meta)
+    if "drums" in meta["stems"]:
+        return make_tops(row["id"], split=None if separate else _rough_tops,
+                         embed=lambda seg: cl.embed_audio([to_mono48(seg)])[0])
+    return meta
 
 
 def choose(con, n_random=40):
@@ -154,8 +237,34 @@ def choose(con, n_random=40):
     return out
 
 
-def prepare(n_random=40, limit=None, separate=True):
+def top_up(limit=None, split=None, embed=None, *, standalone=True):
     from .memguard import breathe
+    songs = [(tid, m) for tid, m in library().items() if "drums" in m["stems"] and not has_tops(tid)][:limit]
+    print(f"TASK making Tops for {len(songs)} songs prepared before", flush=True)
+    made = 0
+    for k, (tid, m) in enumerate(songs, 1):
+        breathe()
+        start = time.monotonic()
+        try:
+            made += make_tops(tid, split, embed) is not None
+        except Exception as e:
+            print(f"    {m['artist']} - {m['title']}: {e}", flush=True)
+        print(f"tops: {k}/{len(songs)} [{made} ready]", flush=True)
+        if k == 1:
+            secs = time.monotonic() - start
+            hours, mins = divmod(round(secs * (len(songs) - 1) / 60), 60)
+            eta = f"{hours} h {mins} min" if hours else f"{mins} min"
+            print(f"    {secs:.0f} s for this song: about {eta} for the other {len(songs) - 1}", flush=True)
+    prefix = "TASK DONE " if standalone else ""
+    print(f"{prefix}Tops made for {made} songs", flush=True)
+    return made
+
+
+def prepare(n_random=40, limit=None, separate=True, tops_only=False):
+    from .memguard import breathe
+    top_up(limit, split=None if separate else _rough_tops, standalone=tops_only)
+    if tops_only:
+        return
     con = connect()
     ids = choose(con, n_random)
     ids = ids[:limit] if limit else ids
@@ -194,13 +303,16 @@ def _cache_output(out):
         path.unlink(missing_ok=True)
 
 
-def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False):
+def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops=None):
     """n mixer bars of a stem from the song's bar bar0 (n * k of its bars), as a WAV exactly n bars long at bpm,
     shifted by semis. Legacy saves retain the source span they played before track editing. -> path"""
     import soundfile as sf
     from .stretch import signalsmith
     track, requested = int(track), int(bar0)
     m = library()[track]
+    split = stem in DRUM_ROLES and (has_tops(track) if with_tops is None else with_tops)
+    if stem == "tops" and not split:
+        raise KeyError((track, stem))
     semis = round(float(semis), 2) or 0.0
     bt = m["bars"]
     n, k = max(1, int(n)), float(k or 1)
@@ -214,27 +326,37 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False):
         return CACHE / f"{hashlib.sha1(key.encode()).hexdigest()[:16]}.wav"
 
     old_geometry = legacy and ns != min(src_bars(n, k), nb)
-    out = cached(bar0, f"{semis:.2f}", "v4-legacy" if old_geometry else "v4")
+    version = "v5" if split else "v4"
+    out = cached(bar0, f"{semis:.2f}", version + ("-legacy" if old_geometry else ""))
     if out.exists():
         return out
     source = DIR / f"t{track}" / f"{stem}.flac"
     # A prepared stem may have vanished while its previously rendered loop is still playable.
-    if (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
+    if not split and (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
         old = cached(bar0, int(semis), "v3")
         if old.is_file():
             return old
     CACHE.mkdir(parents=True, exist_ok=True)
     a, b = int(bt[bar0] * C.SR), int(bt[bar0 + ns] * C.SR)
-    y, _ = sf.read(str(source), start=a, frames=b - a, dtype="float32", always_2d=True)
-    y = y.T
     N = int(round(n * 240.0 / float(bpm) * C.SR))
-    if semis or abs(N / max(1, y.shape[1]) - 1) > 1e-3:
-        y = signalsmith(y, semis, N / max(1, y.shape[1]))
-    if y.shape[1] >= N:
-        y = y[:, :N]
+
+    def read(path):
+        return sf.read(str(path), start=a, frames=b - a, dtype="float32", always_2d=True)[0].T
+
+    def fit_length(y):
+        ratio = N / max(1, y.shape[1])
+        if semis or abs(ratio - 1) > 1e-3:
+            y = signalsmith(y, semis, ratio)
+        return np.pad(y[:, :N], ((0, 0), (0, max(0, N - y.shape[1]))))
+
+    if split:
+        kit = read(source.with_name("drums.flac"))
+        tops = read(source.with_name("tops.flac"))
+        ref = fit_length(kit)
+        y = fit_length(kit - tops if stem == "drums" else tops)
     else:
-        y = np.pad(y, ((0, 0), (0, N - y.shape[1])))
-    rms, peak = float(np.sqrt(np.mean(y ** 2) + 1e-12)), float(np.abs(y).max() + 1e-9)
+        y = ref = fit_length(read(source))
+    rms, peak = float(np.sqrt(np.mean(ref ** 2) + 1e-12)), float(np.abs(ref).max() + 1e-9)
     y = y * min(TARGET_RMS / rms, 0.9 / peak, 60.0)  # equally loud parts: a quiet recording isn't lost under a loud one
     f = int(0.002 * C.SR)  # 2 ms in and out: the loop point never clicks
     ramp = np.linspace(0, 1, f, dtype=np.float32)
@@ -251,12 +373,14 @@ def peaks(track, stem):
 
     track = int(track)
     m = library()[track]
-    if stem not in STEMS:
+    if stem not in ROLES:
         raise KeyError(stem)
     source = DIR / f"t{track}" / f"{stem}.flac"
-    out = source.with_suffix(".pk")
-    modified = source.stat().st_mtime_ns
-    with sf.SoundFile(source) as audio:
+    split = stem == "drums" and has_tops(track)
+    tops = source.with_name("tops.flac")
+    out = source.with_name("drums-notops.pk") if split else source.with_suffix(".pk")
+    modified = max(source.stat().st_mtime_ns, tops.stat().st_mtime_ns) if split else source.stat().st_mtime_ns
+    with sf.SoundFile(source) as audio, (sf.SoundFile(tops) if split else nullcontext()) as hats:
         sr = audio.samplerate
         dur = audio.frames / sr
         n = (audio.frames * PEAK_RATE + sr - 1) // sr
@@ -268,6 +392,8 @@ def peaks(track, stem):
             peak = np.empty(n, dtype=np.float32)
             starts = np.arange(PEAK_RATE) * sr // PEAK_RATE
             for i, block in enumerate(audio.blocks(blocksize=sr, dtype="float32", always_2d=True)):
+                if hats is not None:
+                    block -= hats.read(len(block), dtype="float32", always_2d=True)
                 values = np.maximum.reduceat(np.abs(block.mean(axis=1)), starts[starts < len(block)])
                 offset = i * PEAK_RATE
                 peak[offset:offset + len(values)] = values
@@ -377,7 +503,7 @@ def fit(a, b):
 
 def _semis(state, stem, part, lib, target=None):
     off = int(part.get("off") or 0)
-    if stem == "drums":
+    if stem in DRUM_ROLES:
         return off
     return key_semis(lib[int(part["track"])], target or target_key(state)) + off
 
@@ -410,10 +536,16 @@ _EMB = {}
 
 
 def _emb(tid, stem):
-    if tid not in _EMB:
-        f = DIR / f"t{tid}" / "emb.npy"
-        _EMB[tid] = np.load(f).astype(np.float32) if f.exists() else np.zeros((4, 512), np.float32)
-    e = _EMB[tid][STEMS.index(stem)]
+    f = DIR / f"t{tid}" / "emb.npy"
+    try:
+        version = f.stat().st_mtime_ns
+    except FileNotFoundError:
+        return np.zeros(512, np.float32)
+    entry = _EMB.get(f)
+    if entry is None or entry[0] != version:
+        entry = _EMB[f] = (version, np.load(f).astype(np.float32))
+    i = ROLES.index(stem)
+    e = entry[1][i] if i < len(entry[1]) else np.zeros(512, np.float32)
     return e / (np.linalg.norm(e) + 1e-9)
 
 
@@ -464,7 +596,7 @@ def features(stem, m, bar0, n, state, lib, taste, target, k=1, slot=None):
     ns = src_bars(n, k)
     act = float(np.mean(m["act"][stem][bar0:bar0 + ns]))
     ratio = m["bpm"] / (float(state.get("bpm") or m["bpm"]) * k)
-    semis = 0 if stem == "drums" else key_semis(m, target)
+    semis = 0 if stem in DRUM_ROLES else key_semis(m, target)
     fits = []
     if stem in PITCHED:
         for sid, s, p in _parts(state, lib):
@@ -698,7 +830,7 @@ def oneshot(state, n=1, avoid=(), rng=None, path=None):
 
 # ---------------------------------------------------------------- to Ableton Live (docs/plans/mashup-ableton.md)
 
-ROLE_CAT = dict(drums="Percussion", bass="Bass & Sub", vocals="Vocals", other="Chords & Keys", oneshot="Vocal Atmospheres")
+ROLE_CAT = dict(drums="Percussion", tops="Percussion", bass="Bass & Sub", vocals="Vocals", other="Chords & Keys", oneshot="Vocal Atmospheres")
 
 
 def oneshot_warp(path, key, trim, beats, bpm, semis=0):
@@ -831,7 +963,7 @@ def export(name, bpm, key, sections, bars=8, reveal=True):
             if sid not in tracks:
                 order.append(sid)
                 tracks[sid] = dict(label=role.capitalize() if role != "oneshot" else "One-shot", category=ROLE_CAT.get(role),
-                                   volume=10 ** (db / 20), db=db, drums=role == "drums", clips=[], names=set())
+                                   volume=10 ** (db / 20), db=db, drums=role in DRUM_ROLES, clips=[], names=set())
             tr = tracks[sid]
             tr["names"].add(label.split(" · ")[0])
             tr["clips"].append(dict(file=f, start=start, end=start + bars * 4, beats=beats, gain=10 ** ((db - tr["db"]) / 20),

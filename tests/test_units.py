@@ -700,20 +700,22 @@ def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
         return c
     monkeypatch.setattr(stems, "connect", _con)
     stems._LIB.update(n=-1, lib={}); stems._EMB.clear()
-    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)
+    split = _fake_kit_song(tmp_path, 1, 100)
+    stems.make_tops(1, split=split, embed=lambda _: np.ones(512, np.float32))
     _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)
     part = lambda stem, track, **kw: dict(dict(stem=stem, track=track, bar0=4, n=4, k=1, off=0, db=-2), **kw)
-    A = dict(label="A", order=["drums", "other"], roles={}, slots=dict(drums=part("drums", 1), other=part("other", 2, ct=25)))
+    A = dict(label="A", order=["drums", "other", "tops"], roles={},
+             slots=dict(drums=part("drums", 1), other=part("other", 2, ct=25), tops=part("tops", 1)))
     B = dict(label="B", order=["drums", "other"], roles={},
              slots=dict(drums=part("drums", 1, db=-8), other=part("other", 2, mute=True)))
     r = stems.export("Unit mash", 100, "C", [A, B], bars=8, reveal=False)
-    assert (r["tracks"], r["clips"], r["sections"]) == (2, 3, 2)
+    assert (r["tracks"], r["clips"], r["sections"]) == (3, 4, 2)
     dest = tmp_path / "ableton" / "Mashups" / "Unit mash"
     ls = ET.parse(gzip.open(dest / r["als"])).getroot().find("LiveSet")
     assert [(l.find("Time").get("Value"), l.find("Name").get("Value")) for l in ls.iter("Locator")] == [("0", "A"), ("32", "B")]
     tr = [t for t in ls.find("Tracks") if t.tag == "AudioTrack"]
     clips = [list(t.iter("AudioClip")) for t in tr]
-    assert [len(c) for c in clips] == [2, 1]                                    # the muted "other" has no clip in B
+    assert [len(c) for c in clips] == [2, 1, 1]                                 # the muted "other" has no clip in B
     d0, d1 = clips[0]
     assert (d0.get("Time"), d0.find("CurrentEnd").get("Value"), d0.find("Loop/LoopEnd").get("Value"), d0.find("Loop/LoopOn").get("Value")) == ("0", "32", "16", "true")
     assert abs(float(d1.find("SampleVolume").get("Value")) - 10 ** (-6 / 20)) < 1e-3   # 6 dB lower in B: the clip's gain
@@ -722,6 +724,8 @@ def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
         i = sf.info(str(f))
         assert i.frames == round(4 * 240 / 100 * SR)
     assert "-1.75st" in next(f.name for f in (dest / "Parts").glob("Other*"))  # D major to C plus 25 cents
+    assert tr[2].find("Name/EffectiveName").get("Value").startswith("Tops")
+    assert next((dest / "Parts").glob("Tops*")).read_bytes() == stems.render(1, "tops", 4, 4, 100).read_bytes()
 
 
 def test_one_shot_export_uses_warp_length_and_fractional_pitch(tmp_path, monkeypatch):
@@ -743,3 +747,126 @@ def test_one_shot_export_uses_warp_length_and_fractional_pitch(tmp_path, monkeyp
     assert warped == []
     assert stems.oneshot_loop(dict(part, warp=1), 100, None, tmp_path / "warped.wav") == 4
     assert warped == [(1, 2.25)]
+
+
+def _fake_kit_song(tmp, tid, bpm, hats=True, kick=True):
+    """_fake_stem_song, with drums that are a 60 Hz kick on every beat and an 8 kHz hat on every off-beat."""
+    import soundfile as sf
+    from digitalcrate import stems
+    _fake_stem_song(tmp, tid, bpm, 0, "major", 0)
+    n = sf.info(str(stems.DIR / f"t{tid}" / "drums.flac")).frames
+    t, beat = np.arange(n) / SR, 60.0 / bpm
+    k = (0.5 * (np.modf(t / beat)[0] < 0.25) * np.sin(2 * np.pi * 60 * t)).astype(np.float32) * kick
+    h = (0.2 * (np.modf(t / beat + 0.5)[0] < 0.1) * np.sin(2 * np.pi * 8000 * t)).astype(np.float32) * hats
+    sf.write(str(stems.DIR / f"t{tid}" / "drums.flac"), np.stack([k + h, k + h]).T, SR, format="FLAC", subtype="PCM_16")
+    z = np.zeros((2, n), np.float32)
+    return lambda drums: dict(kick=np.stack([k, k]), snare=z, toms=z, hh=np.stack([h, h]), ride=z, crash=z)
+
+
+def test_a_songs_tops_are_made_and_known(tmp_path, monkeypatch):
+    import json, soundfile as sf
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    stems._LIB.update(n=-1, lib={})
+    stems._EMB.clear()
+    one = lambda seg: np.ones(512, np.float32)
+    split = _fake_kit_song(tmp_path, 1, 100)
+    assert "tops" not in stems.library()[1]["stems"] and not stems.has_tops(1)
+    assert not stems._emb(1, "tops").any()                           # no row for it yet: zeros, never an error
+    before = stems.library()[1]["level"]["drums"]
+    m = stems.make_tops(1, split=split, embed=one)
+    tops, _ = sf.read(str(stems.DIR / "t1" / "tops.flac"), dtype="float32", always_2d=True)
+    assert stems.has_tops(1) and np.abs(tops.T - split(None)["hh"]).max() < 1e-4
+    assert m["stems"][-1] == "tops" and len(m["act"]["tops"]) == 24 and m["level"]["tops"] < m["level"]["drums"] <= before
+    assert stems.library()[1]["stems"] == m["stems"]                 # seen without a new song being added
+    assert np.load(stems.DIR / "t1" / "emb.npy").shape == (5, 512) and stems._emb(1, "tops").any()
+    kit = np.load(stems.DIR / "t1" / "kit.npy")                      # kick, snare, toms, tops: how loud, 86 times a second
+    assert kit.shape[0] == 4 and abs(kit.shape[1] - tops.shape[0] / 512) <= 1 and kit[0].max() > kit[3].max() > 0 and not kit[1].any()
+    # 2. all hats: Drums go; no hats: Tops are not offered. Neither is boosted.
+    assert "drums" not in stems.make_tops(2, split=_fake_kit_song(tmp_path, 2, 100, kick=False), embed=one)["stems"]
+    m3 = stems.make_tops(3, split=_fake_kit_song(tmp_path, 3, 100, hats=False), embed=one)
+    assert "tops" not in m3["stems"] and stems.has_tops(3)
+    # a song that gives only its vocals gives no Tops, and no file
+    _fake_kit_song(tmp_path, 4, 100)
+    mp = stems.DIR / "t4" / "meta.json"
+    mp.write_text(json.dumps({**json.loads(mp.read_text()), "stems": ["vocals"]}))
+    stems._LIB.update(n=-1, lib={})
+    assert stems.make_tops(4, split=split, embed=one) is None and not stems.has_tops(4)
+
+
+def test_drums_and_tops_add_back_up_to_the_kit(tmp_path, monkeypatch):
+    import soundfile as sf
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    stems._LIB.update(n=-1, lib={})
+    split = _fake_kit_song(tmp_path, 1, 100)
+    read = lambda f: sf.read(str(f), dtype="float32", always_2d=True)[0]
+    db = lambda y: 20 * np.log10(np.sqrt(np.mean(y ** 2)) + 1e-9)
+    kit, kit110 = stems.render(1, "drums", 4, 4, 100), stems.render(1, "drums", 4, 4, 110)   # the kit as it is today
+    whole = stems.peaks(1, "drums")["path"]
+    stems.make_tops(1, split=split, embed=lambda s: np.ones(512, np.float32))
+    d, t = stems.render(1, "drums", 4, 4, 100), stems.render(1, "tops", 4, 4, 100)
+    assert d != kit and np.abs(read(d) + read(t) - read(kit)).max() < 2e-4                  # exactly, at the song's own tempo
+    assert db(read(t)) < db(read(d)) - 6                                                    # hats are as quiet as hats are
+    d2, t2 = stems.render(1, "drums", 4, 4, 110), stems.render(1, "tops", 4, 4, 110)
+    assert abs(db(read(d2) + read(t2)) - db(read(kit110))) < 1.0                            # very nearly, once stretched
+    assert stems.render(1, "tops", 4, 4, 100, semis=2) != t                                 # your own pitch
+    p = stems.peaks(1, "drums")
+    assert p["path"].name == "drums-notops.pk" and p["path"] != whole and stems.peaks(1, "tops")["n"] == p["n"]
+    with pytest.raises(Exception):
+        stems.render(2, "tops", 0, 4, 100)                                                  # a song that has none
+
+
+def test_tops_are_picked_like_drums(tmp_path, monkeypatch):
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    import sqlite3
+    def _con():  # its own database: never the library's
+        c = sqlite3.connect(tmp_path / "t.sqlite"); c.row_factory = sqlite3.Row
+        return c
+    monkeypatch.setattr(stems, "connect", _con)
+    stems._LIB.update(n=-1, lib={})
+    stems._EMB.clear()
+    one = lambda seg: np.ones(512, np.float32)
+    for tid in (1, 2):
+        stems.make_tops(tid, split=_fake_kit_song(tmp_path, tid, 100), embed=one)
+    _fake_kit_song(tmp_path, 3, 100)                               # prepared, but no tops yet
+    st = dict(bpm=100, key="D", slots=dict(drums=dict(stem="drums", track=1, bar0=0, n=4)))
+    got = {stems.pick("tops", st, rng=np.random.default_rng(k), slot="tops")["track"] for k in range(12)}
+    assert got == {2}                                              # not the song already playing, never the one without tops
+    p = stems.pick("tops", st, track=1, slot="tops")
+    assert p["stem"] == "tops" and p["semis"] == 0 and p["k"] == 1
+    st["slots"]["tops"] = dict(p, off=3)
+    assert stems.info(st)["slots"]["tops"]["semis"] == 3
+    assert stems.pick("tops", dict(st, bpm=140), slot="tops") is None            # out of what drums stretch to
+    assert stems.alts(st, "tops")[0]["stem"] == "tops" and stems.log("like", st) == 2
+
+
+def test_the_tops_pass_tops_up_times_itself_and_survives(tmp_path, monkeypatch, capsys):
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    stems._LIB.update(n=-1, lib={})
+    one = lambda seg: np.ones(512, np.float32)
+    splits = {tid: _fake_kit_song(tmp_path, tid, 100) for tid in (1, 2, 3, 4)}
+    stems.make_tops(1, split=splits[1], embed=one)
+    calls = []
+    def split(drums):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("model fell over")
+        return splits[2](drums)
+    assert stems.top_up(split=split, embed=one) == 2                        # three to do, one failed
+    out = capsys.readouterr().out
+    assert "TASK making Tops for 3 songs" in out and "tops: 1/3 [1 ready]" in out and "about" in out and "model fell over" in out
+    assert out.count("s for this song") == 1 and "TASK DONE Tops made for 2 songs" in out
+    left = [t for t in (2, 3, 4) if not stems.has_tops(t)]
+    assert len(left) == 1 and "tops" not in stems.library()[left[0]]["stems"] and "tops" not in stems.library()[left[0]]["act"]
+    def stop(drums):
+        raise KeyboardInterrupt
+    with pytest.raises(KeyboardInterrupt):
+        stems.top_up(split=stop, embed=one)
+    kept = sorted(f.name for f in (stems.DIR / f"t{left[0]}").glob("*.flac"))
+    assert kept == ["bass.flac", "drums.flac", "other.flac", "vocals.flac"]                 # nothing half-made
+    assert stems.top_up(limit=1, split=splits[left[0]], embed=one) == 1 and stems.top_up(split=split, embed=one) == 0

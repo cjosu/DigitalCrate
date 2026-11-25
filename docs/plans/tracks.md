@@ -1,6 +1,6 @@
 # Plan: Mashup tracks (the whole song under every loop, effects you drag, Tops and a vocal duck)
 
-Status: part 1 built (tracks, the loop, pitch, the row of effects, harmonics as an amount). Tops and the vocal duck: not yet.
+Status: parts 1 and 2 built (tracks, the loop, pitch, the row of effects, harmonics as an amount, and Tops). The vocal duck is next.
 
 ## The idea
 
@@ -248,6 +248,7 @@ Each leaves Mashup working. The work starts from `main`.
 - Loops of different lengths come round at different times: three bars against four line up every twelve.
 - Tops are as good as the model. Some snare can bleed into them, and whatever it doesn't call a hat or a cymbal
   stays in Drums.
+- A Drums waveform drawn before a song's Tops were made stays until the page is reloaded.
 - Zoomed all the way out on a long song, a one-bar loop is a few pixels wide.
 - The vocal duck follows how loud the vocal is, breaths and held notes included.
 

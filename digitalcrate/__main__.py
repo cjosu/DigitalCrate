@@ -96,6 +96,7 @@ def main():
     sm.add_argument("--random", type=int, default=40, help="random mined songs on top of your favorites' sources")
     sm.add_argument("--limit", type=int, help="at most N songs this run")
     sm.add_argument("--no-separate", action="store_true", help="tests: rough stand-in stems, no separator")
+    sm.add_argument("--tops-only", action="store_true", help="make Tops for songs already prepared")
     gr = sub.add_parser("grain", help="check stem samples for separation grain (grainy ones rank lower)")
     gr.add_argument("--redo", action="store_true")
     gr.add_argument("--recut", action="store_true", help="cut the grainy samples again with the better separator (in place)")
@@ -289,7 +290,7 @@ def main():
         sections(a.limit)
     elif a.cmd == "stems":
         from .stems import prepare
-        prepare(a.random, a.limit, separate=not a.no_separate)
+        prepare(a.random, a.limit, separate=not a.no_separate, tops_only=a.tops_only)
     elif a.cmd == "grain":
         if a.recut:
             from .grain import recut

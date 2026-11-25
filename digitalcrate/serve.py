@@ -607,16 +607,18 @@ class Handler(SimpleHTTPRequestHandler):
                     lib = SM.library()
                     return self._json(dict(n=len(lib), rated=SM.weights()[1], songs=[
                         dict(track=t, artist=m["artist"], title=m["title"], bpm=m["bpm"], bars=len(m["bars"]) - 1,
-                             key=SM.NOTES[m["pc"]] + ("m" if m["scale"] == "minor" else ""), stems=m["stems"])
+                             key=SM.NOTES[m["pc"]] + ("m" if m["scale"] == "minor" else ""), stems=m["stems"], tops=SM.has_tops(t))
                         for t, m in lib.items()]))
                 if what == "pick":
                     return self._json(dict(part=SM.pick(req["stem"], state, avoid=set(req.get("avoid") or []),
                                                         n=req.get("n"), track=req.get("track"),
                                                         slot=req.get("slot")), info=SM.info(state)))
                 if what == "render":
+                    with_tops = req["stem"] in SM.DRUM_ROLES and SM.has_tops(req["track"])
                     f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
-                                  req.get("k") or 1, legacy=req.get("legacy") is True)
-                    return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f)))
+                                  req.get("k") or 1, legacy=req.get("legacy") is True, with_tops=with_tops)
+                    return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f),
+                                           whole=req["stem"] == "drums" and not with_tops))
                 if what == "peaks":
                     picture = SM.peaks(req["track"], req["stem"])
                     picture["url"] = str(picture.pop("path").relative_to(C.LIB_ROOT))

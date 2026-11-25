@@ -1723,7 +1723,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // ---------------------------------------------------------------- snapshots
 
   BL.LETTERS = 'ABCDEFGH';
-  BL.STEMVAR = { drums: '--PERC', bass: '--BASS', vocals: '--VOX', other: '--KEYS' };
+  BL.STEMVAR = { drums: '--PERC', tops: '--MEL', bass: '--BASS', vocals: '--VOX', other: '--KEYS' };
   const copy = x => JSON.parse(JSON.stringify(x));
 
   // a part that sounds: there, holding a song, not muted
@@ -1941,8 +1941,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // make snaps[i] and snaps[i + 1] the pair that plays. true: loaded; false: the server did not answer, and the
   // pair that was playing is left as it was; null: a newer load or a close took over.
   PB.load = async i => {
-    const MX = H.MX, my = ++PB.seq, A = MX.snaps[i], B = MX.snaps[i + 1];
+    const MX = H.MX, my = ++PB.seq;
     PB.ready = false;
+    if (MX.snaps.slice(i, i + 2).some(s => Object.values(s.slots || {}).some(p => p?.kit))) {
+      await H.refreshSongs();
+      if (my !== PB.seq) return null;
+    }
+    if (H.split()) H.save();
+    const A = MX.snaps[i], B = MX.snaps[i + 1];
     if (!A || !B) return null;
     const info = await Promise.all([infoOf(A), infoOf(B)]);
     if (my !== PB.seq) return null;
@@ -2623,7 +2629,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
 
   TR.DIE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="currentColor"><rect x="1.5" y="1.5" width="13" height="13" rx="3" fill="none" stroke="currentColor"/><circle cx="5" cy="5" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="11" cy="11" r="1"/></svg>';
-  TR.name = role => ({ drums: 'Drums', bass: 'Bass', vocals: 'Vocals', other: 'Other', oneshot: 'One-shot' })[role];
+  TR.name = role => ({ drums: 'Drums', tops: 'Tops', bass: 'Bass', vocals: 'Vocals', other: 'Other', oneshot: 'One-shot' })[role];
   let menuId = null;
   TR.isOpen = id => menuId === id;
   TR.more = (id, roles, back) => {
@@ -3011,7 +3017,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
 // (digitalcrate/stems.py, docs/plans/stems.md). Parts are rendered by the server to exactly n bars at the tempo and
 // looped here on one bar clock; volume, EQ and delay are live Web Audio.
 {const api=(...args)=>window.CRATE.api(...args),TR=window.TRACKS,PROJ=window.PROJ||{};  // (this file's main part is one closure; what's appended after it gets its helpers from CRATE)
- const STEMS=['drums','bass','vocals','other'],ROLES=[...STEMS,'oneshot'],ICON={drums:'🥁',bass:'🎸',vocals:'🎤',other:'🎹',oneshot:'✦'},PITCHED=new Set(['bass','vocals','other']);
+ const STEMS=['drums','tops','bass','vocals','other'],ROLES=[...STEMS,'oneshot'],ICON={drums:'🥁',tops:'🥢',bass:'🎸',vocals:'🎤',other:'🎹',oneshot:'✦'},PITCHED=new Set(['bass','vocals','other']);
  const F_=F;  // the library's sample fields (F is also a local name in places below)
  const isOS=id=>role(id)==='oneshot',has=p=>!!p&&(p.track!=null||!!p.sample);  // a one-shot slot plays a library sample at steps of a cycle; has: the slot holds something
  const KEYS=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'].flatMap(k=>[k,k+'m']);
@@ -3019,8 +3025,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
  const role=id=>MX.roles[id]||id;
  function adopt(sv){const ids=sv.order&&sv.order.length?sv.order:[...new Set([...STEMS,...Object.keys(sv.slots||{})])];MX.order=ids;MX.roles=Object.fromEntries(ids.map(id=>[id,(sv.roles||{})[id]||((sv.slots||{})[id]||{}).stem||(STEMS.includes(id)?id:'other')]))}
- const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:2,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
-   return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined}]}))}))}catch(e){}};
+ const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:3,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
+   return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined,kit:p.kit||undefined}]}))}))}catch(e){}};
  const sig=(legacy=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:BLEND.duckSig(MX),
   snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{
    const p=MX.slots[id];
@@ -3040,11 +3046,13 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   MX.slots=slots||{};
   adopt({order,roles,slots});
   BLEND.adopt(MX,{snaps,trans,duck});
-  if(sv.v>=2)return;
-  const clean=MX.savedSig&&(MX.savedSig===sig(true)||MX.savedSig===sig('shape'));
+  if(sv.v>=3)return;
+  const clean=MX.savedSig&&(sv.v>=2?MX.savedSig===sig():MX.savedSig===sig(true)||MX.savedSig===sig('shape'));
   for(const mix of [MX,...MX.snaps]){
-   Object.values(mix.slots||{}).forEach(p=>{
+   Object.entries(mix.slots||{}).forEach(([id,p])=>{
     if(p?.track==null)return;
+    if((mix.roles?.[id]||p.stem||id)==='drums')p.kit=true;
+    if(sv.v>=2)return;
     // Older renders left out the last bar of a full-song loop and rounded half bars to even.
     const k=p.k||1,roundsUp=k===0.5&&p.n>1&&p.n%4===1;
     if(!p.bars||TR.srcBars(p.n,k)>=p.bars||roundsUp)p.legacyLoop=true;
@@ -3056,6 +3064,39 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    });
   }
   if(clean)MX.savedSig=sig();
+ }
+ // Give each migrated kit its own Tops row in the mixer and across the strip, even where the row is empty.
+ function splitKits(){
+  const songs=new Set((MX.songs||[]).filter(song=>song.tops).map(song=>song.track));
+  const mixes=[MX,...MX.snaps], splits=[];
+  for(const mix of mixes){
+   for(const id of mix.order||[]){
+    const p=mix.slots?.[id];
+    if(p?.kit&&(mix.roles?.[id]||p.stem||id)==='drums'&&songs.has(p.track))splits.push({mix,id,p});
+   }
+  }
+  if(!splits.length)return false;
+  const clean=MX.savedSig===sig();
+  const fields=['track','bar0','n','k','off','ct','legacyLoop','artist','title','bars','db','mute','lock',
+   'eq','eqOn','dly','dt','fb','dlyOn','rev','revOn'];
+  for(const {mix,id,p} of splits){
+   const tops=id+'~tops';
+   mix.slots[tops]={stem:'tops'};
+   for(const field of fields)if(p[field]!==undefined)mix.slots[tops][field]=field==='eq'?p.eq.slice():p[field];
+   delete p.kit;
+   delete p._key;
+  }
+  for(const id of new Set(splits.map(x=>x.id))){
+   const tops=id+'~tops';
+   for(const mix of mixes){
+    if(mix.order.includes(tops))continue;
+    const at=mix.order.indexOf(id);
+    mix.order.splice(at<0?mix.order.length:at+1,0,tops);
+    mix.roles[tops]='tops';
+   }
+  }
+  if(clean)MX.savedSig=sig();
+  return true;
  }
  try{
   const sv=JSON.parse(localStorage.getItem('dcStems')||'null');
@@ -3175,7 +3216,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
    load=async()=>{
     const r=await api('api/stems/render',{track,stem:kind,bar0,n,k,bpm,semis,legacy});
     const buf=await decode(url(r.url));
-    return {buf,sub:r.sub||0,hc:await BLEND.harmMeasure(buf)};
+    return {buf,sub:r.sub||0,hc:await BLEND.harmMeasure(buf),whole:r.whole};
    };
   }
   if(p._key===want&&p.buf){
@@ -3189,8 +3230,12 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   const request=p._request?.key===key?p._request:{key,pending:load()};
   p._request=request;
   try{
-   const {buf,sub,hc}=await request.pending;
+   const {buf,sub,hc,whole}=await request.pending;
    if(!owns())return;
+   if(kind==='drums'){
+    if(whole===false&&p.kit)return true;
+    if(whole)p.kit=true;
+   }
    p.buf=buf;
    p._key=want;
    p.err=null;
@@ -3212,13 +3257,18 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   }
  }
  function sync(){
+  splitKits();
   const token=++syncId,want=state(),current=()=>token===syncId;
   const task=(async()=>{
    try{
     const info=await api('api/stems/info',{state:want});
     if(!current())return;
     MX.info=info;
-    await Promise.all(MX.order.map(id=>syncPart(id,info,want.bpm,current)));
+    const stale=await Promise.all(MX.order.map(id=>syncPart(id,info,want.bpm,current)));
+    if(current()&&stale.some(Boolean)){
+     await refreshSongs();
+     if(current()&&splitKits()){sync();return}
+    }
    }catch(e){
     if(!current())return;
     MX.order.forEach(id=>{if(MX.slots[id])MX.slots[id]._loading=false});
@@ -3246,7 +3296,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function ev(kind,stem){api('api/stems/event',{kind,stem:stem||null,state:state()}).then(r=>{MX.rated=r.rated;const el=$('mxrated');if(el)el.textContent=ratedTxt()}).catch(()=>{})}
  const ratedTxt=()=>MX.rated>=12?`recommendations learned from ${MX.rated} ratings`:`learning: ${MX.rated}/12 ratings before it adapts (👍 👎, what you keep and what you throw out)`;
  // each slot remembers the parts it has held: ↶ goes back to one you liked after trying something else, ↷ forward again
- const snap=(id,p)=>({stem:role(id),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,legacyLoop:!!p.legacyLoop,artist:p.artist,title:p.title,bars:p.bars,why:p.why,alt:p.alt||null,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,steps:(p.steps||[]).slice(),every:p.every,trim:p.trim?p.trim.slice():null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit});
+ const snap=(id,p)=>({stem:role(id),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,legacyLoop:!!p.legacyLoop,kit:p.kit||undefined,artist:p.artist,title:p.title,bars:p.bars,why:p.why,alt:p.alt||null,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,steps:(p.steps||[]).slice(),every:p.every,trim:p.trim?p.trim.slice():null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit});
  MX.hist={};MX.hpos={};
  const sameHistoryPart=(a,b)=>a&&a.stem===b.stem&&a.track===b.track&&a.sample===b.sample&&
   a.bar0===b.bar0&&a.n===b.n&&a.k===b.k&&a.legacyLoop===b.legacyLoop;
@@ -3263,6 +3313,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   const tok=MX.pre[id]={sig,ready:false};
   try{const r=await api('api/stems/pick',{stem:role(id),slot:id,state:state(),avoid:(MX.recent[id]||[]).slice(-8),n:p.n});if(!r.part||MX.pre[id]!==tok)return;
    const q=r.part,rr=await api('api/stems/render',{track:q.track,stem:role(id),bar0:q.bar0,n:q.n,k:q.k||1,bpm:MX.bpm,semis:TR.semis(q.semis||0,q)});
+   if(rr.whole)q.kit=true;
    const buf=await decode(url(rr.url)),hc=await BLEND.harmMeasure(buf);
    if(MX.pre[id]===tok)Object.assign(tok,{part:q,buf,hc,sub:rr.sub||0,ready:true})}catch(e){if(MX.pre[id]===tok)delete MX.pre[id]}}
  let preT=0;const prefetchSoon=()=>{clearTimeout(preT);preT=setTimeout(async()=>{if(st.tab!=='M')return;for(const id of MX.order)await prefetch(id)},350)};
@@ -3277,7 +3328,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   MX.slots[stem]=Object.assign(keep,r.part,{ct:0,since:performance.now(),buf:null,_key:null,_next:null});rec.push(isOS(stem)?r.part.sample:r.part.track);hpush(stem);
   if(hit){const p=MX.slots[stem];p.buf=hit.buf;p.sub=hit.sub;p._hc=hit.hc;initHarm(stem);p._key=renderKey(p,MX.bpm,TR.semis(p.semis||0,p));p._playingLoop={track:p.track,bar0:p.bar0,n:p.n,k:p.k};startSrc(stem);draw()}  // it's playing already; sync only confirms
   await sync()}
- async function rollAll(){const pr={drums:0,other:1,bass:2,vocals:3,oneshot:4};  // 'other' before bass and vocals: it sets the key they fit to
+ async function rollAll(){const pr={drums:0,tops:1,other:2,bass:3,vocals:4,oneshot:5};  // 'other' before bass and vocals: it sets the key they fit to
   for(const s of MX.order.slice().sort((a,b)=>pr[role(a)]-pr[role(b)]))if(!(MX.slots[s]&&MX.slots[s].lock))await roll(s,true);if(!MX.on&&MX.order.some(s=>has(MX.slots[s])))play(true)}
  const why=p=>{const w=p.why;if(!w)return'';return `\n\nwhy this part: active ${Math.round(w.active*100)}% · stretched ${Math.round((Math.exp(-w.stretch)-1)*100)}% · shifted ${-w.shift} st · fits the harmony ${Math.round(w.fit*100)}% · harmony still ${Math.round((w.still??0.5)*100)}%${w.sound?` · like your liked sounds ${w.sound>0?'+':''}${w.sound.toFixed(2)}`:''}`};
  // every prepared song, with a button per stem to put it in a slot
@@ -3517,7 +3568,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   L.addEventListener('dblclick',e=>{const c=e.target.closest&&e.target.closest('canvas[data-mxtrim]');if(!c||st.tab!=='M')return;const p=MX.slots[c.dataset.mxtrim];if(p){p.trim=null;save();draw();if(p.warp)sync()}})}
  L.addEventListener('dblclick',e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset||{};if(ds.mxdb){MX.slots[ds.mxdb].db=0;t.value=0;t.title=dbv(0)+' · double-click for 0 dB';apply(ds.mxdb)}
   save();markSave()});
- BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,ev,barLenM});
+ BLEND.init({MX,STEMS,ICON,PITCHED,DT,role,state,save,draw,sync,play,apply,ev,barLenM,refreshSongs,split:splitKits});
  TR.init({MX,AC,role,isOS,part:id=>MX.slots[id],apply,sync,save,mark:markSave,draw,loop:setLoop,pitch:id=>{
   const p=MX.slots[id];
   hpush(id);
@@ -3532,7 +3583,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.id==='tabM'));try{localStorage.setItem('dcTab','M')}catch(e){}
   document.body.classList.add('wide','mash');['cats','subsBox','sbanner','tbanner'].forEach(id=>{if($(id))$(id).hidden=true});$('count').textContent='mashup';draw();
   if(MX.saved==null){MX.saved=[];refreshSaved().then(draw)}
-  if(MX.n==null)api('api/stems/library',{}).then(r=>{MX.n=r.n;MX.rated=r.rated;MX.songs=r.songs;draw();if(r.n&&MX.order.some(s=>MX.slots[s]))sync()}).catch(()=>{MX.n=0;draw()})};
+  if(MX.n==null)refreshSongs().then(()=>{if(MX.n==null)MX.n=0;draw();if(MX.n&&(MX.order.some(s=>MX.slots[s])||MX.snaps.length))sync()})};
  try{if(localStorage.getItem('dcTab')==='M'){st.tab='M';render()}}catch(e){}  // back on this tab after a refresh
  // ＋ Mashup in the sample panel: a short sample goes into a one-shot slot (an empty one, else a new one)
  async function addOneShot(i){const path=S[i][F_.path];if(S[i][F_.dur]>2*barLenM()+0.05){toast(`too long for a one-shot at ${MX.bpm} bpm (two bars at most)`);return}
@@ -3545,7 +3596,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  if(typeof scheduleRefit==='function'){const _sr=scheduleRefit;scheduleRefit=function(){if(st.tab==='M'){MX._refit=true;return}_sr()}}
  // ⌘S on this tab saves the mashup (not the sketch)
  window.addEventListener('keydown',e=>{if(st.tab!=='M'||!(e.metaKey||e.ctrlKey)||e.key.toLowerCase()!=='s')return;e.preventDefault();e.stopImmediatePropagation();const b=$('mxsave');if(b&&!b.disabled)b.click()},true);
- window.CRATE.TR=TRACKS;window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync}
+ window.CRATE.TR=TRACKS;window.CRATE.mxSig=sig;window.CRATE.MX=MX;window.CRATE.mxRoll=roll;window.CRATE.mxRollAll=rollAll;window.CRATE.mxPlay=play;window.CRATE.mxSync=sync;window.CRATE.mxRefreshSongs=refreshSongs}
 // ---------- sliders: keep each one's fill (--a .. --b, see studio.css) in step with its value. The fill runs from the
 // minimum, or from zero when the range spans it (EQ, tune, dB), so "all the way down" and "0" both look off.
 {const paint=el=>{const mn=+el.min||0,mx=el.max===''?100:+el.max,v=+el.value,span=mx-mn||1,p=Math.max(0,Math.min(1,(v-mn)/span)),z=mn<0&&mx>0?(0-mn)/span:0;
