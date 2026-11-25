@@ -1027,6 +1027,15 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
     page.select_option(f'[data-mxlen="{stem}"]', "2")
     page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
+    # ↺ revert: changes made to an open saved combination are dropped, and it's back as saved
+    saved_track = page.evaluate(f"CRATE.MX.slots['{stem}'].track")
+    page.click(f'[data-mxdel="{stem}"]')
+    page.wait_for_function(f"!CRATE.MX.slots['{stem}']", timeout=10000)
+    page.click("#mxrevert")
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track==={saved_track}&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
+    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
+    page.select_option(f'[data-mxlen="{stem}"]', "2")   # (the saved one had 4 bars: 2 again, for the reload check below)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
     # another slot (a second "other"), then its role changed to vocals: a part of the new kind comes in
     page.select_option("#mxaddrole", "other")
     page.click("#mxadd")
