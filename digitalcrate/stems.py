@@ -54,22 +54,25 @@ _LIB = {"at": 0, "n": -1, "lib": {}}
 
 SILENT_DB = -30.0   # a stem this far below its song's loudest stem isn't really there (the "drums" of a horn trio)
 TARGET_RMS = 0.08   # every rendered part is brought to this loudness (about -22 dBFS), like sketchpad lanes
+PEAK_CEILING = 10 ** (-8 / 20)
 
 
 def has_tops(track):
     return _meta_path(track).with_name("tops.flac").is_file()
 
 
-def tops_ready(track, meta=None):
-    """The completed metadata tells readers when the split can be used."""
-    if not has_tops(track):
-        return False
+def tops_prepared(track, meta=None):
+    """Whether the completed metadata records a split."""
     if meta is None:
         try:
             meta = json.loads(_meta_path(track).read_text())
         except FileNotFoundError:
             return False
     return "tops" in meta.get("act", {})
+
+
+def tops_ready(track, meta=None):
+    return has_tops(track) and tops_prepared(track, meta)
 
 
 def _bar_rms(mono, edges):
@@ -320,6 +323,16 @@ def _cache_output(out):
         path.unlink(missing_ok=True)
 
 
+def tame(ref: np.ndarray) -> np.ndarray:
+    """Hold the kit's peaks to PEAK_CEILING with a short, loop-aware gain curve."""
+    from scipy.ndimage import maximum_filter1d, minimum_filter1d, uniform_filter1d
+
+    w = int(0.004 * C.SR) | 1
+    env = maximum_filter1d(np.abs(ref).max(0), w, mode="wrap")
+    gain = np.minimum(1.0, PEAK_CEILING / np.maximum(env, 1e-9))
+    return uniform_filter1d(minimum_filter1d(gain, w, mode="wrap"), w, mode="wrap").astype(np.float32)
+
+
 def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops=None, cond=0):
     """n mixer bars of a stem from the song's bar bar0 (n * k of its bars), as a WAV exactly n bars long at bpm,
     shifted by semis. Legacy saves retain the source span they played before track editing. -> path"""
@@ -330,7 +343,7 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
     if cond not in (0, basscond.VERSION):
         raise ValueError(f"unknown bass conditioning version {cond}")
     m = library()[track]
-    split = stem in DRUM_ROLES and (tops_ready(track, m) if with_tops is None else with_tops)
+    split = stem in DRUM_ROLES and (tops_prepared(track, m) if with_tops is None else with_tops)
     if stem == "tops" and not split:
         raise KeyError((track, stem))
     semis = round(float(semis), 2) or 0.0
@@ -348,12 +361,19 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
         return CACHE / f"{hashlib.sha1(key.encode()).hexdigest()[:16]}.wav"
 
     old_geometry = legacy and ns != min(src_bars(n, k), nb)
-    version = "v5" if split else "v4"
-    out = cached(bar0, f"{semis:.2f}", version + ("-legacy" if old_geometry else ""))
+    suffix = "-legacy" if old_geometry else ""
+    drum = stem in DRUM_ROLES
+    version = "v7" if split else "v6" if drum else "v4"
+    out = cached(bar0, f"{semis:.2f}", version + suffix)
     if out.exists():
         return out
     source = DIR / f"t{track}" / f"{stem}.flac"
+    sources = (source.with_name("drums.flac"), source.with_name("tops.flac")) if split else (source,)
     # A prepared stem may have vanished while its previously rendered loop is still playable.
+    if drum and not all(path.is_file() for path in sources):
+        old = cached(bar0, f"{semis:.2f}", ("v5" if split else "v4") + suffix)
+        if old.is_file():
+            return old
     if not (split or cond) and (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
         old = cached(bar0, int(semis), "v3")
         if old.is_file():
@@ -372,8 +392,7 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
         return np.pad(y[:, :N], ((0, 0), (0, max(0, N - y.shape[1]))))
 
     if split:
-        kit = read(source.with_name("drums.flac"))
-        tops = read(source.with_name("tops.flac"))
+        kit, tops = map(read, sources)
         ref = fit_length(kit)
         y = fit_length(kit - tops if stem == "drums" else tops)
     else:
@@ -385,7 +404,10 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
         np.clip(y, -limit, limit, out=y)
     else:
         rms, peak = float(np.sqrt(np.mean(ref ** 2) + 1e-12)), float(np.abs(ref).max() + 1e-9)
-        y = y * min(TARGET_RMS / rms, 0.9 / peak, 60.0)
+        level = min(TARGET_RMS / rms, 0.9 / peak, 60.0)
+        y = y * level
+        if drum:
+            y *= tame(ref * level)
     f = int(0.002 * C.SR)  # 2 ms in and out: the loop point never clicks
     ramp = np.linspace(0, 1, f, dtype=np.float32)
     y[:, :f] *= ramp

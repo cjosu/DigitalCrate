@@ -1,6 +1,6 @@
 # Plan: Mashup tracks (the whole song under every loop, effects you drag, Tops and a vocal duck)
 
-Status: built (tracks, the loop, pitch, the row of effects, harmonics as an amount, Tops and the vocal duck).
+Status: built (tracks, the loop, pitch, the row of effects, harmonics as an amount, Tops, the vocal duck and the drum group).
 
 ## The idea
 
@@ -192,6 +192,66 @@ So an old combination or snapshot sounds as it did.
 - Rendering takes fractions of a semitone, renders Tops, and renders Drums with their tops taken away whenever the
   song has them. Parts rendered before are not reused for Drums.
 - The library call lists Tops among a song's stems.
+
+### The drum group
+
+#### Tamed peaks at render
+
+- Drums and Tops are levelled as before, then follow a ceiling of **−8 dBFS** on the whole kit. Bass, vocals, Other
+  and one-shots keep their usual render. At this ceiling a typical kit loses 1.2 dB off its tallest hits, and the
+  spikiest kits lose up to 7.1 dB. The gain moves for under 2% of the time on average across 30 kits.
+- A short look-ahead brings down the gain before a hit that crosses the ceiling and brings it back up afterwards.
+  It wraps around the loop. A kit already below the ceiling keeps its level.
+- The curve is worked out from the whole kit for those bars, just like the levelling gain. The same curve goes
+  onto Drums and Tops, so they add back up to the tamed kit. There is no gain after that step. Drums and Tops
+  renders get new cache versions.
+
+#### The live glue
+
+- Drums and Tops tracks send their sound and delay echoes through one compressor ahead of the mastering chain.
+  A change of role moves the track and its echoes with it. Reverb still has its own shared return.
+- The settings are fixed at −18 dB threshold, 12 dB knee, 2:1 ratio, 30 ms attack and 250 ms release. The browser
+  adds about 3.5 dB of make-up gain at these settings (×1.498). The mixer measures and removes it. The drums
+  play dry through the group while the measurement runs.
+- The compressor delays its signal by 6 ms (264 samples at 44.1 kHz and 288 at 48 kHz). The rest of the mix
+  and the dry side of the drum group wait the same length of time, so the parts stay together.
+- **GLUE** sits beside **MASTER** and shows the reduction in dB while a drum part plays. It starts on, including
+  in combinations saved before it existed. The switch crossfades over 10 ms and is saved with the mixer.
+  **FX** leaves the switch as set. The play-strip uses the same group.
+
+#### Other makes room for the drums
+
+- Drums and Tops feed a detector after their volume, so a muted kit ducks nothing and a quieter kit ducks
+  less. It measures seven bands at 125, 250, 500, 1000, 2000, 4000 and 8000 Hz.
+- Other dips where the drums are loud, up to its amount in each band. It uses a new 125 Hz filter and shares
+  the other six with the vocal duck. The two dips add where a hit lands on a sung note.
+- Other's Duck has one switch for **vocals** and **drums**. The drums amount runs from 0 to 12 dB, with 0 off.
+  It starts at 2 dB in a fresh mixer and at 0 in older combinations and their snapshots. Opening those
+  combinations keeps their saved mark clean.
+- The detector is smoothed at 30 Hz, with Q 1.92 and scale 12. At a 12 dB setting, a 125 Hz test kick gives
+  7.3 dB of reduction at 16–40 ms, 12.7 dB during the hit and 0.1 dB at 60–100 ms after it ends.
+
+#### Approaches considered for the drum group
+
+| Approach | Reduction on the loudest hits, across 30 kits | Trade-off |
+|---|---|---|
+| Live only, fixed setting | 0.2 to 3.1 dB | The spikiest kits get the most reduction |
+| Live only, threshold follows the drums | About the same on every kit by design | More code, and kits that are already dense get squeezed too |
+| **Tame peaks at render, then use fixed live glue** | 0.2 to 1.4 dB | Drums and Tops renders are made again |
+
+| Approach for Other | Trade-off |
+|---|---|
+| One quick detector for drums and vocals | The vocal dip would flutter back up between syllables |
+| **Two detectors with one set of dips** | The dips add on a hit that lands on a sung note |
+
+#### Limits of the drum group
+
+- The reduction figures are measured on single drum stems. Expect a higher reading for a kit paired with
+  Tops from another song. The ceiling, duck amount and speeds were tested with measurements and test tones.
+- The group adds 6 ms across the mix. The mastering chain adds another 12 ms while **MASTER** is on.
+- If Drums and Tops partly cancel, an individual part can peak above the whole-kit's ceiling.
+- A kit whose source file is missing can keep playing a cached, untamed render. Legacy loops can still use a
+  compatible v3 render.
 
 ## Approaches considered
 

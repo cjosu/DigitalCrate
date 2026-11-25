@@ -1709,6 +1709,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // 250 and 500 Hz and less than 1.5 dB at 60 Hz, 4 kHz and 8 kHz. Between phrases both recover.
   BL.VDUCK = { hp: 150, smooth: 6, scale: 18, fc: 10, bands: [250, 500, 1000, 2000, 4000, 8000],
     q: 1.92, bscale: 46, db: 3, max: 12 };
+  // A 125 Hz test kick takes 2.1 dB off Other at the default amount. At 12 dB it takes 7.3 dB off in
+  // the 16–40 ms window, 12.7 dB during the hit, and 0.1 dB in the 60–100 ms after it ends.
+  BL.GDUCK = { smooth: 30, bands: [125, ...BL.VDUCK.bands], q: 1.92, bscale: 12, db: 2, max: 12 };
   BL.DUCKED = { bass: 'lows', tops: 'vocals', other: 'vocals' };
   BL.Q = -3.0103;      // Web Audio's lowpass / highpass Q is in dB: this is Butterworth (no resonance)
   BL.STAGES = 2;       // biquads per filter: 2 = 24 dB / octave
@@ -1779,11 +1782,16 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return { in: input, env: duckEnv(ctx, input, 'highpass', hp, BL.Q, smooth, scale),
       bands: bands.map(f => duckEnv(ctx, input, 'bandpass', f, q, smooth, bscale)) };
   };
+  BL.gduckBus = ctx => {
+    const input = ctx.createGain(), { bands, q, smooth, bscale } = BL.GDUCK;
+    return { in: input, bands: bands.map(f => duckEnv(ctx, input, 'bandpass', f, q, smooth, bscale)) };
+  };
 
+  BL.GLUE = { set: { threshold: -18, knee: 12, ratio: 2, attack: 0.03, release: 0.25 }, fade: 0.01 };
   const MASTER_SET={
    bottom:{type:'highpass',frequency:30,Q:0.707},
    top:{type:'highshelf',frequency:12000,gain:-1.5},
-   glue:{threshold:-18,knee:12,ratio:2,attack:0.03,release:0.25},
+   glue:BL.GLUE.set,
    limiter:{threshold:-3,knee:0,ratio:20,attack:0.001,release:0.1}
   };
   const masterProbes=new Map();
@@ -1857,13 +1865,52 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   window.CRATE.masterProbe = masterProbe;
   window.CRATE.masterChain = masterChain;
 
+  BL.drumGroup = (ctx, out, probe = masterProbe) => {
+    const { set, fade } = BL.GLUE;
+    const delay = Math.floor(0.006 * ctx.sampleRate) / ctx.sampleRate;
+    const input = ctx.createGain(), comp = new DynamicsCompressorNode(ctx, set),
+      wet = new GainNode(ctx, { gain: 0 }), dry = ctx.createGain(),
+      hold = new DelayNode(ctx, { delayTime: delay }), rest = new DelayNode(ctx, { delayTime: delay });
+    input.connect(comp).connect(wet).connect(out);
+    input.connect(hold).connect(dry).connect(out);
+    rest.connect(out);
+    const g = { in: input, comp, wet, dry, rest, out, on: true };
+    let makeup, from = 0, to = 0, start = 0;
+    g.set = (on, t = ctx.currentTime) => {
+      g.on = on;
+      const next = on ? 1 : 0;
+      if (!makeup || next === to) return;
+      // Pick up an interrupted crossfade at its current position.
+      const mix = from + (to - from) * BL.clamp01((t - start) / fade);
+      const interrupting = from !== to && t > start && t <= start + fade;
+      for (const [param, value, target] of [[wet.gain, mix / makeup, next / makeup], [dry.gain, 1 - mix, 1 - next]]) {
+        param.cancelScheduledValues(t);
+        if (interrupting) param.linearRampToValueAtTime(value, t);
+        else param.setValueAtTime(value, t);
+        param.linearRampToValueAtTime(target, t + fade);
+      }
+      from = mix; to = next; start = t;
+    };
+    g.ready = Promise.resolve().then(() => probe(set)).then(value => {
+      if (Number.isFinite(value) && value > 0) {
+        makeup = Math.max(1, value);
+        g.set(g.on);
+      }
+      return g;
+    }, () => g);
+    return g;
+  };
+
   // the mixer's output and the duck bus, made once (MX.master, MX.bus)
   BL.out = (MX, ctx) => {
     if (!MX.master) {
       MX.master = ctx.createGain(); MX.master.gain.value = MASTER_LEVEL; BL.mxRoute(MX);
       MX.bus = BL.duckBus(ctx);
       MX.bus.v = BL.vduckBus(ctx);
-      MX.bus.rev = BL.reverb(ctx, MX.master, MX.reverb);   // every chain made on this bus gets a send to it
+      MX.bus.d = BL.gduckBus(ctx);
+      MX.bus.g = BL.drumGroup(ctx, MX.master);
+      MX.bus.g.set(MX.glue?.on !== false);
+      MX.bus.rev = BL.reverb(ctx, MX.bus.g.rest, MX.reverb);   // every chain made on this bus gets a send to it
     }
     return MX;
   };
@@ -1993,63 +2040,82 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   };
   BL.legacyHarmDb = (p, hc) => p.hup ? -20 * Math.log10(BL.harmComp({ harm: p.harm }, hc)) : 0;
 
-  // EQ and the bass duck, then the vocal duck, volume and output. The key taps follow the volume.
+  // EQ and the bass duck, then the vocal and drum dips, volume and output. The key taps follow the volume.
   // Harmonics add overtones to help the bass carry on small speakers. The wet paths are the soft clipper (hg) and the octave (hgo).
   BL.mkChain = (ctx, out, bus) => {
+    const group = bus.g?.out === out ? bus.g : null, dest = group ? group.rest : out;
     const lo = ctx.createBiquadFilter(), mid = ctx.createBiquadFilter(), hi = ctx.createBiquadFilter(),
       duck = ctx.createBiquadFilter(), dk = ctx.createGain(), vol = ctx.createGain(), key = ctx.createGain(),
       send = ctx.createGain(), dl = ctx.createDelay(2), fb = ctx.createGain(), lp = ctx.createBiquadFilter();
     lo.type = 'lowshelf'; lo.frequency.value = 200; mid.type = 'peaking'; mid.frequency.value = 1000; mid.Q.value = 0.8;
     hi.type = 'highshelf'; hi.frequency.value = 5000; lp.type = 'lowpass'; lp.frequency.value = 4500; fb.gain.value = 0.35;
     duck.type = 'lowshelf'; duck.frequency.value = BL.DUCK.fc; duck.gain.value = 0; dk.gain.value = 0; key.gain.value = 0;
-    const { fc, bands, q } = BL.VDUCK, vbus = bus.v;
-    const vkey = ctx.createGain(), vduck = ctx.createBiquadFilter(), vdk = ctx.createGain();
+    const { fc, bands, q } = BL.VDUCK, vbus = bus.v, gbus = bus.d;
+    const vkey = ctx.createGain(), gkey = ctx.createGain(), vduck = ctx.createBiquadFilter(), vdk = ctx.createGain();
     vduck.type = 'highshelf'; vduck.frequency.value = fc; vdk.gain.value = 0;
-    const vb = bands.map(f => {
+    const peak = (frequency, q) => {
       const filter = ctx.createBiquadFilter();
-      filter.type = 'peaking'; filter.frequency.value = f; filter.Q.value = q;
+      filter.type = 'peaking'; filter.frequency.value = frequency; filter.Q.value = q;
       return filter;
-    });
-    const vbk = vb.map(() => { const amount = ctx.createGain(); amount.gain.value = 0; return amount; });
+    };
+    const vb = bands.map(f => peak(f, q)), glow = peak(BL.GDUCK.bands[0], BL.GDUCK.q);
+    const bandFilters = [glow, ...vb];
+    const amount = () => new GainNode(ctx, { gain: 0 });
+    const vbk = vb.map(amount), gbk = bandFilters.map(amount);
     const inp = ctx.createGain(), harmonics = harmonicsPath(ctx), octave = harmonicsPath(ctx, 'oct');
     const hg = harmonics.out, hgo = octave.out;
-    const vin = vbus ? ctx.createGain() : vol;
+    const vin = vbus || gbus ? ctx.createGain() : vol;
     inp.connect(lo); inp.connect(harmonics.in); hg.connect(vin); inp.connect(octave.in); hgo.connect(vin);
-    lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vin); vol.connect(out);
-    if (vbus) { vin.connect(vol); vol.connect(vkey); }
+    lo.connect(mid); mid.connect(hi); hi.connect(duck); duck.connect(vin); vol.connect(dest);
+    if (vin !== vol) vin.connect(vol);
+    if (vbus) vol.connect(vkey);
+    if (gbus) vol.connect(gkey);
     send.gain.value = 0;
     send.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl);
     vol.connect(key); key.connect(bus.in); bus.env.connect(dk);
     const rsend = ctx.createGain(); rsend.gain.value = 0;
     if (bus.rev) { vol.connect(rsend); rsend.connect(bus.rev.in); }
-    const c = { in: inp, out, lo, mid, hi, duck, dk, key, vol, send, dl, fb, lp, hg, hgo, rsend, ducked: false,
+    const c = { in: inp, out, dest, group, grouped: false, lo, mid, hi, duck, dk, key, vol, send, dl, fb, lp, hg, hgo, rsend, ducked: false,
       dlyOn: false, dlyTimer: null,
-      vkey, vduck, vdk, vb, vbk, vducked: false, vbanded: false };
+      vkey, vduck, vdk, vb, vbk, vducked: false, vbanded: false, gkey, glow, gbk, gbanded: false };
     const tops = { filters: [vduck], amounts: [vdk], levels: [vbus?.env] };
-    const other = { filters: vb, amounts: vbk, levels: vbus?.bands };
-    let path = null, keyed = false;
-    const wire = (mode, method) => {
-      const nodes = [vin, ...(mode?.filters || []), vol];
+    if (!vbus) tops.levels = null;
+    const voice = { filters: vb, amounts: vbk, levels: vbus?.bands };
+    const drums = { filters: bandFilters, amounts: gbk, levels: gbus?.bands };
+    const other = gbus ? bandFilters : vb;
+    let path = null, vkeyed = false, gkeyed = false;
+    const wirePath = (filters, method) => {
+      const nodes = [vin, ...(filters || []), vol];
       nodes.slice(0, -1).forEach((node, i) => node[method](nodes[i + 1]));
-      mode?.amounts.forEach((amount, i) => {
-        mode.levels[i][method](amount);
-        amount[method](mode.filters[i].gain);
-      });
     };
-    c.applyVocalDuck = (s, t, timeConstant) => {
-      if (!vbus) return;
-      if (!!s.vkey !== keyed) {
+    const wireAmounts = ({ amounts, levels, filters }, method) => amounts.forEach((node, i) => {
+      levels[i][method](node);
+      node[method](filters[i].gain);
+    });
+    const setDuck = (bank, flag, db, t, timeConstant) => {
+      const on = !!bank.levels && db > 0;
+      if (on) bank.amounts.forEach(node => node.gain.setTargetAtTime(-db, t, timeConstant));
+      if (on !== c[flag]) wireAmounts(bank, on ? 'connect' : 'disconnect');
+      c[flag] = on;
+    };
+    c.applyDucks = (s, t, timeConstant) => {
+      if (vin === vol) return;
+      if (vbus && !!s.vkey !== vkeyed) {
         if (s.vkey) vkey.connect(vbus.in); else vkey.disconnect(vbus.in);
-        keyed = !!s.vkey;
+        vkeyed = !!s.vkey;
       }
-      const next = s.vduck > 0 ? tops : s.vband > 0 ? other : null;
-      if (next) next.amounts.forEach(amount => amount.gain.setTargetAtTime(-(s.vduck || s.vband), t, timeConstant));
+      if (gbus && !!s.gkey !== gkeyed) {
+        if (s.gkey) gkey.connect(gbus.in); else gkey.disconnect(gbus.in);
+        gkeyed = !!s.gkey;
+      }
+      setDuck(tops, 'vducked', s.vduck, t, timeConstant);
+      setDuck(voice, 'vbanded', s.vband, t, timeConstant);
+      setDuck(drums, 'gbanded', s.gband, t, timeConstant);
+      const next = c.vducked ? tops.filters : c.vbanded || c.gbanded ? other : null;
       if (next !== path) {
-        wire(path, 'disconnect');
-        wire(next, 'connect');
+        wirePath(path, 'disconnect');
+        wirePath(next, 'connect');
         path = next;
-        c.vducked = path === tops;
-        c.vbanded = path === other;
       }
     };
     // Disconnect the shared envelope inputs and the delay feedback loop when a chain is retired.
@@ -2058,11 +2124,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       c.dlyTimer = null;
       c.dlyOn = false;
       bus.env.disconnect(dk);
-      path?.amounts.forEach((amount, i) => path.levels[i].disconnect(amount));
-      if (vbus) vin.disconnect();
-      [inp, ...harmonics.nodes, ...octave.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend, vkey, vduck, vdk, ...vb, ...vbk]
+      if (c.vducked) wireAmounts(tops, 'disconnect');
+      if (c.vbanded) wireAmounts(voice, 'disconnect');
+      if (c.gbanded) wireAmounts(drums, 'disconnect');
+      if (vin !== vol) vin.disconnect();
+      [inp, ...harmonics.nodes, ...octave.nodes, lo, mid, hi, duck, dk, vol, key, send, dl, fb, lp, rsend,
+        vkey, vduck, vdk, ...vb, ...vbk, gkey, glow, ...gbk]
         .forEach(n => n.disconnect());
-      c.vducked = c.vbanded = false;
+      c.vducked = c.vbanded = c.gbanded = false;
     };
     return c;
   };
@@ -2070,15 +2139,24 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // s: {gain (linear), eq: [lo, mid, hi] dB, send, delay (s), key (feeds the bus), duck (dB taken off the lows, 0 = off)}
   BL.applyChain = (c, s, t) => {
     const T = 0.02, oct = s.hk === 'oct', harm = s.harm || 0;
+    if (c.group && !!s.grouped !== c.grouped) {
+      const dest = s.grouped ? c.group.in : c.group.rest;
+      for (const node of c.dlyOn ? [c.vol, c.lp] : [c.vol]) {
+        node.disconnect(c.dest);
+        node.connect(dest);
+      }
+      c.dest = dest;
+      c.grouped = !!s.grouped;
+    }
     c.vol.gain.setTargetAtTime(s.gain, t, T);
     c.lo.gain.setTargetAtTime(s.eq[0], t, T); c.mid.gain.setTargetAtTime(s.eq[1], t, T); c.hi.gain.setTargetAtTime(s.eq[2], t, T);
     c.send.gain.setTargetAtTime(s.send, t, T); c.dl.delayTime.setTargetAtTime(Math.min(1.9, s.delay), t, T);
     if (s.send > 0) {
       if (c.dlyTimer !== null) { clearTimeout(c.dlyTimer); c.dlyTimer = null; }
-      if (!c.dlyOn) { c.vol.connect(c.send); c.lp.connect(c.out); c.dlyOn = true; }
+      if (!c.dlyOn) { c.vol.connect(c.send); c.lp.connect(c.dest); c.dlyOn = true; }
     } else if (c.dlyOn && c.dlyTimer === null) {
       c.dlyTimer = setTimeout(() => {
-        try { c.vol.disconnect(c.send); c.lp.disconnect(c.out); } catch (e) {}
+        try { c.vol.disconnect(c.send); c.lp.disconnect(c.dest); } catch (e) {}
         c.dlyOn = false;
         c.dlyTimer = null;
       }, 4000);
@@ -2091,13 +2169,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     c.dk.gain.setTargetAtTime(-s.duck, t, T);
     const want = s.duck > 0;
     if (want !== c.ducked) { if (want) c.dk.connect(c.duck.gain); else c.dk.disconnect(c.duck.gain); c.ducked = want; }
-    c.applyVocalDuck(s, t, T);
+    c.applyDucks(s, t, T);
   };
 
   // a part's mix settings as applyChain takes them. stem: what its slot plays.
   // o: {on (audible: not muted, not soloed out), fx, bar (seconds), hc (measure for the part's harmonics kind),
-  // DT (note value -> share of a bar), duck: {on, db} | undefined}
+  // DT (note value -> share of a bar), duck: {on, db, ddb} | undefined}
   BL.duckDb = d => d && d.db != null ? Math.max(0, Math.min(BL.DUCK.max, +d.db)) : BL.DUCK.db;
+  BL.gduckDb = d => d?.ddb != null ? Math.max(0, Math.min(BL.GDUCK.max, +d.ddb)) : BL.GDUCK.db;
   BL.mixOf = (p, stem, o) => ({
     gain: o.on ? Math.pow(10, (p.db || 0) / 20) * (o.fx ? BL.harmComp(p, o.hc) : 1) : 0,
     eq: o.fx && p.eqOn !== false ? (p.eq || [0, 0, 0]) : [0, 0, 0],
@@ -2107,11 +2186,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     hk: BL.harmKind(p),
     rev: o.fx && p.revOn !== false ? (p.rev || 0) : 0,
     delay: o.bar * (o.DT[p.dt || '1/8'] || 1 / 8),
+    grouped: stem === 'drums' || stem === 'tops',
+    gkey: stem === 'drums' || stem === 'tops',
     key: stem === 'drums',
     duck: stem === 'bass' && !(o.duck && o.duck.on === false) ? BL.duckDb(o.duck) : 0,
     vkey: stem === 'vocals',
     vduck: stem === 'tops' && o.duck?.on !== false ? BL.duckDb(o.duck) : 0,
     vband: stem === 'other' && o.duck?.on !== false ? BL.duckDb(o.duck) : 0,
+    gband: stem === 'other' && o.duck?.on !== false ? BL.gduckDb(o.duck) : 0,
   });
 
   // ---------------------------------------------------------------- saved state
@@ -2180,8 +2262,13 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
         p.rev || 0, p.revOn !== false, BL.harmAmt(p), !!p.legacyLoop, ...(p.cond ? [p.cond] : []), ...(p.hk === 'oct' ? ['oct'] : [])] : null];
   }), BL.duckSig(s)]);
   // Include the default setting for tracks that have never had their Duck control touched.
-  BL.duckSig = (s, roles = Object.keys(BL.DUCKED)) => (s.order || []).filter(id => roles.includes(s.roles?.[id] || s.slots?.[id]?.stem || id)).map(id => { const d = s.duck?.[id];
-    return [id, !(d && d.on === false), BL.duckDb(d)]; });
+  BL.duckSig = (s, roles = Object.keys(BL.DUCKED), drums = true) => (s.order || []).flatMap(id => {
+    const role = s.roles?.[id] || s.slots?.[id]?.stem || id;
+    if (!roles.includes(role)) return [];
+    const d = s.duck?.[id], entry = [id, d?.on !== false, BL.duckDb(d)];
+    if (drums && role === 'other') entry.push(BL.gduckDb(d));
+    return [entry];
+  });
   BL.changed = () => { const MX = H.MX, i = MX.snapSel; return i != null && !!MX.snaps[i] && BL.snapSig(BL.snapNow()) !== BL.snapSig(MX.snaps[i]); };
   // edits change the mixer, not the snapshot it came from: say so, and point at ↻ (sliders don't redraw the strip)
   BL.markSnap = () => { const b = document.getElementById('snrep'), n = document.getElementById('snnote'); if (!b) return;
@@ -3030,6 +3117,11 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       get: (p, id) => BLEND.duckDb(H.MX.duck[id]),
       put: (p, id, v) => { BLEND.duckOf(id).db = v; },
     },
+    gduck: {
+      ...field('gduck', 0, BLEND.GDUCK.max, 0.5, BLEND.GDUCK.db, 'cut'),
+      get: (p, id) => BLEND.gduckDb(H.MX.duck[id]),
+      put: (p, id, v) => { BLEND.duckOf(id).ddb = v; },
+    },
   });
   TR.fxHTML = id => {
     const p = H.part(id), fx = H.MX.fx !== false;
@@ -3053,15 +3145,17 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
         <output data-mxtrimlen="${id}"></output><button type="button" class="tbtn trfine" data-mxtrimopen="${id}" aria-expanded="${expanded}" title="trim, fade and warp the sample">Shape</button>`);
     } else {
       tail = device('harm', '<span class="trfxlabel">Harmonics</span>' + num('harm', 'amount') + octave, fx && BLEND.harmAmt(p) > 0);
-      if (H.role(id) === 'bass') {
+      const role = H.role(id);
+      if (role === 'bass') {
         const even = !!p.cond;
         tail += device('even', toggle('even', 'Even', even,
           'Hold stray peaks, ease heavy sub and match loudness by ear. Renders the bass again.'), even);
       }
-      const duckLabel = BLEND.DUCKED[H.role(id)];
+      const duckLabel = BLEND.DUCKED[role];
       if (duckLabel) {
         const on = H.MX.duck[id]?.on !== false;
-        tail += device('duck', toggle('duckon', 'Duck', on) + num('duck', duckLabel), on);
+        tail += device('duck', toggle('duckon', 'Duck', on) + num('duck', duckLabel) +
+          (role === 'other' ? num('gduck', 'drums') : ''), on);
       }
     }
     return `<div class="trfx">${eq}${dly}${rev}${tail}</div>`;
@@ -3466,7 +3560,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const isOS=id=>role(id)==='oneshot',has=p=>!!p&&(p.track!=null||!!p.sample);  // a one-shot slot plays a library sample at steps of a cycle; has: the slot holds something
  const KEYS=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'].flatMap(k=>[k,k+'m']);
  // slots have ids; MX.roles[id] is the stem a slot plays (several slots can play one stem); MX.slots[id] is its part
- const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},mast:{on:true,chain:null,built:0},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
+ const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},mast:{on:true,chain:null,built:0},glue:{on:true},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
  const role=id=>MX.roles[id]||id;
  function adopt(sv){const ids=sv.order&&sv.order.length?sv.order:[...new Set([...STEMS,...Object.keys(sv.slots||{})])];MX.order=ids;MX.roles=Object.fromEntries(ids.map(id=>[id,(sv.roles||{})[id]||((sv.slots||{})[id]||{}).stem||(STEMS.includes(id)?id:'other')]))}
  // undo: every saved change of the mixer is a step (a drag is one step); ⌘Z / ⌘⇧Z walk them
@@ -3474,9 +3568,9 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function undoNote(J){if(UN.busy)return;const o=JSON.parse(J);delete o.savedSig;delete o.snapsOf;delete o.name;const k=JSON.stringify(o);
   if(UN.cur===null){UN.cur=k;return}if(k===UN.cur)return;const now=performance.now();
   if(now-UN.t>600||!UN.u.length){UN.u.push(UN.cur);if(UN.u.length>100)UN.u.shift()}UN.t=now;UN.cur=k;UN.r=[]}
- const save=()=>{try{const J=JSON.stringify({v:4,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,master:{on:MX.mast.on},duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
+ const save=()=>{try{const J=JSON.stringify({v:5,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,master:{on:MX.mast.on},glue:{on:MX.glue.on},duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
    return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined,kit:p.kit||undefined,hk:p.hk==='oct'?'oct':undefined,cond:p.cond||undefined}]}))});localStorage.setItem('dcStems',J);undoNote(J)}catch(e){}};
- const sig=(v=4,legacyShape=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:v<4?BLEND.duckSig(MX,['bass']):BLEND.duckSig(MX),...(MX.mast.on?{}:{master:{on:false}}),
+ const sig=(v=5,legacyShape=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:BLEND.duckSig(MX,v<4?['bass']:undefined,v>=5),...(MX.mast.on?{}:{master:{on:false}}),...(MX.glue.on?{}:{glue:{on:false}}),
   snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{
    const p=MX.slots[id];
    if(!has(p))return [role(id),null];
@@ -3495,18 +3589,23 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function restore(sv){
   const {order,roles,slots,snaps,trans,duck}=sv;
   MX.mast.on=sv.master?.on!==false;BLEND.mxRoute(MX);
+  MX.glue.on=sv.glue?.on!==false;MX.bus?.g?.set(MX.glue.on);
   MX.slots=slots||{};
   adopt({order,roles,slots});
   BLEND.adopt(MX,{snaps,trans,duck});
   const v=sv.v||1;
-  if(v>=4)return;
+  if(v>=5)return;
   const clean=MX.savedSig&&(MX.savedSig===sig(v)||(v<2&&MX.savedSig===sig(1,true)));
   for(const mix of [MX,...MX.snaps]){
    mix.duck ||= {};
    for(const id of mix.order||Object.keys(mix.slots||{})){
     const r=mix.roles?.[id]||mix.slots?.[id]?.stem||id;
     // A slot that used to play Bass may still have its old Duck setting.
-    if(r==='other'||r==='tops')mix.duck[id]={on:false,db:BLEND.duckDb(mix.duck[id])};
+    if(v<4&&(r==='other'||r==='tops'))mix.duck[id]={on:false,db:BLEND.duckDb(mix.duck[id])};
+    if(r==='other'){
+     mix.duck[id]||={on:true,db:BLEND.DUCK.db};
+     mix.duck[id].ddb=0;
+    }
    }
    if(v>=3)continue;
    Object.entries(mix.slots||{}).forEach(([id,p])=>{
@@ -3623,8 +3722,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  function retire(id){
   const c=MX.slots[id]?._c;
   stopSrc(id);
-  // Release the vocal bus after the source fade while the delay tail rings out.
-  if(c)setTimeout(()=>c.applyVocalDuck({}),150);
+  // Release the duck buses after the source fade while the delay tail rings out.
+  if(c)setTimeout(()=>c.applyDucks({}),150);
  }
  // one-shots: hits scheduled a little ahead on the mixer's bar clock (16 steps a bar), each through its slot's chain
  let osT=null;const osLive=new Set();
@@ -3907,10 +4006,14 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  window.addEventListener('resize',()=>{if(st.tab==='M')waves()});
  function mxMeter(){
   const el=$('mxgr');if(!el)return;
-  const chain=MX.mast.chain,text=st.tab==='M'&&MX.on&&MX.mast.on&&chain?`${chain.glue.reduction.toFixed(1)} dB`:'';
+  const playing=st.tab==='M'&&MX.on,chain=MX.mast.chain,text=playing&&MX.mast.on&&chain?`${chain.glue.reduction.toFixed(1)} dB`:'';
   if(el.textContent!==text)el.textContent=text;
+  const gl=$('mxglgr'),group=MX.bus?.g;
+  const drums=playing&&MX.glue.on&&group?.wet.gain.value>0&&MX.order.some(id=>(role(id)==='drums'||role(id)==='tops')&&has(MX.slots[id]));
+  const reduction=drums?`${group.comp.reduction.toFixed(1)} dB`:'';
+  if(gl&&gl.textContent!==reduction)gl.textContent=reduction;
  }
- let phRaf=0;function playheads(){phRaf=0;if(MX.mast.on)mxMeter();if(!MX.on||st.tab!=='M')return;MX.order.forEach(id=>{
+ let phRaf=0;function playheads(){phRaf=0;if(MX.mast.on||MX.glue.on)mxMeter();if(!MX.on||st.tab!=='M')return;MX.order.forEach(id=>{
   const p=MX.slots[id],el=document.querySelector(`[data-mxwave="${id}"] i`);if(!p?.buf||!el)return;
   const os=isOS(id),d=os?(p.n||1)*barLenM()*(p.every||1):p.buf.duration;
   const phase=(((AC.currentTime-MX.t0)%d)+d)%d/d,x=os?phase:TR.playhead(id,phase);
@@ -3970,6 +4073,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     <label>tempo <input id="mxbpm" type="number" min="50" max="200" step="1" value="${MX.bpm}" style="width:64px"> bpm</label>
     <label>key <select id="mxkey"><option value="">auto${!MX.key&&I.key?` (${I.key})`:''}</option>${KEYS.map(k=>`<option ${MX.key===k?'selected':''}>${k}</option>`).join('')}</select></label>
     <span class="mxmaster"><label><input id="mxmaster" type="checkbox" ${MX.mast.on?'checked':''}> MASTER</label><span id="mxgr"></span></span>
+    <span class="mxmaster"><label title="light compression on Drums and Tops together"><input id="mxglue" type="checkbox" ${MX.glue.on?'checked':''}> GLUE</label><span id="mxglgr"></span></span>
     <button id="mxall" title="a new part in every unlocked slot, chosen to fit together">${TR.DIE} all</button>
     <span class="mxrate"><button id="mxup" title="this combination works: teaches the recommendations">👍</button><button id="mxdown" title="this doesn't work: teaches the recommendations, and deals a new one">👎</button></span>
     <button id="mxfx" class="${MX.fx!==false?'on':''}" title="all EQ, delay, reverb and harmonics on / off at once (your settings are kept)">FX ${MX.fx!==false?'on':'off'}</button>
@@ -4097,6 +4201,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   else if(t.id==='mxrvdecay'){t.parentNode.querySelector('output').textContent=(+t.value).toFixed(1)+' s'}markSave()});
  L.addEventListener('change',async e=>{if(st.tab!=='M')return;const t=e.target,ds=t.dataset;
   if(t.id==='mxmaster'){MX.mast.on=t.checked;BLEND.mxRoute(MX);mxMeter();save();markSave();return}
+  if(t.id==='mxglue'){MX.glue.on=t.checked;MX.bus?.g?.set(MX.glue.on);mxMeter();save();markSave();return}
   if(t.id==='mxbpm'){MX.bpm=Math.max(50,Math.min(200,+t.value||100));const was=MX.on;if(was)play(false);await sync();MX.order.forEach(apply);if(was)play(true);return}
   if(t.id==='mxkey'){MX.key=t.value;await sync();return}
   if(t.id==='mxexbars'){MX.exBars=+t.value;return}
@@ -4104,6 +4209,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   if(t.id==='mxrvdecay'){BLEND.out(MX,AC);BLEND.setReverb(MX,MX.reverb.type,+t.value);save();markSave();return}  // (on release: the room is rebuilt)
   if(ds.mxrole){const id=ds.mxrole,old=MX.slots[id];if(MX.roles[id]===t.value)return;stopSrc(id);MX.roles[id]=t.value;  // a new role: a new part of that kind, the slot's mix settings stay
    if(old)MX.slots[id]={db:old.db,mute:old.mute,solo:old.solo,eq:old.eq,dly:old.dly,dt:old.dt,fb:old.fb,eqOn:old.eqOn,dlyOn:old.dlyOn,rev:old.rev,revOn:old.revOn,_c:old._c,n:old.n,_v:old._v,_viewMode:old._viewMode,_preset:old._preset,_blank:true};
+   apply(id);  // reroute any echoes while the new part loads
    await roll(id);if(MX.slots[id]&&MX.slots[id]._blank){retire(id);delete MX.slots[id];await sync()}return}
   if(t.id==='mxload'){const m=(MX.saved||[]).find(x=>x.name===t.value);if(!m)return;await openSaved(m);return}
   if(ds.mxwarp){const p=MX.slots[ds.mxwarp];p.warp=+t.value;p._next=null;await sync();return}

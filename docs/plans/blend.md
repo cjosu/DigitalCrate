@@ -24,6 +24,8 @@ line from different songs don't pile up.
   drops 2.8 dB under the kick and is back between kicks, and its 440 Hz moves by less than 0.05 dB.
 - The FX switch does not turn it off: it is a mix fix, not an effect.
 - Vocals feed a second bus that ducks Tops and Other. See [the tracks plan](tracks.md).
+- Drums and Tops feed a third bus that ducks Other in seven bands, and play through a drum group ahead of the
+  mastering chain.
 
 **2. Snapshots.** A snapshot is every slot as it is now (the part, its bars, pitch, volume, EQ, delay, duck), in the
 shape the mixer already saves.

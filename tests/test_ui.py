@@ -1234,7 +1234,7 @@ def test_state_saved_before_blends_still_opens(site, page):
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=120000)
     assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length]") == [0, 0]
-    assert page.evaluate("CRATE.MX.duck") == {"other": {"on": False, "db": 3}}
+    assert page.evaluate("CRATE.MX.duck") == {"other": {"on": False, "db": 3, "ddb": 0}}
     assert page.evaluate("CRATE.MX.duck.bass?.db ?? BLEND.DUCK.db") == 3
 
 
@@ -2096,7 +2096,7 @@ def test_state_saved_before_tracks_still_opens(site, page, bass_harm):
     assert page.evaluate("CRATE.MX.slots.bass.harm") == 1 and page.evaluate("CRATE.MX.slots.drums.db") == -2
     c = page.evaluate("(()=>{const c=CRATE.MX.slots.vocals._c;return [c.lo.frequency.value,c.mid.frequency.value,c.hi.frequency.value,+c.fb.gain.value.toFixed(2)]})()")
     assert c == [200, 1000, 5000, 0.35] and page.evaluate("(CRATE.MX.slots.vocals.ct||0)") == 0
-    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 4
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 5
     page.evaluate("CRATE.TR.set('bass','harm',50)")
     page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.hg.gain.value-0.175)<0.01")
     assert page.locator("[data-mxharm]").count() == 0 and page.locator('[data-mxrow="bass"] .trfx [data-v="bass:harm"]').count() == 1
@@ -2246,7 +2246,7 @@ def test_drums_saved_before_tops_keep_them_on_their_own_track(site, page):
     assert page.evaluate(f"(()=>{{const d=CRATE.MX.slots.drums,t=CRATE.MX.slots['drums~tops'];return {same}&&!d.kit}})()")
     assert page.evaluate(f"(()=>{{const s=CRATE.MX.snaps[0],d=s.slots.drums,t=s.slots['drums~tops'];return s.order[1]==='drums~tops'&&{same}}})()")
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")                 # opening and splitting is not a change
-    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 4
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 5
     page.evaluate("CRATE.MX.snapSel=0"); assert page.evaluate("BLEND.changed()") is False
     page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===2")            # the play-strip view: the rows line up
     page.click("#snplay"); page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready", timeout=90000)
@@ -2408,7 +2408,7 @@ def test_state_saved_before_the_vocal_duck_is_not_ducked(site, page):
     assert page.evaluate("!CRATE.MX.slots.other._c.vbanded&&!CRATE.MX.slots['drums~tops']._c.vducked&&CRATE.MX.slots.bass._c.ducked")
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
     page.evaluate("CRATE.MX.snapSel=0"); assert page.evaluate("BLEND.changed()") is False
-    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 4
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 5
     page.click("#mxclear"); page.click("#mxclear")                                   # a clean slate ducks as a new mixer does
     _roll(page, "other", 902); _roll(page, "vocals", 901)
     page.wait_for_function("CRATE.MX.slots.other._c&&CRATE.MX.slots.other._c.vbanded===true")
@@ -2457,7 +2457,7 @@ def test_vocal_duck_migration_ignores_a_previous_bass_setting(site, page):
     }""")
     page.reload()
     page.wait_for_function("CRATE.MX?.slots.other?.buf", timeout=60000)
-    assert page.evaluate("[CRATE.MX.duck.other, CRATE.MX.snaps[0].duck.other]") == [{"on": False, "db": 12}] * 2
+    assert page.evaluate("[CRATE.MX.duck.other, CRATE.MX.snaps[0].duck.other]") == [{"on": False, "db": 12, "ddb": 0}] * 2
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
 
 
@@ -2921,19 +2921,23 @@ def test_mixer_undo_preserves_new_mix_settings_and_playback(site, page):
     _mixer(site, page)
     page.evaluate("CRATE.mxSync()")
     state = """() => {
-        const {v, master, slots} = JSON.parse(localStorage.getItem('dcStems'));
-        return [v, master.on, slots.bass.cond, slots.bass.hk];
+        const {v, master, glue, slots} = JSON.parse(localStorage.getItem('dcStems'));
+        return [v, master.on, glue.on, slots.bass.cond, slots.bass.hk];
     }"""
     initial = page.evaluate(state)
-    assert initial[:2] == [4, True] and initial[2] and initial[3] == "oct"
+    assert initial[:3] == [5, True, True] and initial[3] and initial[4] == "oct"
     page.evaluate("window.sourceBeforeUndo = CRATE.MX.slots.bass._s")
-    page.wait_for_timeout(700)
-    page.click("#mxmaster")
-    assert page.evaluate(state) == [4, False, *initial[2:]]
-    page.evaluate("CRATE.mxUndo(-1)")
-    assert page.evaluate(state) == initial
-    page.evaluate("CRATE.mxUndo(1)")
-    assert page.evaluate(state) == [4, False, *initial[2:]]
+    for control, index in (("#mxmaster", 1), ("#mxglue", 2)):
+        before = page.evaluate(state)
+        after = before.copy()
+        after[index] = False
+        page.wait_for_timeout(700)
+        page.click(control)
+        assert page.evaluate(state) == after
+        page.evaluate("CRATE.mxUndo(-1)")
+        assert page.evaluate(state) == before
+        page.evaluate("CRATE.mxUndo(1)")
+        assert page.evaluate(state) == after
     assert page.evaluate("CRATE.MX.on && CRATE.MX.slots.bass._s === sourceBeforeUndo")
 
 
@@ -3159,3 +3163,267 @@ def test_the_die_sits_beside_the_song_and_stands_out(site, page):
         assert abs(icon["r"] - icon["l"] - 16) < 0.5 and abs(icon["b"] - icon["t"] - 16) < 0.5, (slot, icon)       # and upright
     assert page.evaluate("getComputedStyle(document.querySelector('[data-mxroll=\"drums\"]')).color"
                          "===getComputedStyle(document.querySelector('#mxplay.on')).backgroundColor")   # in the accent colour
+
+
+GLUE_AUDIO = """async () => {
+  const BL = BLEND, out = {}, db = x => 20 * Math.log10(x + 1e-12);
+  const rms = (d, a, b) => { let s = 0; for (let i = Math.round(a); i < Math.round(b); i++) s += d[i] * d[i]; return Math.sqrt(s / (b - a)); };
+  const O = { fx: false, on: true, bar: 2, DT: { '1/8': 1 / 8 }, duck: { on: false, ddb: 0 } };   // no effects, no ducks: the group alone
+  const buffer = (c, fill) => { const b = c.createBuffer(1, c.length, c.sampleRate); fill(b.getChannelData(0), c.sampleRate); return b; };
+  const click = at => (d, sr) => { d[Math.round(at * sr)] = 0.05; };
+  const tone = (f, a) => (d, sr) => { for (let i = 0; i < d.length; i++) d[i] = a * Math.sin(2 * Math.PI * f * i / sr); };
+  // a kit as the server gives it: a decaying 100 Hz hit every half second, at 0.08 RMS, its peaks held at -8 dBFS
+  const kit = (d, sr) => { for (let i = 0; i < d.length; i++) { const t = (i / sr) % 0.5; d[i] = Math.sin(2 * Math.PI * 100 * t) * Math.exp(-t / 0.05); }
+    const g = 0.08 / rms(d, 0, d.length); for (let i = 0; i < d.length; i++) d[i] = Math.max(-0.398, Math.min(0.398, d[i] * g)); };
+  // the mixer's own output on an offline context. parts: [role, fill]; -> the mix
+  const mix = async (parts, glue, SR = 44100, secs = 4) => {
+    const c = new OfflineAudioContext(1, secs * SR, SR), MX = { glue: { on: glue } }; BL.out(MX, c);
+    await MX.bus.g.ready;
+    for (const [role, fill] of parts) { const ch = BL.mkChain(c, MX.master, MX.bus);
+      BL.applyChain(ch, BL.mixOf({ db: 0 }, role, O), 0);
+      const s = c.createBufferSource(); s.buffer = buffer(c, fill); s.connect(ch.in); s.start(0); }
+    return (await c.startRendering()).getChannelData(0); };
+  // 1. timing: a drum click and a bass click a tenth of a second apart stay a tenth of a second apart
+  const peakAt = (y, a, b) => { let k = Math.round(a); for (let i = k; i < Math.round(b); i++) if (Math.abs(y[i]) > Math.abs(y[k])) k = i; return k; };
+  for (const SR of [44100, 48000]) for (const glue of [true, false]) {
+    const y = await mix([['drums', click(0.1)], ['bass', click(0.2)]], glue, SR, 1);
+    const d = peakAt(y, 0, 0.15 * SR), b = peakAt(y, 0.15 * SR, SR), k = SR + (glue ? 'on' : 'off');
+    out['gap' + k] = (b - d) - 0.1 * SR; out['late' + k] = d - 0.1 * SR; }
+  // 2. how much it takes off, in 10 ms steps over the last two seconds
+  const taken = async parts => { const on = await mix(parts, true), off = await mix(parts, false), w = 441; let most = -99, least = 99;
+    for (let i = 2 * 44100; i + w < on.length; i += w) { const a = rms(off, i, i + w); if (db(a) < -40) continue;
+      const r = db(a) - db(rms(on, i, i + w)); most = Math.max(most, r); least = Math.min(least, r); }
+    return { most, least }; };
+  out.kit = await taken([['drums', kit]]);
+  out.pair = await taken([['drums', kit], ['tops', kit]]);              // Tops go through the same compressor
+  // 3. levels: a quiet drum is not raised, a loud one is held, nothing else is touched
+  const lv = async (role, fill, glue) => db(rms(await mix([[role, fill]], glue), 2 * 44100, 4 * 44100));
+  const change = async (role, fill) => await lv(role, fill, true) - await lv(role, fill, false);
+  out.quiet = await change('drums', tone(1000, 0.01)); out.loud = await change('drums', tone(200, 0.5));
+  for (const r of ['bass', 'vocals', 'other', 'oneshot']) out[r] = await change(r, tone(200, 0.5));
+  // 4. before the make-up is measured, a failed measurement, a role that changes, and chains that are not on the group
+  { const c = new OfflineAudioContext(1, 44100, 44100), MX = {}; BL.out(MX, c); const g = MX.bus.g;
+    out.early = [g.wet.gain.value, g.dry.gain.value];
+    const ch = BL.mkChain(c, MX.master, MX.bus), seen = [];
+    for (const role of ['drums', 'other', 'tops', 'bass']) { BL.applyChain(ch, BL.mixOf({ db: 0, dly: 0.3 }, role, { ...O, fx: true }), 0); seen.push(ch.grouped); }
+    out.moved = seen; ch.drop();
+    const own = BL.mkChain(c, c.createGain(), MX.bus); BL.applyChain(own, BL.mixOf({ db: 0 }, 'drums', O), 0); out.own = own.grouped;
+    const bare = BL.mkChain(c, c.destination, BL.duckBus(c)); BL.applyChain(bare, BL.mixOf({ db: 0 }, 'drums', O), 0); bare.drop(); out.bare = bare.grouped;
+    const failed = BL.drumGroup(c, c.destination, () => Promise.reject(new Error('no probe')));
+    await failed.ready; out.failed = [failed.wet.gain.value, failed.dry.gain.value]; }
+  // 5. A switch during a fade carries on from that fade's current gain.
+  { const sr = 48000, c = new OfflineAudioContext(1, sr, sr);
+    const g = BL.drumGroup(c, c.destination); g.set(false); await g.ready;
+    const signal = new ConstantSourceNode(c); signal.connect(g.dry); signal.start();
+    g.set(true, 0.020); g.set(false, 0.025);
+    const dry = (await c.startRendering()).getChannelData(0);
+    out.interrupted = [0.022, 0.024, 0.025, 0.027].map(t => dry[Math.round(t * sr)]); }
+  return out;
+}"""
+
+
+def test_glue_audio(page):
+    """The drum group, measured offline. Drums and Tops are held a little and never raised; nothing else is touched;
+    nothing moves in time, with the glue on or off; and the drums play before the make-up gain is known."""
+    o = page.evaluate(GLUE_AUDIO)
+    for sr, late in ((44100, 264), (48000, 288)):
+        for sw in ("on", "off"):
+            assert abs(o[f"gap{sr}{sw}"]) <= 1 and abs(o[f"late{sr}{sw}"] - late) <= 1, (sr, sw, o)
+    assert 0.3 < o["kit"]["most"] < 2.5 and o["kit"]["least"] > -0.2, o["kit"]   # light, and never louder
+    assert o["pair"]["most"] > o["kit"]["most"] + 0.5
+    assert abs(o["quiet"]) < 0.3 and o["loud"] < -1.5                             # no make-up gain; a loud tone is held
+    assert all(abs(o[r]) < 0.05 for r in ("bass", "vocals", "other", "oneshot"))
+    assert o["early"] == [0, 1] and o["failed"] == [0, 1]
+    assert o["moved"] == [True, False, True, False] and o["own"] is False and o["bare"] is False
+    assert o["interrupted"] == pytest.approx([0.8, 0.6, 0.5, 0.6], abs=0.002)
+
+
+def test_glue_is_on_by_default_switches_off_and_is_kept(site, page):
+    page.evaluate("""() => {
+        const render = OfflineAudioContext.prototype.startRendering;
+        const probe = new Promise(resolve => { window.releaseGlueProbe = resolve; });
+        OfflineAudioContext.prototype.startRendering = function () {
+            if (this.length === 48000 && this.sampleRate === 48000) return probe.then(() => render.call(this));
+            return render.call(this);
+        };
+    }""")
+    _kits(site); _mixer(site, page); _roll(page, "drums", 904); _roll(page, "tops", 905)
+    assert page.locator(".mxmaster:has(#mxmaster) + .mxmaster #mxglue").count() == 1
+    assert page.is_checked("#mxglue")
+    page.wait_for_function("(()=>{const g=CRATE.MX.bus&&CRATE.MX.bus.g,c=id=>CRATE.MX.slots[id]._c;return g&&g.on&&['drums','tops'].every(id=>c(id)&&c(id).grouped)&&['bass','vocals','other'].every(id=>c(id)&&!c(id).grouped)})()")
+    assert page.inner_text("#mxglgr") == ""
+    page.evaluate("releaseGlueProbe()")
+    page.wait_for_function("CRATE.MX.bus.g.wet.gain.value>0.5&&CRATE.MX.bus.g.dry.gain.value<0.01")   # the make-up is measured and taken out (about 0.67)
+    page.wait_for_function(r"/^-?\d+\.\d dB$/.test(document.getElementById('mxglgr').textContent)")
+    with_glue = page.evaluate("CRATE.mxSig()")
+    assert '"glue"' not in with_glue                                                 # on is not a change: older saves still match
+    page.click("#mxfx")                                                              # the glue is not an effect
+    page.wait_for_function("CRATE.MX.fx===false&&CRATE.MX.bus.g.on===true&&CRATE.MX.bus.g.wet.gain.value>0.5")
+    page.click("#mxfx")
+    page.uncheck("#mxglue")
+    page.wait_for_function("CRATE.MX.glue.on===false&&CRATE.MX.bus.g.wet.gain.value<0.01&&CRATE.MX.bus.g.dry.gain.value>0.99")
+    assert page.inner_text("#mxglgr") == "" and page.evaluate("CRATE.mxSig()") != with_glue
+    page.check("#mxglue")
+    for s in ("drums", "tops"):                                                      # no drums: nothing to read
+        _more(page, s); page.click(f'[data-mxdel="{s}"]'); page.wait_for_function(f"!CRATE.MX.slots['{s}']")
+        if s == "drums":
+            assert page.inner_text("#mxglgr").endswith(" dB")                        # Tops alone still use the group
+    page.wait_for_function("document.getElementById('mxglgr').textContent===''")
+    page.uncheck("#mxglue")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&document.getElementById('mxglue')", timeout=30000)
+    assert not page.is_checked("#mxglue") and page.evaluate("JSON.parse(localStorage.getItem('dcStems')).glue.on") is False
+    for w in (1512, 1280):                                                           # the longer top row still fits
+        page.set_viewport_size({"width": w, "height": 800}); page.wait_for_timeout(200)
+        assert page.evaluate("[...document.querySelectorAll('.mxmaster,.mxmaster *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+
+
+GDUCK_AUDIO = """async () => {
+  const BL = BLEND, SR = 44100, N = 4 * SR, out = {}, db = x => 20 * Math.log10(x + 1e-12);
+  const rms = (d, a, b) => { let s = 0; for (let i = Math.round(a); i < Math.round(b); i++) s += d[i] * d[i]; return Math.sqrt(s / (b - a)); };
+  const buffer = (c, fill) => { const b = c.createBuffer(1, N, SR); fill(b.getChannelData(0)); return b; };
+  // a "drum": a burst of one frequency, len seconds long, every `every` seconds, at the loudness the server gives every part
+  const hit = (f, len, every) => d => { for (let i = 0; i < N; i++) { const t = i / SR; d[i] = (t % every) < len ? Math.sin(2 * Math.PI * f * t) : 0; }
+    const g = 0.08 / rms(d, 0, N); for (let i = 0; i < N; i++) d[i] *= g; };
+  const kick = hit(125, 0.1, 0.5), snare = hit(500, 0.1, 0.5), hat = hit(8000, 0.05, 0.25);
+  const sung = d => { for (let i = 0; i < N; i++) d[i] = 0.113 * Math.sin(2 * Math.PI * 500 * i / SR); };   // a held 500 Hz note at 0.08 RMS
+  // what is ducked: four steady tones, so each band's level is easy to read
+  const TONES = [125, 500, 4000, 8000];
+  const bed = d => { for (let i = 0; i < N; i++) { let v = 0; for (const f of TONES) v += 0.03 * Math.sin(2 * Math.PI * f * i / SR); d[i] = v; } };
+  const O = { fx: true, bar: 2, DT: { '1/8': 1 / 8 } };
+  // one track of this role under these keys ([role, fill, dB, on]); -> that track alone
+  const run = async (role, duck, keys) => {
+    const c = new OfflineAudioContext(2, N, SR), merge = c.createChannelMerger(2); merge.connect(c.destination);
+    const MX = {}; BL.out(MX, c); MX.master.disconnect();
+    const outT = c.createGain(), outK = c.createGain(); outT.connect(merge, 0, 0); outK.connect(merge, 0, 1);
+    const play = (fill, ch) => { const s = c.createBufferSource(); s.buffer = buffer(c, fill); s.connect(ch.in); s.start(0); };
+    const ct = BL.mkChain(c, outT, MX.bus);
+    BL.applyChain(ct, BL.mixOf({ db: 0 }, role, { ...O, on: true, duck }), 0); play(bed, ct);
+    for (const [r, fill, level = 0, on = true] of keys) { const ck = BL.mkChain(c, outK, MX.bus);
+      BL.applyChain(ck, BL.mixOf({ db: level }, r, { ...O, on }), 0); play(fill, ck); }
+    return (await c.startRendering()).getChannelData(0); };
+  const band = async (data, f0) => { const c = new OfflineAudioContext(1, data.length, SR), b = c.createBuffer(1, data.length, SR); b.getChannelData(0).set(data);
+    const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = f0; f.Q.value = 4;
+    const s = c.createBufferSource(); s.buffer = b; s.connect(f); f.connect(c.destination); s.start(0);
+    return (await c.startRendering()).getChannelData(0); };
+  const ref = {}, flat = await run('other', { on: false }, []);
+  for (const f of TONES) ref[f] = await band(flat, f);
+  // the dip at f over a window counted from the hit that starts at 2 s (every window is whole cycles of 125 Hz)
+  const dip = async (y, f, a, b) => db(rms(await band(y, f), (2 + a) * SR, (2 + b) * SR)) - db(rms(ref[f], (2 + a) * SR, (2 + b) * SR));
+  const EARLY = [0.016, 0.04], HELD = [0.052, 0.1], SOON = [0.16, 0.2], REST = [0.3, 0.46], HAT = [0.02, 0.048];
+  const D12 = { on: true, db: 0, ddb: 12 }, K = [['drums', kick]];
+  const held = async (role, duck, keys, f = 125) => dip(await run(role, duck, keys), f, ...HELD);
+  { const y = await run('other', D12, K);
+    out.kick = { early: await dip(y, 125, ...EARLY), held: await dip(y, 125, ...HELD), soon: await dip(y, 125, ...SOON), rest: await dip(y, 125, ...REST),
+      top: await dip(y, 4000, ...HELD) }; }
+  out.first = await held('other', undefined, K);                        // no setting yet: on, 2 dB
+  out.off = await held('other', { on: false, db: 0, ddb: 12 }, K);
+  out.zero = await held('other', { on: true, db: 0, ddb: 0 }, K);
+  out.muted = await held('other', D12, [['drums', kick, 0, false]]);
+  out.quiet = await held('other', D12, [['drums', kick, -18]]);
+  out.two = await held('other', D12, [['drums', kick], ['drums', kick]]);
+  { const y = await run('other', D12, [['tops', hat]]);                // hats on a Tops track: Other's top gives way, its lows do not
+    out.hat = { top: await dip(y, 8000, ...HAT), low: await dip(y, 125, ...HAT) }; }
+  { const y = await run('other', { on: true, db: 6, ddb: 6 }, [['vocals', sung], ['drums', snare]]);   // a snare on a sung note: the dips add
+    out.both = { hit: await dip(y, 500, ...HELD), between: await dip(y, 500, ...REST) }; }
+  for (const r of ['drums', 'tops', 'bass', 'vocals', 'oneshot']) out[r] = await held(r, D12, K);
+  // one chain, its track's role and its Duck changed
+  { const c = new OfflineAudioContext(1, SR, SR), MX = {}; BL.out(MX, c); const ch = BL.mkChain(c, c.destination, MX.bus), seen = [];
+    const set = (role, duck) => { BL.applyChain(ch, BL.mixOf({ db: 0 }, role, { ...O, on: true, duck }), 0); seen.push([ch.ducked, ch.vducked, ch.vbanded, ch.gbanded]); };
+    set('bass'); set('other'); set('tops'); set('other', { on: true, db: 0, ddb: 2 }); set('other', { on: true, db: 3, ddb: 0 }); set('other', { on: false, db: 3, ddb: 2 });
+    out.switched = seen; ch.drop(); }
+  // a chain on a bus that has no drum bus
+  { const c = new OfflineAudioContext(1, SR, SR), ch = BL.mkChain(c, c.destination, BL.duckBus(c));
+    BL.applyChain(ch, BL.mixOf({ db: 0 }, 'other', { ...O, on: true }), 0); ch.drop(); out.bare = ch.gbanded; }
+  return out;
+}"""
+
+
+def test_drum_duck_audio(page):
+    """Other under the drums, measured offline. It gives way where the drums are, by close to its amount, quickly,
+    and is back quickly; the dips add to the vocals'; nothing else is ducked by the drums."""
+    o = page.evaluate(GDUCK_AUDIO)
+    k = o["kick"]
+    assert -15.0 < k["held"] < -8.0 and k["top"] > -1.0                # at 12 dB: down at 125 Hz, 4 kHz left alone
+    assert k["early"] < -4.0                                           # quick attack: well on its way within 40 ms
+    assert k["soon"] > -1.5 and k["rest"] > -0.5                       # quick release: back within 100 ms of the hit's end
+    assert -3.0 < o["first"] < -1.2                                    # at 2 dB, the amount it starts with
+    assert o["off"] > -0.1 and o["zero"] > -0.1 and o["muted"] > -0.1
+    assert o["quiet"] > k["held"] + 3                                  # a quieter kit ducks less
+    assert o["two"] > k["held"] - 2.0                                  # two kits: hardly deeper than one
+    assert o["hat"]["top"] < -6.0 and o["hat"]["low"] > -1.0           # Tops feed it too, and it is by frequency
+    b = o["both"]                                                      # 6 dB each: the vocal alone between hits, both on a hit
+    assert -9.0 < b["between"] < -3.0 and -19.0 < b["hit"] < b["between"] - 3.0
+    assert all(o[r] > -0.1 for r in ("drums", "tops", "bass", "vocals", "oneshot"))
+    F, T = False, True
+    assert o["switched"] == [[T, F, F, F], [F, F, T, T], [F, T, F, F], [F, F, F, T], [F, F, T, F], [F, F, F, F]] and o["bare"] is False
+
+
+def test_drums_duck_other(site, page):
+    _kits(site); _mixer(site, page); _roll(page, "drums", 904); _roll(page, "tops", 905)
+    assert page.locator('[data-mxduckon="other"]').count() == 1                      # still one switch
+    text = page.inner_text('[data-mxrow="other"] [data-dev="duck"]')
+    assert "vocals" in text and "drums" in text
+    assert all("drums" not in page.inner_text(f'[data-mxrow="{s}"] [data-dev="duck"]') for s in ("tops", "bass"))
+    page.wait_for_function("(()=>{const c=id=>CRATE.MX.slots[id]._c;return c('other').gbanded&&c('other').vbanded&&!c('tops').gbanded&&!c('bass').gbanded})()")
+    assert page.evaluate("BLEND.gduckDb(CRATE.MX.duck.other)") == 2
+    page.click("#mxfx")                                                              # the ducks are not effects
+    page.wait_for_function("CRATE.MX.fx===false&&CRATE.MX.slots.other._c.gbanded===true")
+    page.click("#mxfx")
+    page.fill("#mxname", "room"); page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
+    page.click("#mxsave"); page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.evaluate("CRATE.TR.set('other','gduck',5)")
+    assert "dirty" in page.get_attribute("#mxsave", "class") and page.evaluate("BLEND.changed()") is True
+    assert page.evaluate("BLEND.gduckDb(CRATE.MX.snaps[0].duck.other)") == 2         # the snapshot keeps its own amount
+    page.evaluate("CRATE.TR.set('other','gduck',0)")                                 # 0 is off, for the drums alone
+    page.wait_for_function("(c=>!c.gbanded&&c.vbanded)(CRATE.MX.slots.other._c)")
+    page.evaluate("CRATE.TR.set('other','gduck',5)")
+    page.click('[data-mxduckon="other"]')                                            # the one switch turns both off
+    page.wait_for_function("(c=>!c.gbanded&&!c.vbanded)(CRATE.MX.slots.other._c)")
+    page.click('[data-mxduckon="other"]')
+    page.wait_for_function("(c=>c.gbanded&&c.vbanded)(CRATE.MX.slots.other._c)")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.duck.other", timeout=30000)
+    assert page.evaluate("CRATE.MX.duck.other") == {"on": True, "db": 3, "ddb": 5}
+    for w in (1512, 1280):                                                           # the longer row still fits
+        page.set_viewport_size({"width": w, "height": 800}); page.wait_for_timeout(200)
+        assert page.evaluate("[...document.querySelectorAll('.trfx,.trfx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+
+
+def test_state_saved_before_the_drum_duck_is_not_ducked_by_the_drums(site, page):
+    _old_state(site, page, 904)                                                      # v 2, clean, one snapshot
+    page.wait_for_function("CRATE.MX.slots.other&&CRATE.MX.slots.other.buf", timeout=60000)
+    zero = "(d=>!!d.other&&d.other.ddb===0)"
+    assert page.evaluate(f"{zero}(CRATE.MX.duck)") and page.evaluate(f"{zero}(CRATE.MX.snaps[0].duck)")
+    page.click("#mxplay")
+    page.wait_for_function("CRATE.MX.slots.other._c")
+    assert page.evaluate("CRATE.MX.slots.other._c.gbanded") is False
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 5
+    # a state saved with the vocal duck, before the drums': Other keeps its vocal duck and gets none from the drums
+    page.click("#mxclear"); page.click("#mxclear")
+    _roll(page, "other", 902); _roll(page, "vocals", 901); _roll(page, "drums", 904)
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
+    page.fill("#mxname", "four"); page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.evaluate("""() => { const s = JSON.parse(localStorage.getItem('dcStems')); s.v = 4;
+      for (const mix of [s, ...s.snaps]) for (const d of Object.values(mix.duck || {})) delete d.ddb;
+      s.savedSig = CRATE.mxSig(4); localStorage.setItem('dcStems', JSON.stringify(s)); }""")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.other&&CRATE.MX.slots.other.buf", timeout=60000)
+    mix = page.evaluate("(m=>[m.vband,m.gband])(BLEND.mixOf(CRATE.MX.slots.other,'other',{on:true,fx:true,bar:2,DT:{},duck:CRATE.MX.duck.other}))")
+    assert mix == [3, 0] and page.evaluate("CRATE.MX.duck.other.ddb") == 0
+    assert page.evaluate(f"{zero}(CRATE.MX.snaps[0].duck)")
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+
+
+def test_playback_groups_the_drums_and_ducks_other_under_them(site, page):
+    _strip(site, page)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    assert page.evaluate("CRATE.PB.voice('drums','a').chain.grouped") is True        # A's drums, in the group
+    assert page.evaluate("CRATE.PB.voice('bass','a').chain.grouped") is False
+    assert page.evaluate("CRATE.PB.voice('other','a').chain.gbanded") is True        # A's Other, under the drums
+    assert page.evaluate("CRATE.PB.voice('bass','a').chain.ducked") is True          # and the bass's own duck is as it was

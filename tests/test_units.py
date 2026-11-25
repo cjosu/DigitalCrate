@@ -754,18 +754,79 @@ def test_one_shot_export_uses_warp_length_and_fractional_pitch(tmp_path, monkeyp
     assert warped == [(1, 2.25)]
 
 
-def _fake_kit_song(tmp, tid, bpm, hats=True, kick=True):
+def _fake_kit_song(tmp, tid, bpm, hats=True, kick=True, *, kick_len=0.25, kick_hz=60, kick_amp=0.5):
     """_fake_stem_song, with drums that are a 60 Hz kick on every beat and an 8 kHz hat on every off-beat."""
     import soundfile as sf
     from digitalcrate import stems
     _fake_stem_song(tmp, tid, bpm, 0, "major", 0)
     n = sf.info(str(stems.DIR / f"t{tid}" / "drums.flac")).frames
     t, beat = np.arange(n) / SR, 60.0 / bpm
-    k = (0.5 * (np.modf(t / beat)[0] < 0.25) * np.sin(2 * np.pi * 60 * t)).astype(np.float32) * kick
+    k = (kick_amp * (np.modf(t / beat)[0] < kick_len) * np.sin(2 * np.pi * kick_hz * t)).astype(np.float32) * kick
     h = (0.2 * (np.modf(t / beat + 0.5)[0] < 0.1) * np.sin(2 * np.pi * 8000 * t)).astype(np.float32) * hats
     sf.write(str(stems.DIR / f"t{tid}" / "drums.flac"), np.stack([k + h, k + h]).T, SR, format="FLAC", subtype="PCM_16")
     z = np.zeros((2, n), np.float32)
     return lambda drums: dict(kick=np.stack([k, k]), snare=z, toms=z, hh=np.stack([h, h]), ride=z, crash=z)
+
+
+def test_tame_holds_peaks_and_leaves_the_rest():
+    from digitalcrate import stems
+    n = stems.C.SR
+    t = np.arange(n) / n
+    y = 0.1 * np.sin(2 * np.pi * 200 * t)
+    y[n // 2:n // 2 + 200] += 0.8 * np.hanning(200)                    # one hit, far over the ceiling
+    ref = np.stack([y, 0.5 * y]).astype(np.float32)
+    g = stems.tame(ref)
+    assert abs(20 * np.log10(stems.PEAK_CEILING) + 8) < 1e-9
+    assert g.shape == (n,) and g.dtype == np.float32 and g.max() <= 1.0
+    assert np.abs(ref * g).max() <= stems.PEAK_CEILING + 1e-4
+    assert np.abs(ref * g).max() > 0.95 * stems.PEAK_CEILING            # held at the ceiling, not pushed under it
+    away = np.r_[0:n // 2 - 1000, n // 2 + 1200:n]
+    assert g[away].min() > 0.9999                                       # nothing away from the hit is touched
+    assert stems.tame(0.9 * stems.PEAK_CEILING * np.sign(ref)).min() > 0.9999   # a part under the ceiling: untouched
+
+
+def test_drum_peaks_are_tamed_at_render_and_the_kit_still_adds_up(tmp_path, monkeypatch):
+    import soundfile as sf
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    stems._LIB.update(n=-1, lib={})
+    split = _fake_kit_song(tmp_path, 1, 100, kick_len=0.02, kick_hz=200, kick_amp=0.9)   # a spiky kit: its hits level to about -3 dBFS
+    read = lambda f: sf.read(str(f), dtype="float32", always_2d=True)[0]
+    c = stems.PEAK_CEILING
+    calls, real = [], stems.tame
+    monkeypatch.setattr(stems, "tame", lambda ref: calls.append(1) or real(ref))
+    stems.render(1, "bass", 4, 4, 100)
+    assert not calls                                                    # only Drums and Tops are tamed
+    kit = read(stems.render(1, "drums", 4, 4, 100))
+    assert calls and 0.95 * c < np.abs(kit).max() <= c + 1e-3
+    stems.make_tops(1, split=split, embed=lambda s: np.ones(512, np.float32))
+    d, t = stems.render(1, "drums", 4, 4, 100), stems.render(1, "tops", 4, 4, 100)
+    assert np.abs(read(d) + read(t) - kit).max() < 2e-4                 # one curve, the kit's: they still add up
+    assert np.abs(read(d)).max() <= c + 1e-3
+
+
+@pytest.mark.parametrize("version", [5, 7])
+def test_cached_split_plays_when_the_tops_source_is_missing(tmp_path, monkeypatch, version):
+    import hashlib
+    from digitalcrate import stems
+
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    stems._LIB.update(n=-1, lib={})
+    split = _fake_kit_song(tmp_path, 1, 100)
+    stems.make_tops(1, split=split, embed=lambda s: np.ones(512, np.float32))
+    cached = {}
+    for role in ("drums", "tops"):
+        path = stems.render(1, role, 4, 4, 100)
+        key = hashlib.sha1(f"1|{role}|4|4|1.0|100.00|0.00|v{version}".encode()).hexdigest()[:16]
+        cached[role] = path.rename(stems.CACHE / f"{key}.wav") if version == 5 else path
+
+    (stems.DIR / "t1" / "tops.flac").unlink()
+    assert not stems.tops_ready(1)
+    for role, path in cached.items():
+        assert stems.render(1, role, 4, 4, 100, with_tops=True) == path
+        assert stems.render(1, role, 4, 4, 100) == path
 
 
 def test_a_songs_tops_are_made_and_known(tmp_path, monkeypatch):

@@ -121,10 +121,14 @@ Hover over the song for the full name and why that part was picked.
 - **Even** holds down stray bass peaks. It eases heavy sub when there is enough bass above it to balance against.
   It brings bass parts closer in loudness by ear. New bass parts start with Even on, and older parts open with it
   off. **FX** leaves Even as you set it. The dry Ableton export uses the same bass render.
-- **Duck** starts on at 3 dB. Drums lower the Bass track's lows. Vocals lower the whole Tops track and the bands of
-  Other where the voice is loud. Drag the amount from 0 to 12 dB to set the limit for each dip. **FX** leaves
-  Duck as you set it. A muted vocal ducks nothing. Combinations saved before vocal ducking open with it off on
-  Tops and Other.
+- **GLUE**, beside **MASTER**, holds the loudest hits a little across Drums and Tops together. The number shows how
+  much it is taking off while you play. Glue starts on and stays as set when you switch **FX**. When a drum part is
+  prepared, its gain follows a −8 dBFS peak ceiling on its source kit.
+- **Duck** starts on. Drums lower the Bass track's lows. Vocals lower the whole Tops track and the bands of Other
+  where the voice is loud. These amounts start at 3 dB. Other's Duck has **vocals** and **drums** amounts under one
+  switch. The drums amount starts at 2 dB in a new mixer and at 0 in combinations saved before it was added.
+  Drag either amount from 0 to 12 dB to set how much room Other makes. **FX** leaves Duck as you set it. Muted
+  tracks duck nothing. Combinations saved before vocal ducking open with it off on Tops and Other.
 - **One-shot tracks** play a library sample at chosen moments. Set a cycle of 1, 2, 4 or 8 bars and click a step to
   place or remove a hit. The die picks a sample that fits and keeps your steps. **Choose a sample** searches the
   library, **▶** plays it once, and **✦ Mashup** in the sample panel sends the current sample to a one-shot track.
