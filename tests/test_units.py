@@ -708,27 +708,29 @@ def test_mashup_exports_a_live_set(tmp_path, monkeypatch):
              slots=dict(drums=part("drums", 1), other=part("other", 2, ct=25), tops=part("tops", 1), bass=part("bass", 1, cond=1)))
     B = dict(label="B", order=["drums", "other", "bass"], roles={},
              slots=dict(drums=part("drums", 1, db=-8), other=part("other", 2, mute=True), bass=part("bass", 1)))
-    r = stems.export("Unit mash", 100, "C", [A, B], bars=8, reveal=False)
-    assert (r["tracks"], r["clips"], r["sections"]) == (4, 6, 2)
+    C = dict(label="C", order=["bass"], roles={}, slots=dict(bass=part("bass", 1, n=2, k=2, cond=1)))
+    r = stems.export("Unit mash", 100, "C", [A, B, C], bars=8, reveal=False)
+    assert (r["tracks"], r["clips"], r["sections"]) == (4, 7, 3)
     dest = tmp_path / "ableton" / "Mashups" / "Unit mash"
     ls = ET.parse(gzip.open(dest / r["als"])).getroot().find("LiveSet")
-    assert [(l.find("Time").get("Value"), l.find("Name").get("Value")) for l in ls.iter("Locator")] == [("0", "A"), ("32", "B")]
+    assert [(l.find("Time").get("Value"), l.find("Name").get("Value")) for l in ls.iter("Locator")] == [("0", "A"), ("32", "B"), ("64", "C")]
     tr = [t for t in ls.find("Tracks") if t.tag == "AudioTrack"]
     clips = [list(t.iter("AudioClip")) for t in tr]
-    assert [len(c) for c in clips] == [2, 1, 1, 2]                              # the muted "other" has no clip in B
+    assert [len(c) for c in clips] == [2, 1, 1, 3]                              # the muted "other" has no clip in B
     d0, d1 = clips[0]
     assert (d0.get("Time"), d0.find("CurrentEnd").get("Value"), d0.find("Loop/LoopEnd").get("Value"), d0.find("Loop/LoopOn").get("Value")) == ("0", "32", "16", "true")
     assert abs(float(d1.find("SampleVolume").get("Value")) - 10 ** (-6 / 20)) < 1e-3   # 6 dB lower in B: the clip's gain
     assert abs(float(tr[0].find("DeviceChain/Mixer/Volume/Manual").get("Value")) - 10 ** (-2 / 20)) < 1e-3
     for f in (dest / "Parts").glob("*.wav"):                                    # every part is exactly its bars at the tempo
         i = sf.info(str(f))
-        assert i.frames == round(4 * 240 / 100 * SR)
+        assert i.frames == round(4 * 240 / 100 * SR) or (f.name.startswith("Bass") and i.frames == round(2 * 240 / 100 * SR))
     assert "-1.75st" in next(f.name for f in (dest / "Parts").glob("Other*"))  # D major to C plus 25 cents
     assert tr[2].find("Name/EffectiveName").get("Value").startswith("Tops")
     assert next((dest / "Parts").glob("Tops*")).read_bytes() == stems.render(1, "tops", 4, 4, 100).read_bytes()
     bass_files = {f.read_bytes() for f in (dest / "Parts").glob("Bass*")}
-    assert bass_files == {stems.render(1, "bass", 4, 4, 100, cond=cond).read_bytes() for cond in (0, 1)}
-    assert len(bass_files) == 2
+    assert bass_files == {stems.render(1, "bass", 4, n, 100, k=k, cond=cond).read_bytes()
+                          for n, k, cond in [(4, 1, 0), (4, 1, 1), (2, 2, 1)]}
+    assert len(bass_files) == 3
 
 
 def test_one_shot_export_uses_warp_length_and_fractional_pitch(tmp_path, monkeypatch):
@@ -936,6 +938,26 @@ def test_bass_parts_are_evened_out():
     assert time.perf_counter() - t0 < 1.0                                           # (8 bars at 100 bpm; the aim is 0.25 s)
 
 
+def test_even_bass_does_not_raise_a_quiet_loop_with_a_click():
+    from digitalcrate import basscond
+
+    y = _bass("quiet", 2.4) * 10
+    middle = y.shape[1] // 2
+    y[:, middle] = -0.65
+    out = basscond.condition(y, SR)
+    before_click = slice(0, middle // 2)
+    legacy_gain = 0.9 / abs(y[0, middle])
+    assert np.abs(out[:, before_click]).max() <= np.abs(y[:, before_click]).max() * legacy_gain * 1.001
+    y[:, middle] = -0.2
+    assert float(np.abs(basscond.condition(y, SR)).max()) <= 0.9
+    bed = []
+    for amplitude in (0.0019, 0.0020):
+        y = _bass("quiet", 2.4) * (amplitude / 1e-5)
+        y[:, middle] = -0.65
+        bed.append(float(np.abs(basscond.condition(y, SR)[:, before_click]).max()))
+    assert bed[1] / bed[0] < 1.2
+
+
 def test_new_bass_parts_are_rendered_even_and_old_ones_as_before(tmp_path, monkeypatch):
     import soundfile as sf, sqlite3
     from digitalcrate import stems, basscond
@@ -962,3 +984,7 @@ def test_new_bass_parts_are_rendered_even_and_old_ones_as_before(tmp_path, monke
     assert stems.pick("bass", st, slot="bass")["cond"] == basscond.VERSION and "cond" not in stems.pick("other", st, slot="other")
     st["slots"]["bass"] = dict(stems.pick("bass", st, track=1, slot="bass"))
     assert all(a.get("cond") == basscond.VERSION for a in stems.alts(st, "bass"))
+    quiet = _bass("quiet", 2.4)
+    quiet[:, quiet.shape[1] // 2] = -0.2
+    sf.write(str(stems.DIR / "t2" / "bass.flac"), quiet.T, SR, format="FLAC", subtype="PCM_16")
+    assert float(np.abs(read(stems.render(2, "bass", 0, 1, 100, cond=1))).max()) <= 0.9

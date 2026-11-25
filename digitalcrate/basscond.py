@@ -103,10 +103,12 @@ def condition(y, sr):
     length = y.shape[-1]
     if not length:
         return y.copy()
-    rms = _rms(y)
+    source = y
+    input_rms = rms = _rms(y)
     if rms * P["max_gain"] <= P["target"]:
         peak = float(np.abs(y).max())
-        return y * min(P["max_gain"], P["ceil"] / max(peak, 1e-12))
+        gain = min(P["max_gain"], P["ceil"] / max(peak, 1e-12))
+        return np.clip(y * gain, -P["ceil"], P["ceil"])
 
     freq, power = _spectrum(y, sr)
     sub = float(power[(freq >= 30) & (freq < 60)].sum())
@@ -131,5 +133,13 @@ def condition(y, sr):
     energy_gain = _db(P["target"]) - rms_db
     correction = np.clip(P["weigh"] * (rms_db - weighted_db - P["offset"]), -P["swing"], P["swing"])
     gain = min(10 ** ((energy_gain + correction) / 20), P["max_gain"])
+    # A click can mask near-silence until it is limited. Fade in the gain above the plain render
+    # over 12 dB so a small difference in the remaining signal cannot lift a quiet bed abruptly.
+    quiet_edge = _db(P["target"] / P["max_gain"])
+    above_quiet = np.clip((rms_db - quiet_edge) / 12, 0, 1)
+    if above_quiet < 1:
+        input_peak = float(np.abs(source).max())
+        plain_gain = min(P["target"] / input_rms, P["ceil"] / input_peak, P["max_gain"])
+        gain = min(gain, plain_gain * (gain / plain_gain) ** above_quiet)
     y *= np.float32(gain)
     return np.clip(_hold_peaks(y, P["ceil"], edges, rate), -P["ceil"], P["ceil"])

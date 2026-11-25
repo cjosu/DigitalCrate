@@ -380,6 +380,9 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
         y = ref = fit_length(read(source))
     if cond:
         y = basscond.condition(y, C.SR)
+        # Use the largest PCM-16 sample inside the ceiling on either side of zero.
+        limit = np.floor(basscond.P["ceil"] * 32768) / 32768
+        np.clip(y, -limit, limit, out=y)
     else:
         rms, peak = float(np.sqrt(np.mean(ref ** 2) + 1e-12)), float(np.abs(ref).max() + 1e-9)
         y = y * min(TARGET_RMS / rms, 0.9 / peak, 60.0)
@@ -986,6 +989,8 @@ def export(name, bpm, key, sections, bars=8, reveal=True):
                 src = render(p["track"], role, p["bar0"], n, bpm, semis, k, legacy=legacy, cond=cond)
                 b0 = int(p["bar0"])
                 variant = (" legacy" if legacy else "") + (f" even{cond}" if cond else "")
+                if role == "bass":
+                    variant += f" {src.stem}"
                 f = dest / "Parts" / (_safe(f"{role.capitalize()} - {m['artist']} - {m['title']}")[:64]
                                       + f" b{b0 + 1}-{b0 + src_bars(n, k)} {semis:+g}st{variant}.wav")
                 if not f.exists():

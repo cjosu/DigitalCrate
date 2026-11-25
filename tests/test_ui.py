@@ -2482,3 +2482,25 @@ def test_even_bass_prefetch_follows_the_new_role(site, page):
     page.wait_for_function("CRATE.MX.roles.bass === 'other' && !!CRATE.MX.slots.bass?.buf && !CRATE.MX.slots.bass._loading")
     assert page.evaluate("CRATE.MX.slots.bass.stem") == "other"
     assert page.evaluate("CRATE.MX.slots.bass.cond ?? null") is None
+
+
+def test_even_bass_history_keeps_both_renders_of_one_part(site, page):
+    _mixer(site, page)
+    _roll(page, "bass", 901)
+    page.click('[data-mxeven="bass"]')
+    page.wait_for_function("document.querySelector('[data-mxeven=bass]')?.getAttribute('aria-pressed') === 'false'")
+    before = page.evaluate("""() => {
+        const {track, bar0, n, k} = CRATE.MX.slots.bass;
+        return [track, bar0, n, k];
+    }""")
+    _roll(page, "bass", 901)
+    assert page.evaluate("""() => {
+        const {track, bar0, n, k} = CRATE.MX.slots.bass;
+        return [track, bar0, n, k];
+    }""") == before
+    assert page.evaluate("""() => {
+        const {hist, hpos} = CRATE.MX;
+        return hist.bass.slice(hpos.bass - 1, hpos.bass + 1).map(p => p.cond || 0);
+    }""") == [0, 1]
+    page.click('[data-mxhist="bass:-1"]')
+    page.wait_for_function("document.querySelector('[data-mxeven=bass]')?.getAttribute('aria-pressed') === 'false'")
