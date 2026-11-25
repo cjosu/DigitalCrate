@@ -2830,7 +2830,11 @@ def test_master_switch_is_on_by_default_bypasses_and_is_kept(site, page):
         const start = OfflineAudioContext.prototype.startRendering;
         const gate = new Promise(resolve => { window.releaseMasterProbe = resolve; });
         OfflineAudioContext.prototype.startRendering = function () {
-            return gate.then(() => start.call(this));
+            // Only hold the one-second calibration renders. The mixer also renders harmonics offline.
+            if (this.sampleRate === 48000 && this.length === 48000) {
+                return gate.then(() => start.call(this));
+            }
+            return start.call(this);
         };
         const targets = new Set();
         const connect = AudioNode.prototype.connect, disconnect = AudioNode.prototype.disconnect;
