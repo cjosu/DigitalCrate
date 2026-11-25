@@ -1527,6 +1527,26 @@ def test_mashup_one_shot_slot(site, page):
     assert page.locator(f'[data-mxrow="{sid}"] .mxst').count() == 32
     page.click(f'[data-mxstep="{sid}:30"]')                          # ... and one at the end of bar 2
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 10, 30]
+    # trim: drag across the small waveform to choose the piece that plays; double-click for the whole sample
+    tb = page.locator(f'canvas[data-mxtrim="{sid}"]').bounding_box()
+    page.mouse.move(tb["x"] + tb["width"] * 0.25, tb["y"] + 10)
+    page.mouse.down()
+    page.mouse.move(tb["x"] + tb["width"] * 0.75, tb["y"] + 10, steps=5)
+    page.mouse.up()
+    tr = page.evaluate(f"CRATE.MX.slots['{sid}'].trim")
+    assert abs(tr[0] - 0.25) < 0.03 and abs(tr[1] - 0.75) < 0.03
+    page.dblclick(f'canvas[data-mxtrim="{sid}"]')
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].trim") is None
+    # ⧉ duplicate: the same sample, placement and settings in a new slot right below
+    page.click(f'[data-mxdup="{sid}"]')
+    dup = page.evaluate(f"CRATE.MX.order[CRATE.MX.order.indexOf('{sid}')+1]")
+    assert page.evaluate(f"CRATE.MX.roles['{dup}']") == "oneshot" and page.evaluate(f"CRATE.MX.slots['{dup}'].steps") == [0, 10, 30]
+    assert page.evaluate(f"CRATE.MX.slots['{dup}'].sample===CRATE.MX.slots['{sid}'].sample&&!!CRATE.MX.slots['{dup}'].buf")
+    page.click(f'[data-mxstep="{dup}:4"]')                           # the copy is its own: changing it leaves the original
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 10, 30]
+    page.click(f'[data-mxdel="{dup}"]')
+    page.click(f'[data-mxrm="{dup}"]')
+    page.wait_for_function(f"!CRATE.MX.order.includes('{dup}')", timeout=10000)
     page.click("#mxplay")                                            # it plays on the bar clock, through its own chain
     page.wait_for_function(f"CRATE.MX.on&&CRATE.MX.slots['{sid}']._c&&CRATE.MX.slots['{sid}']._next>0", timeout=20000)
     page.click(f'[data-mxstep="{sid}:10"]')

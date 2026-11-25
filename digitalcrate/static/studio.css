@@ -162,3 +162,5 @@ body.mash .projbar{display:none}
 .mxsax{display:grid;grid-template-columns:repeat(var(--b),minmax(0,1fr));font:9.5px/13px ui-monospace,Menlo,monospace;color:#8a93a0;background:#0b0d10}
 .mxsax span{padding-left:4px;border-left:1px solid rgba(255,255,255,.3);background:rgba(143,201,143,calc(var(--f,0)*.28))}.mxsax span:first-child{border-left:0}
 .mxask{margin:0 0 10px;padding:8px 12px;border:1px solid var(--acc);border-radius:10px;background:#1a1710;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mxrow .mxsteps{position:relative}.mxosw{position:absolute;left:0;right:0;top:3px;height:calc(100% - 18px);width:100%;pointer-events:none}
+.mxtrim{width:170px;height:26px;display:block;background:#0e1013;border-radius:5px;cursor:ew-resize}.mxsm .tbtn{font-size:11px}

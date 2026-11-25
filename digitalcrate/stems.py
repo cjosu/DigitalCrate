@@ -595,12 +595,13 @@ def oneshot(state, n=1, avoid=(), rng=None, path=None):
         for sft in np.unique(semis):
             m = semis == sft
             F[m] = np.roll(ch[m], int(sft), axis=1) @ H.T
-    try:
-        from .taste import scores_payload
-        pay = scores_payload(None) or {}
+    try:  # the taste scores as last fitted: a click never waits for a refit (that takes seconds)
+        from .taste import cached_scores
+        sc = cached_scores() or {}
+        bad = {r[0] for r in con.execute("SELECT path FROM events WHERE type='dislike' GROUP BY path "
+                                         "HAVING MAX(ts) = MAX(CASE WHEN value = 1 THEN ts END)")}
     except Exception:
-        pay = {}
-    sc, bad = pay.get("score") or {}, set(pay.get("disliked") or [])
+        sc, bad = {}, set()
     t = np.array([sc.get(r["path"], np.nan) for r in rows], float)
     z = (t - np.nanmean(t)) / (np.nanstd(t) + 1e-9) if np.isfinite(t).any() else np.zeros(len(rows))
     z = np.clip(np.nan_to_num(z), -2, 2)  # your favorites score far above the rest: capped, or they'd be all you get

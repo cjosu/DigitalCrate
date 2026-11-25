@@ -490,6 +490,26 @@ def scores_payload(recent_hours=None):
                 disliked=sorted(disliked))
 
 
+def cached_scores():
+    """The last fit's scores ({path: score}) and disliked paths, without refitting: for callers on a click path (the
+    Mashup's one-shot dice), where a few seconds' wait for a fresh fit isn't worth it. None if nothing was fitted yet
+    in this process: then a fit is started in the background for the next call."""
+    res = _FIT.get(None)
+    if res is None:
+        import threading
+        if not getattr(cached_scores, "_busy", False):
+            cached_scores._busy = True
+
+            def go():
+                try:
+                    scores_payload(None)
+                finally:
+                    cached_scores._busy = False
+            threading.Thread(target=go, daemon=True).start()
+        return None
+    return dict(zip(res["paths"], (float(x) for x in res["score"])))
+
+
 def why(path):
     """"Why this?" for one sample: how it ranks, which parts of the model put it there (the score is 0.7 x the
     model + 0.3 x closeness to a favourite + 0.3 x its song), the samples you liked that it's closest to, what you
