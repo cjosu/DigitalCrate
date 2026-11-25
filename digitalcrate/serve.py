@@ -739,9 +739,18 @@ class Handler(SimpleHTTPRequestHandler):
             elif self.path == "/api/activity/resume":
                 from .memguard import resume
                 jobs = resume()
-                for j in jobs:  # they take turns as usual (one heavy job at a time)
-                    start_job(j["kind"], j["args"], LABELS.get(j["kind"], j["kind"]) + (" (resumed)"))
-                return self._json(dict(ok=True, started=len(jobs)))
+                first = req.get("first")  # a kind to run before the others (e.g. "stems")
+                jobs.sort(key=lambda j: j["kind"] != first)
+
+                def go():  # in the listed order: each gets a few seconds to take its turn before the next starts
+                    import time as _t
+                    for k, j in enumerate(jobs):
+                        if k:
+                            _t.sleep(6)
+                        start_job(j["kind"], j["args"], LABELS.get(j["kind"], j["kind"]) + " (resumed)")
+                import threading
+                threading.Thread(target=go, daemon=True).start()
+                return self._json(dict(ok=True, started=len(jobs), order=[j["kind"] for j in jobs]))
             elif self.path == "/api/activity/task":
                 t = req.get("task")
                 if t not in TASKS:
