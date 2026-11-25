@@ -1186,9 +1186,10 @@ def test_blend_audio_core(page):
 
 
 def test_duck_is_on_for_bass_and_remembered(site, page):
-    """DUCK: on by default at 3 dB, on bass rows only; the switch and the amount are kept across a reload."""
+    """Bass Duck starts on at 3 dB, and keeps its switch and amount across a reload."""
     _mixer(site, page)
-    assert page.locator("[data-mxduckon]").count() == 1 and page.locator('[data-mxduckon="bass"]').count() == 1
+    assert page.locator('[data-mxduckon="bass"]').count() == 1
+    assert page.locator('[data-mxduckon="drums"], [data-mxduckon="vocals"]').count() == 0
     assert page.evaluate("CRATE.MX.duck.bass?.db ?? BLEND.DUCK.db") == 3
     page.wait_for_function("CRATE.MX.slots.bass._c&&CRATE.MX.slots.bass._c.ducked===true&&CRATE.MX.slots.drums._c.ducked===false")
     page.evaluate("CRATE.TR.set('bass','duck',6)")
@@ -1209,7 +1210,8 @@ def test_state_saved_before_blends_still_opens(site, page):
       artist:'Stem Artist 901',title:'Song',db:-2,mute:false,lock:false,eq:[0,0,0],dly:0,dt:'1/8',eqOn:true,dlyOn:true}}}));localStorage.setItem('dcTab','M')""")
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=120000)
-    assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length,Object.keys(CRATE.MX.duck).length]") == [0, 0, 0]
+    assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length]") == [0, 0]
+    assert page.evaluate("CRATE.MX.duck") == {"other": {"on": False, "db": 3}}
     assert page.evaluate("CRATE.MX.duck.bass?.db ?? BLEND.DUCK.db") == 3
 
 
@@ -1761,9 +1763,10 @@ def _one_shot(page):
 def test_effects_are_numbers_under_every_track(site, page):
     _mixer(site, page)
     devs = lambda s: page.evaluate(f"[...document.querySelectorAll('[data-mxrow=\"{s}\"] .trfx .trdev')].map(d=>d.dataset.dev)")
-    for s in ("drums", "vocals", "other"):
+    for s in ("drums", "vocals"):
         assert devs(s) == ["eq", "dly", "rev", "harm"], s
-    assert devs("bass") == ["eq", "dly", "rev", "harm", "duck"]
+    for s in ("bass", "other"):
+        assert devs(s) == ["eq", "dly", "rev", "harm", "duck"], s
     page.evaluate("CRATE.TR.set('bass','fb',60)")
     page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.fb.gain.value-0.6)<0.02")
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass.fb") == 0.6
@@ -1958,7 +1961,7 @@ def test_zoom_and_the_view_switch(site, page):
     page.click('[data-trview="song"]'); page.wait_for_timeout(400)
     assert page.evaluate("CRATE.MX.slots.bass._v[0]===0&&Math.abs(CRATE.MX.slots.bass._v[1]-CRATE.TR.song(CRATE.MX.slots.bass.track,'bass').dur)<0.01")
     page.click("#tabS"); page.click("#tabM"); page.wait_for_selector(".trfx")                 # away and back: still there, nothing stuck
-    assert page.locator(".trfx").count() == 5
+    assert page.locator(".trfx").count() == 4   # the four tracks with parts
 
 
 HARM = r"""async () => {
@@ -2005,7 +2008,7 @@ def test_state_saved_before_tracks_still_opens(site, page, bass_harm):
     assert page.evaluate("CRATE.MX.slots.bass.harm") == 1 and page.evaluate("CRATE.MX.slots.drums.db") == -2
     c = page.evaluate("(()=>{const c=CRATE.MX.slots.vocals._c;return [c.lo.frequency.value,c.mid.frequency.value,c.hi.frequency.value,+c.fb.gain.value.toFixed(2)]})()")
     assert c == [200, 1000, 5000, 0.35] and page.evaluate("(CRATE.MX.slots.vocals.ct||0)") == 0
-    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 3
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 4
     page.evaluate("CRATE.TR.set('bass','harm',50)")
     page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.hg.gain.value-0.175)<0.01")
     assert page.locator("[data-mxharm]").count() == 0 and page.locator('[data-mxrow="bass"] .trfx [data-v="bass:harm"]').count() == 1
@@ -2093,7 +2096,7 @@ def test_tops_is_a_track(site, page):
     assert page.evaluate("document.querySelector('[data-mxrow=\"tops\"]').style.getPropertyValue('--trcol').trim()") == "var(--MEL)"
     stems_asked = page.evaluate("__calls.filter(c=>c[0]==='api/stems/render').map(c=>c[1].stem)")
     assert "tops" in stems_asked and "drums" in stems_asked
-    assert page.evaluate("CRATE.MX.slots.tops.db") == -2 and page.locator('[data-mxduckon="tops"]').count() == 0
+    assert page.evaluate("CRATE.MX.slots.tops.db") == -2 and page.locator('[data-mxduckon="tops"]').count() == 1
     page.select_option("#mxkey", "E")
     page.wait_for_function("!CRATE.MX.slots.tops._loading&&CRATE.MX.info&&CRATE.MX.info.slots.tops")
     assert page.evaluate("CRATE.MX.info.slots.tops.semis") == 0                       # never shifted to the key
@@ -2133,7 +2136,7 @@ def _old_state(site, page, track, snap_only=False):
     page.wait_for_function("CRATE.MX.savedSig&&CRATE.MX.savedSig===CRATE.mxSig()")
     page.evaluate("""snapOnly=>{CRATE.mxPlay(false);const s=JSON.parse(localStorage.getItem('dcStems'));s.v=2;
       [s,...s.snaps].forEach(x=>Object.values(x.slots).forEach(p=>{delete p.kit}));
-      const mark=JSON.parse(CRATE.mxSig());mark.snaps=s.snaps;s.savedSig=JSON.stringify(mark);
+      const mark=JSON.parse(CRATE.mxSig(2));mark.snaps=s.snaps;s.savedSig=JSON.stringify(mark);
       if(snapOnly)delete s.slots.drums;
       localStorage.setItem('dcStems',JSON.stringify(s))}""", snap_only)
     page.reload()
@@ -2148,7 +2151,7 @@ def test_drums_saved_before_tops_keep_them_on_their_own_track(site, page):
     assert page.evaluate(f"(()=>{{const d=CRATE.MX.slots.drums,t=CRATE.MX.slots['drums~tops'];return {same}&&!d.kit}})()")
     assert page.evaluate(f"(()=>{{const s=CRATE.MX.snaps[0],d=s.slots.drums,t=s.slots['drums~tops'];return s.order[1]==='drums~tops'&&{same}}})()")
     assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")                 # opening and splitting is not a change
-    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 3
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 4
     page.evaluate("CRATE.MX.snapSel=0"); assert page.evaluate("BLEND.changed()") is False
     page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===2")            # the play-strip view: the rows line up
     page.click("#snplay"); page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready", timeout=90000)
@@ -2271,3 +2274,47 @@ def test_vocal_duck_audio(page):
     assert -4.2 < b["d250"] < -2.0 and b["d4k"] > -0.6             # at 3 dB, the amount it starts with
     assert b["rest250"] > -1.0 and b["off250"] > -0.1 and b["two250"] > -14.0   # back between phrases; off is off; two vocals go no deeper
     assert o["switched"] == [[True, False, False], [False, False, True], [False, True, False]] and o["bare"] == [False, False]
+
+
+def test_vocals_duck_tops_and_other(site, page):
+    _kits(site); _mixer(site, page); _roll(page, "drums", 904); _roll(page, "tops", 905)
+    assert page.locator("[data-mxduckon]").count() == 3 and all(page.locator(f'[data-mxduckon="{s}"]').count() == 1 for s in ("bass", "tops", "other"))
+    assert "vocals" in page.inner_text('[data-mxrow="other"] [data-dev="duck"]') and "lows" in page.inner_text('[data-mxrow="bass"] [data-dev="duck"]')
+    page.wait_for_function("(()=>{const c=id=>CRATE.MX.slots[id]._c;return c('other').vbanded&&!c('other').vducked&&c('tops').vducked&&!c('tops').vbanded&&!c('bass').vducked&&c('bass').ducked&&!c('vocals').vducked})()")
+    assert page.evaluate("BLEND.duckDb(CRATE.MX.duck.other)") == 3
+    page.click("#mxfx")                                                              # the ducks are not effects
+    page.wait_for_function("CRATE.MX.fx===false&&CRATE.MX.slots.other._c.vbanded===true")
+    page.click("#mxfx")
+    page.click('[data-mxsolo="drums"]')                                              # a vocal that is soloed out ducks nothing
+    page.wait_for_function("CRATE.MX.slots.vocals._c.vol.gain.value<0.001")
+    page.click('[data-mxsolo="drums"]')
+    page.fill("#mxname", "ducked"); page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.click("#sncap"); page.wait_for_function("CRATE.MX.snaps.length===1")
+    page.click("#mxsave"); page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.evaluate("CRATE.TR.set('other','duck',6)")
+    assert "dirty" in page.get_attribute("#mxsave", "class") and page.evaluate("BLEND.changed()") is True
+    page.click('[data-mxduckon="tops"]')
+    page.wait_for_function("CRATE.MX.slots.tops._c.vducked===false&&CRATE.MX.duck.tops.on===false")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.duck.other", timeout=30000)
+    assert page.evaluate("[CRATE.MX.duck.other,CRATE.MX.duck.tops]") == [{"on": True, "db": 6}, {"on": False, "db": 3}]
+    for w in (1512, 1280):                                                           # the longer rows still fit
+        page.set_viewport_size({"width": w, "height": 800}); page.wait_for_timeout(200)
+        assert page.evaluate("[...document.querySelectorAll('.trfx,.trfx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+
+
+def test_state_saved_before_the_vocal_duck_is_not_ducked(site, page):
+    _old_state(site, page, 904)                                                      # v 2, clean, one snapshot, old Drums
+    page.wait_for_function("CRATE.MX.slots['drums~tops']&&CRATE.MX.slots['drums~tops'].buf&&CRATE.MX.slots.other.buf", timeout=60000)
+    off = "(d=>['other','drums~tops'].every(id=>d[id]&&d[id].on===false)&&!(d.bass&&d.bass.on===false))"
+    assert page.evaluate(f"{off}(CRATE.MX.duck)") and page.evaluate(f"{off}(CRATE.MX.snaps[0].duck)")
+    page.click("#mxplay")
+    page.wait_for_function("['other','drums~tops','bass'].every(id=>CRATE.MX.slots[id]._c)")
+    assert page.evaluate("!CRATE.MX.slots.other._c.vbanded&&!CRATE.MX.slots['drums~tops']._c.vducked&&CRATE.MX.slots.bass._c.ducked")
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+    page.evaluate("CRATE.MX.snapSel=0"); assert page.evaluate("BLEND.changed()") is False
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).v") == 4
+    page.click("#mxclear"); page.click("#mxclear")                                   # a clean slate ducks as a new mixer does
+    _roll(page, "other", 902); _roll(page, "vocals", 901)
+    page.wait_for_function("CRATE.MX.slots.other._c&&CRATE.MX.slots.other._c.vbanded===true")

@@ -1474,6 +1474,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   // 250 and 500 Hz and less than 1.5 dB at 60 Hz, 4 kHz and 8 kHz. Between phrases both recover.
   BL.VDUCK = { hp: 150, smooth: 6, scale: 18, fc: 10, bands: [250, 500, 1000, 2000, 4000, 8000],
     q: 1.92, bscale: 46, db: 3, max: 12 };
+  BL.DUCKED = { bass: 'lows', tops: 'vocals', other: 'vocals' };
   BL.Q = -3.0103;      // Web Audio's lowpass / highpass Q is in dB: this is Butterworth (no resonance)
   BL.STAGES = 2;       // biquads per filter: 2 = 24 dB / octave
   BL.EDGE = 0.05;      // the share of a filter handoff, at each end, over which the part's gain opens or closes
@@ -1827,9 +1828,8 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
         p.eq || [0, 0, 0], p.dly || 0, p.dt || '1/8', p.fb ?? 0.35, p.eqOn !== false, p.dlyOn !== false,
         p.rev || 0, p.revOn !== false, BL.harmAmt(p), !!p.legacyLoop] : null];
   }), BL.duckSig(s)]);
-  // the duck settings of the bass slots with the defaults filled in (a slot's entry is only created when it is first
-  // drawn: an absent one and a default one are the same setting, not a change)
-  BL.duckSig = s => (s.order || []).filter(id => ((s.roles || {})[id] || id) === 'bass').map(id => { const d = (s.duck || {})[id];
+  // Include the default setting for tracks that have never had their Duck control touched.
+  BL.duckSig = (s, roles = Object.keys(BL.DUCKED)) => (s.order || []).filter(id => roles.includes(s.roles?.[id] || s.slots?.[id]?.stem || id)).map(id => { const d = s.duck?.[id];
     return [id, !(d && d.on === false), BL.duckDb(d)]; });
   BL.changed = () => { const MX = H.MX, i = MX.snapSel; return i != null && !!MX.snaps[i] && BL.snapSig(BL.snapNow()) !== BL.snapSig(MX.snaps[i]); };
   // edits change the mixer, not the snapshot it came from: say so, and point at ↻ (sliders don't redraw the strip)
@@ -2686,9 +2686,10 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
         <output data-mxtrimlen="${id}"></output><button type="button" class="tbtn trfine" data-mxtrimopen="${id}" aria-expanded="${expanded}" title="trim, fade and warp the sample">Shape</button>`);
     } else {
       tail = device('harm', '<span class="trfxlabel">Harmonics</span>' + num('harm', 'amount'), fx && BLEND.harmAmt(p) > 0);
-      if (H.role(id) === 'bass') {
+      const duckLabel = BLEND.DUCKED[H.role(id)];
+      if (duckLabel) {
         const on = H.MX.duck[id]?.on !== false;
-        tail += device('duck', toggle('duckon', 'Duck', on) + num('duck', 'lows'), on);
+        tail += device('duck', toggle('duckon', 'Duck', on) + num('duck', duckLabel), on);
       }
     }
     return `<div class="trfx">${eq}${dly}${rev}${tail}</div>`;
@@ -3091,17 +3092,17 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
  const MX={bpm:PROJ.bpm||100,key:'',reverb:{type:'plate',decay:1.8},slots:{},order:STEMS.slice(),roles:Object.fromEntries(STEMS.map(x=>[x,x])),on:false,t0:0,n:null,info:null,rated:0,recent:{},master:null};
  const role=id=>MX.roles[id]||id;
  function adopt(sv){const ids=sv.order&&sv.order.length?sv.order:[...new Set([...STEMS,...Object.keys(sv.slots||{})])];MX.order=ids;MX.roles=Object.fromEntries(ids.map(id=>[id,(sv.roles||{})[id]||((sv.slots||{})[id]||{}).stem||(STEMS.includes(id)?id:'other')]))}
- const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:3,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
+ const save=()=>{try{localStorage.setItem('dcStems',JSON.stringify({v:4,bpm:MX.bpm,key:MX.key,name:MX.name||'',savedSig:MX.savedSig||null,snapsOf:MX.snapsOf||null,fx:MX.fx!==false,reverb:MX.reverb,duck:MX.duck||{},snaps:MX.snaps||[],trans:MX.trans||[],order:MX.order,roles:MX.roles,slots:Object.fromEntries(MX.order.filter(s=>MX.slots[s]).map(s=>{const p=MX.slots[s];
    return [s,{stem:role(s),track:p.track,bar0:p.bar0,n:p.n,k:p.k||1,off:p.off||0,ct:p.ct||0,bars:p.bars,why:p.why,artist:p.artist,title:p.title,sample:p.sample,sid:p.sid,sub:p.sub,cat:p.cat,dur:p.dur,key:p.key,semis:p.semis,steps:p.steps,every:p.every,trim:p.trim||null,warp:p.warp||0,fin:p.fin||0,fout:p.fout||0,fit:p.fit,db:p.db||0,mute:!!p.mute,lock:!!p.lock,eq:p.eq||[0,0,0],dly:p.dly||0,dt:p.dt||'1/8',fb:p.fb??0.35,eqOn:p.eqOn!==false,dlyOn:p.dlyOn!==false,rev:p.rev||0,revOn:p.revOn!==false,harm:p.harm==null?null:BLEND.harmAmt(p),hup:p.hup||undefined,legacyLoop:p.legacyLoop||undefined,kit:p.kit||undefined}]}))}))}catch(e){}};
- const sig=(legacy=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:BLEND.duckSig(MX),
+ const sig=(v=4,legacyShape=false)=>JSON.stringify({bpm:MX.bpm,key:MX.key||'',fx:MX.fx!==false,reverb:[MX.reverb.type,MX.reverb.decay],duck:v<4?BLEND.duckSig(MX,['bass']):BLEND.duckSig(MX),
   snaps:MX.snaps||[],trans:MX.trans||[],slots:MX.order.map(id=>{
    const p=MX.slots[id];
    if(!has(p))return [role(id),null];
    const part=[p.track,p.sample,p.steps,p.every,p.trim||null,p.bar0,p.n,p.k||1,p.off||0,p.db||0,!!p.mute,
     p.eq||[0,0,0],p.dly||0,p.dt||'1/8',p.eqOn!==false,p.dlyOn!==false,p.rev||0,p.revOn!==false];
    const shape=[p.warp||0,p.fin||0,p.fout||0];
-   if(legacy==='shape')part.splice(5,0,...shape);
-   if(!legacy){
+   if(legacyShape)part.splice(5,0,...shape);
+   if(v>=2){
     part.push(p.ct||0,p.fb??0.35,BLEND.harmAmt(p),!!p.legacyLoop);
     if(shape.some(Boolean))part.push(...shape);
    }
@@ -3112,13 +3113,20 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
   MX.slots=slots||{};
   adopt({order,roles,slots});
   BLEND.adopt(MX,{snaps,trans,duck});
-  if(sv.v>=3)return;
-  const clean=MX.savedSig&&(sv.v>=2?MX.savedSig===sig():MX.savedSig===sig(true)||MX.savedSig===sig('shape'));
+  const v=sv.v||1;
+  if(v>=4)return;
+  const clean=MX.savedSig&&(MX.savedSig===sig(v)||(v<2&&MX.savedSig===sig(1,true)));
   for(const mix of [MX,...MX.snaps]){
+   mix.duck ||= {};
+   for(const id of mix.order||Object.keys(mix.slots||{})){
+    const r=mix.roles?.[id]||mix.slots?.[id]?.stem||id;
+    if(r==='other'||r==='tops')mix.duck[id]??={on:false,db:BLEND.VDUCK.db};
+   }
+   if(v>=3)continue;
    Object.entries(mix.slots||{}).forEach(([id,p])=>{
     if(p?.track==null)return;
     if((mix.roles?.[id]||p.stem||id)==='drums')p.kit=true;
-    if(sv.v>=2)return;
+    if(v>=2)return;
     // Older renders left out the last bar of a full-song loop and rounded half bars to even.
     const k=p.k||1,roundsUp=k===0.5&&p.n>1&&p.n%4===1;
     if(!p.bars||TR.srcBars(p.n,k)>=p.bars||roundsUp)p.legacyLoop=true;
@@ -3159,6 +3167,7 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     const at=mix.order.indexOf(id);
     mix.order.splice(at<0?mix.order.length:at+1,0,tops);
     mix.roles[tops]='tops';
+    (mix.duck||={})[tops]??={on:false,db:BLEND.VDUCK.db};
    }
   }
   if(clean)MX.savedSig=sig();
