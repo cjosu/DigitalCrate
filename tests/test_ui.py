@@ -2917,6 +2917,26 @@ def test_master_switch_is_on_by_default_bypasses_and_is_kept(site, page):
     assert not page.is_checked("#mxmaster")                                                    # kept across a refresh
 
 
+def test_mixer_undo_preserves_new_mix_settings_and_playback(site, page):
+    _mixer(site, page)
+    page.evaluate("CRATE.mxSync()")
+    state = """() => {
+        const {v, master, slots} = JSON.parse(localStorage.getItem('dcStems'));
+        return [v, master.on, slots.bass.cond, slots.bass.hk];
+    }"""
+    initial = page.evaluate(state)
+    assert initial[:2] == [4, True] and initial[2] and initial[3] == "oct"
+    page.evaluate("window.sourceBeforeUndo = CRATE.MX.slots.bass._s")
+    page.wait_for_timeout(700)
+    page.click("#mxmaster")
+    assert page.evaluate(state) == [4, False, *initial[2:]]
+    page.evaluate("CRATE.mxUndo(-1)")
+    assert page.evaluate(state) == initial
+    page.evaluate("CRATE.mxUndo(1)")
+    assert page.evaluate(state) == [4, False, *initial[2:]]
+    assert page.evaluate("CRATE.MX.on && CRATE.MX.slots.bass._s === sourceBeforeUndo")
+
+
 def test_delay_loops_are_connected_only_while_in_use(site, page):
     _mixer(site, page)
     setd = "(v)=>CRATE.TR.set('drums','dly',v/0.008)"

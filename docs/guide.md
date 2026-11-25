@@ -111,6 +111,9 @@ Hover over the song for the full name and why that part was picked.
   notes, feedback and amount. **Reverb** sends to the mixer's room, plate or hall, with the type and decay at the top.
   The dots on EQ, Delay and Reverb turn them on or off and keep their settings. **FX** switches those effects and
   harmonics together.
+- **MASTER** turns on a light mastering chain for the mixer. It trims the low and high ends and adds compression
+  and limiting. The readout shows the compressor's gain reduction during playback. The switch is on for new
+  mixes and is kept with the mix.
 - On stem tracks, **Harmonics** keeps the level steady as you add overtones, and a pure sub-bass starts at 100%.
   **Octave** gives new parts a clean octave above the lows, so a 45 Hz note gains a 90 Hz overtone that you can hear
   on monitors or headphones. Switch Octave off for the driven sound when you want higher overtones that carry on
@@ -137,7 +140,8 @@ Hover over the song for the full name and why that part was picked.
   snapshots, they are laid end to end (4, 8 or 16 bars each) with a marker each. A snapshot's own level becomes the
   clip's gain, and a muted slot has no clip. Parts and set go to `Mashups/<name>/` in your Ableton samples folder.
   The effects are not exported yet ([the plan](plans/mashup-ableton.md)).
-- **Keys:** **Space** starts and stops the mashup, **⌘Z** / **⌘⇧Z** undo and redo a change, **⌘S** saves.
+- **Keys:** **Space** starts and stops the mashup or the play strip when it is open. **⌘Z** / **⌘⇧Z** undo and redo
+  a change. **⌘S** saves.
 - **💾 save** keeps a named combination (open it again from the menu next to it).
 - **📸 snapshot** keeps the mixer as it is, in a strip above the slots (A, B, C… up to 8). Click one to bring it back;
   **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too. Edits change
