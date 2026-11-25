@@ -615,7 +615,7 @@ class Handler(SimpleHTTPRequestHandler):
                                                         slot=req.get("slot")), info=SM.info(state)))
                 if what == "render":
                     f = SM.render(req["track"], req["stem"], req["bar0"], req["n"], req["bpm"], req.get("semis") or 0,
-                                  req.get("k") or 1)
+                                  req.get("k") or 1, legacy=req.get("legacy") is True)
                     return self._json(dict(url=str(f.relative_to(C.LIB_ROOT)), sub=SM.sub_share(f)))
                 if what == "peaks":
                     picture = SM.peaks(req["track"], req["stem"])

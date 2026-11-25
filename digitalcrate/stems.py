@@ -194,24 +194,38 @@ def _cache_output(out):
         path.unlink(missing_ok=True)
 
 
-def render(track, stem, bar0, n, bpm, semis=0.0, k=1):
+def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False):
     """n mixer bars of a stem from the song's bar bar0 (n * k of its bars), as a WAV exactly n bars long at bpm,
-    shifted by semis. -> path"""
+    shifted by semis. Legacy saves retain the source span they played before track editing. -> path"""
     import soundfile as sf
     from .stretch import signalsmith
-    m = library()[int(track)]
+    track, requested = int(track), int(bar0)
+    m = library()[track]
     semis = round(float(semis), 2) or 0.0
     bt = m["bars"]
     n, k = max(1, int(n)), float(k or 1)
-    ns = min(src_bars(n, k), len(bt) - 1)
-    bar0 = max(0, min(int(bar0), len(bt) - 1 - ns))
-    h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis:.2f}|v4".encode()).hexdigest()[:16]
-    out = CACHE / f"{h}.wav"
+    nb = len(bt) - 1
+    old_ns = min(max(1, round(n * k)), max(1, nb - 1))
+    ns = old_ns if legacy else min(src_bars(n, k), nb)
+    bar0 = max(0, min(requested, nb - ns))
+
+    def cached(start, pitch, version):
+        key = f"{track}|{stem}|{start}|{n}|{k}|{float(bpm):.2f}|{pitch}|{version}"
+        return CACHE / f"{hashlib.sha1(key.encode()).hexdigest()[:16]}.wav"
+
+    old_geometry = legacy and ns != min(src_bars(n, k), nb)
+    out = cached(bar0, f"{semis:.2f}", "v4-legacy" if old_geometry else "v4")
     if out.exists():
         return out
+    source = DIR / f"t{track}" / f"{stem}.flac"
+    # A prepared stem may have vanished while its previously rendered loop is still playable.
+    if (legacy or (ns == old_ns and not source.exists())) and semis.is_integer() and (stem != "drums" or semis == 0):
+        old = cached(bar0, int(semis), "v3")
+        if old.is_file():
+            return old
     CACHE.mkdir(parents=True, exist_ok=True)
     a, b = int(bt[bar0] * C.SR), int(bt[bar0 + ns] * C.SR)
-    y, _ = sf.read(str(DIR / f"t{track}" / f"{stem}.flac"), start=a, frames=b - a, dtype="float32", always_2d=True)
+    y, _ = sf.read(str(source), start=a, frames=b - a, dtype="float32", always_2d=True)
     y = y.T
     N = int(round(n * 240.0 / float(bpm) * C.SR))
     if semis or abs(N / max(1, y.shape[1]) - 1) > 1e-3:

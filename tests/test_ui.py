@@ -1486,7 +1486,7 @@ def test_reverb_has_a_tail_that_decays_and_is_stereo(page):
 
 
 def test_mashup_reverb_send_and_bar_axis(site, page):
-    """A slot's REVERB send reaches the shared reverb; its type is set at the top; the waveform has its bar axis."""
+    """A slot's REVERB send reaches the shared reverb; its type is set at the top; the waveform stays visible."""
     r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
     assert "STEMS OK" in r.stdout, r.stderr[-2000:]
     page.evaluate("localStorage.removeItem('dcStems')")
@@ -1526,6 +1526,18 @@ def test_mashup_one_shot_slot(site, page):
     page.click("#tabM")
     page.wait_for_selector(f'[data-mxstep="{sid}:0"]')
     assert page.locator(f'[data-mxrow="{sid}"] .mxst').count() == 16 and page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0]
+    page.evaluate("""id=>{
+      const create = AC.createBufferSource.bind(AC);
+      AC.createBufferSource = () => {
+        const source = create(), start = source.start.bind(source);
+        source.start = (...args) => { window.auditionRate = source.playbackRate.value; return start(...args); };
+        return source;
+      };
+      CRATE.TR.set(id, 'st', 5);
+      CRATE.TR.set(id, 'ct', 25);
+    }""", sid)
+    page.click(f'[data-mxaud="{sid}"]')
+    assert page.evaluate("auditionRate") == pytest.approx(2 ** (5.25 / 12))
     page.click(f'[data-mxstep="{sid}:10"]')                          # a hit in the middle of the bar
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].steps") == [0, 10]
     page.select_option(f'[data-mxlen="{sid}"]', "2")                 # a two-bar cycle: 32 steps, the hits stay
@@ -1573,15 +1585,7 @@ def test_mashup_one_shot_slot(site, page):
 
 def test_saving_under_a_new_name_asks_about_another_ones_snapshots(site, page):
     """A strip that came with one saved combination doesn't silently become part of another."""
-    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
-    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
-    page.evaluate("localStorage.removeItem('dcStems')")
-    page.reload()
-    page.wait_for_function("typeof st!=='undefined'&&window.CRATE&&CRATE.MX", timeout=30000)
-    page.click("#tabM")
-    page.wait_for_selector("#mxall")
-    page.click("#mxall")
-    page.wait_for_function("Object.values(CRATE.MX.slots).some(p=>p&&p.buf)", timeout=120000)
+    _mixer(site, page)
     page.click("#sncap")
     page.wait_for_selector("#snrep")
     page.fill("#mxname", "first one")
@@ -1901,18 +1905,25 @@ def test_harmonics_amount_keeps_the_level(page):
     assert r["raw"] > 0.8 and abs(r["old"]) < 0.05, r        # the old switch was louder; a part from before plays as it did
     assert r["amt"] == [1, 0, 0, 0.4]
 
-def test_state_saved_before_tracks_still_opens(site, page):
+@pytest.mark.parametrize("bass_harm", [True, None])
+def test_state_saved_before_tracks_still_opens(site, page, bass_harm):
     _mixer(site, page)
-    page.evaluate("""(()=>{CRATE.mxPlay(false);const s=JSON.parse(localStorage.getItem('dcStems'));delete s.v;
-      for(const id of Object.keys(s.slots)){const p=s.slots[id];delete p.ct;delete p.fb;p.harm=id==='bass'?true:id==='drums'?false:null;p.db=-2}
-      s.snaps=[{order:s.order,roles:s.roles,slots:JSON.parse(JSON.stringify(s.slots)),duck:{}}];localStorage.setItem('dcStems',JSON.stringify(s))})()""")
+    page.select_option("#mxkey", "C")
+    _roll(page, "bass", 901)
+    assert page.evaluate("CRATE.MX.slots.bass.sub") >= 0.85
+    page.evaluate("""bassHarm=>{CRATE.mxPlay(false);const s=JSON.parse(localStorage.getItem('dcStems'));delete s.v;
+      for(const id of Object.keys(s.slots)){const p=s.slots[id];delete p.ct;delete p.fb;p.harm=id==='bass'?bassHarm:id==='drums'?false:null;p.db=-2}
+      s.snaps=[{order:s.order,roles:s.roles,slots:JSON.parse(JSON.stringify(s.slots)),duck:{}}];localStorage.setItem('dcStems',JSON.stringify(s))}""", bass_harm)
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX&&CRATE.MX.slots.bass", timeout=30000)
-    assert page.evaluate("CRATE.MX.slots.bass.hup===true&&CRATE.MX.snaps[0].slots.bass.hup===true&&!CRATE.MX.slots.drums.hup")
+    if bass_harm:
+        assert page.evaluate("CRATE.MX.snaps[0].slots.bass.hup===true&&!CRATE.MX.slots.drums.hup")
+    else:
+        assert page.evaluate("CRATE.MX.snaps[0].slots.bass.harm") is None
     page.click("#mxplay")
     page.wait_for_function("CRATE.MX.slots.bass._hc&&!CRATE.MX.slots.bass.hup", timeout=60000)
     want = page.evaluate("-2-20*Math.log10(BLEND.harmComp({harm:1},CRATE.MX.slots.bass._hc))")
-    assert page.evaluate("CRATE.MX.slots.bass.db") == pytest.approx(min(6, want), abs=0.26)      # (the slider moves in half decibels)
+    assert page.evaluate("CRATE.MX.slots.bass.db") == pytest.approx(min(6, want), abs=0.0001)
     assert page.evaluate("CRATE.MX.slots.bass.harm") == 1 and page.evaluate("CRATE.MX.slots.drums.db") == -2
     c = page.evaluate("(()=>{const c=CRATE.MX.slots.vocals._c;return [c.lo.frequency.value,c.mid.frequency.value,c.hi.frequency.value,+c.fb.gain.value.toFixed(2)]})()")
     assert c == [200, 1000, 5000, 0.35] and page.evaluate("(CRATE.MX.slots.vocals.ct||0)") == 0
@@ -1920,3 +1931,45 @@ def test_state_saved_before_tracks_still_opens(site, page):
     page.evaluate("CRATE.TR.set('bass','harm',50)")
     page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.hg.gain.value-0.175)<0.01")
     assert page.locator("[data-mxharm]").count() == 0 and page.locator('[data-mxrow="bass"] .trfx [data-v="bass:harm"]').count() == 1
+
+
+def test_duplicating_a_track_while_its_loop_renders(site, page):
+    _mixer(site, page)
+    page.wait_for_function("CRATE.TR.has('other')")
+    page.evaluate("""() => {
+      const api = CRATE.api;
+      let release;
+      const held = new Promise(resolve => { release = resolve; });
+      window.releaseDuplicateRender = release;
+      CRATE.api = (path, part) => {
+        const reply = api(path, part);
+        return path === 'api/stems/render' && part.stem === 'other' && part.bar0 === 1 && part.n === 2
+          ? reply.then(async r => { await held; return r; })
+          : reply;
+      };
+      window.pendingDuplicateRender = CRATE.TR.setLoop('other', 1, 2);
+    }""")
+    page.wait_for_selector('[data-mxwave="other"].busy')
+    _more(page, "other")
+    page.click('[data-mxdup="other"]')
+    copy = page.evaluate("""() => {
+      const order = CRATE.MX.order;
+      return order[order.indexOf('other') + 1];
+    }""")
+    assert page.evaluate("id=>CRATE.MX.slots[id].n", copy) == 2
+    page.evaluate("() => { releaseDuplicateRender(); return pendingDuplicateRender; }")
+    assert page.evaluate("id=>CRATE.MX.slots[id].buf.duration", copy) == pytest.approx(4.8, abs=0.01)
+
+
+def test_pitch_after_snapshot_recall_keeps_the_other_parts_pitch(site, page):
+    _mixer(site, page)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===1")
+    original = page.evaluate("CRATE.MX.slots.drums.bar0")
+    alternate = (original + 1) % 12
+    page.evaluate("bar=>CRATE.TR.setLoop('drums',bar,4)", alternate)
+    page.evaluate("CRATE.TR.set('drums','ct',7)")
+    page.click('[data-sn="0"]')
+    page.wait_for_function("bar=>CRATE.MX.slots.drums.bar0===bar&&!CRATE.MX.slots.drums._loading", arg=original)
+    page.evaluate("CRATE.TR.set('drums','ct',-20)")
+    assert page.evaluate("bar=>CRATE.MX.hist.drums.find(p=>p.bar0===bar).ct", alternate) == 7
