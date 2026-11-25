@@ -1023,3 +1023,116 @@ def test_sliders_look_off_at_their_minimum(page):
     page.evaluate("(()=>{const e=document.querySelector('#sl2');e.value=-6;e.dispatchEvent(new Event('input',{bubbles:true}))})()")
     assert v("sl2", "a") == 0.25 and v("sl2", "b") == 0.5       # below zero: the fill runs from the value up to zero
     page.evaluate("document.querySelector('#sltest').remove()")
+
+
+# ---------------------------------------------------------------------------------------------------- stem blends
+def _mixer(site, page, bpm=100):
+    """🎛 Stems on the three prepared test songs, with a part dealt into each of the four slots and playing."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    page.click("#tabM")
+    page.wait_for_selector("#mxall")
+    page.fill("#mxbpm", str(bpm))
+    page.dispatch_event("#mxbpm", "change")
+    page.click("#mxall")
+    page.wait_for_function("CRATE.MX.on&&['drums','bass','vocals','other'].every(s=>CRATE.MX.slots[s]&&CRATE.MX.slots[s].buf)", timeout=90000)
+
+
+def _set(page, sel, value, events=("input",)):
+    """Set a slider or a number field the way a hand does: the value, then the events the app listens for."""
+    page.evaluate("([sel,v,evs])=>{const e=document.querySelector(sel);e.value=v;evs.forEach(n=>e.dispatchEvent(new Event(n,{bubbles:true})))}",
+                  [sel, str(value), list(events)])
+
+
+BLEND_AUDIO = r"""async () => {
+  const BL = window.BLEND, SR = 44100, N = 4 * SR, out = {};
+  const db = x => 20 * Math.log10(Math.max(x, 1e-12));
+  const rms = (d, a, b) => { let s = 0; for (let i = a; i < b; i++) s += d[i] * d[i]; return Math.sqrt(s / (b - a)); };
+  const play = (ctx, buf) => { const s = ctx.createBufferSource(); s.buffer = buf; s.start(0); return s; };
+  const noise = (ctx, secs, seed) => { const b = ctx.createBuffer(1, secs * SR, SR), d = b.getChannelData(0); let s = seed;
+    for (let i = 0; i < d.length; i++) { s = (s * 16807) % 2147483647; d[i] = (s / 2147483647) * 2 - 1; } return b; };
+  // the level of one band of a signal: three bandpasses in a row, rendered offline
+  const band = async (data, f0, q) => { const c = new OfflineAudioContext(1, data.length, SR), b = c.createBuffer(1, data.length, SR);
+    b.copyToChannel(data, 0); let n = play(c, b);
+    for (let i = 0; i < 3; i++) { const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = f0; f.Q.value = q; n.connect(f); n = f; }
+    n.connect(c.destination); return (await c.startRendering()).getChannelData(0); };
+
+  // 1. a parked blend filter passes everything, to the sample
+  { const c = new OfflineAudioContext(1, SR, SR), nb = noise(c, 1, 7), x = BL.mkXf(c); play(c, nb).connect(x.in); x.out.connect(c.destination);
+    const y = (await c.startRendering()).getChannelData(0), d = nb.getChannelData(0); let mx = 0;
+    for (let i = 0; i < d.length; i++) mx = Math.max(mx, Math.abs(y[i] - d[i])); out.parked_max_diff = mx; }
+
+  // 2. halfway through a filter handoff (cutoff 632 Hz): what is left of each side two octaves the wrong way, in dB
+  out.handoff = {};
+  for (const side of ['a', 'b']) { const c = new OfflineAudioContext(1, 2 * SR, SR), nb = noise(c, 2, side === 'a' ? 11 : 13), x = BL.mkXf(c), o = BL.blendAt('filter', 0.5, SR / 2);
+    BL.setXf(x, side === 'a' ? { gain: o.ga, hp: o.hp, lp: SR / 2 } : { gain: o.gb, hp: 0, lp: o.lp }, 0);
+    play(c, nb).connect(x.in); x.out.connect(c.destination); const y = (await c.startRendering()).getChannelData(0), d = nb.getChannelData(0);
+    for (const f of [158, 2528]) out.handoff[side + '_' + f] = db(rms(await band(y, f, 4), SR, 2 * SR)) - db(rms(await band(d, f, 4), SR, 2 * SR)); }
+
+  // 3. the duck: a kick on every beat at 120 bpm, at the loudness the server gives every part (RMS 0.08), over a bass of 55 Hz + 440 Hz
+  const kick = ctx => { const b = ctx.createBuffer(1, N, SR), d = b.getChannelData(0);
+    for (let beat = 0; beat < 8; beat++) { let ph = 0; const i0 = Math.round(beat * 0.5 * SR);
+      for (let i = 0; i < 0.4 * SR; i++) { const t = i / SR; ph += 2 * Math.PI * (50 + 100 * Math.exp(-t / 0.03)) / SR; d[i0 + i] += Math.sin(ph) * Math.exp(-t / 0.12); } }
+    const g = Math.min(0.08 / rms(d, 0, N), 0.9 / d.reduce((m, v) => Math.max(m, Math.abs(v)), 0)); for (let i = 0; i < N; i++) d[i] *= g; return b; };
+  const bass = ctx => { const b = ctx.createBuffer(1, N, SR), d = b.getChannelData(0);
+    for (let i = 0; i < N; i++) d[i] = 0.2 * Math.sin(2 * Math.PI * 55 * i / SR) + 0.1 * Math.sin(2 * Math.PI * 440 * i / SR); return b; };
+  const O = { fx: true, bar: 2, DT: { '1/8': 1 / 8 } };
+  const run = async (duck, drumsOn) => { const c = new OfflineAudioContext(2, N, SR), merge = c.createChannelMerger(2); merge.connect(c.destination);
+    const MX = {}; BL.out(MX, c); MX.master.disconnect();                       // the bus without the speakers: each chain to its own channel
+    const outB = c.createGain(), outK = c.createGain(); outB.connect(merge, 0, 0); outK.connect(merge, 0, 1);
+    const cb = BL.mkChain(c, outB, MX.bus), ck = BL.mkChain(c, outK, MX.bus);
+    BL.applyChain(cb, BL.mixOf({ db: 0 }, 'bass', { ...O, on: true, duck }), 0);
+    BL.applyChain(ck, BL.mixOf({ db: 0 }, 'drums', { ...O, on: drumsOn }), 0);
+    play(c, bass(c)).connect(cb.in); play(c, kick(c)).connect(ck.in); return (await c.startRendering()).getChannelData(0); };
+  const ref = await run({ on: false }, true), lo0 = await band(ref, 55, 3), hi0 = await band(ref, 440, 6);
+  const dip = async (duck, drumsOn) => { const y = await run(duck, drumsOn), lo = await band(y, 55, 3), hi = await band(y, 440, 6), w = Math.round(0.02 * SR), dips = [];
+    for (let k = 0; k < 25; k++) { const a = 2 * SR + k * w; dips.push(db(rms(lo, a, a + w)) - db(rms(lo0, a, a + w))); }   // one beat, in 20 ms steps
+    return { deepest: Math.min(...dips), shallowest: Math.max(...dips), high: db(rms(hi, 2 * SR, 3 * SR)) - db(rms(hi0, 2 * SR, 3 * SR)) }; };
+  out.duck3 = await dip(undefined, true);            // no setting yet: on, 3 dB
+  out.duck12 = await dip({ on: true, db: 12 }, true);
+  out.muted = await dip({ on: true, db: 12 }, false); // muted drums duck nothing
+  out.off = await dip({ on: false, db: 12 }, true);
+  return out;
+}"""
+
+
+def test_blend_audio_core(page):
+    """The stem blends audio graph, measured offline: a parked blend filter changes nothing, a filter handoff splits the
+    spectrum between the two parts, and the duck takes a few dB off the bass's low end only, only under the kick."""
+    o = page.evaluate(BLEND_AUDIO)
+    assert o["parked_max_diff"] < 1e-6
+    h = o["handoff"]
+    assert h["a_158"] < -40 and h["b_2528"] < -40            # the outgoing part has no lows left, the incoming one no highs yet
+    assert abs(h["a_2528"]) < 0.5 and abs(h["b_158"]) < 0.5  # and each keeps its own side whole
+    assert -3.5 < o["duck3"]["deepest"] < -2.0 and o["duck3"]["shallowest"] > -0.5   # down under the kick, back between kicks
+    assert abs(o["duck3"]["high"]) < 0.2                     # 440 Hz is left alone
+    assert -13.0 < o["duck12"]["deepest"] < -9.0
+    assert o["muted"]["deepest"] > -0.1 and o["off"]["deepest"] > -0.1
+
+
+def test_duck_is_on_for_bass_and_remembered(site, page):
+    """DUCK: on by default at 3 dB, on bass rows only; the switch and the amount are kept across a reload."""
+    _mixer(site, page)
+    assert page.locator("[data-mxduckon]").count() == 1 and page.locator('[data-mxduckon="bass"]').count() == 1
+    assert page.input_value('[data-mxduck="bass"]') == "3"
+    page.wait_for_function("CRATE.MX.slots.bass._c&&CRATE.MX.slots.bass._c.ducked===true&&CRATE.MX.slots.drums._c.ducked===false")
+    _set(page, '[data-mxduck="bass"]', 6, ("input", "change"))
+    assert page.evaluate("CRATE.MX.duck.bass.db") == 6
+    page.click('[data-mxduckon="bass"]')
+    page.wait_for_function("CRATE.MX.slots.bass._c.ducked===false&&CRATE.MX.duck.bass.on===false")
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).duck.bass") == {"on": False, "db": 6}
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.duck.bass&&CRATE.MX.duck.bass.on===false", timeout=30000)
+
+
+def test_state_saved_before_blends_still_opens(site, page):
+    """A mixer saved before snapshots and the duck existed (no duck, snaps or trans keys) opens with their defaults."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    page.evaluate("""localStorage.setItem('dcStems',JSON.stringify({bpm:100,key:'',name:'',fx:true,order:['drums','bass','vocals','other'],
+      roles:{drums:'drums',bass:'bass',vocals:'vocals',other:'other'},slots:{bass:{stem:'bass',track:901,bar0:0,n:4,k:1,off:0,bars:16,
+      artist:'Stem Artist 901',title:'Song',db:-2,mute:false,lock:false,eq:[0,0,0],dly:0,dt:'1/8',eqOn:true,dlyOn:true}}}));localStorage.setItem('dcTab','M')""")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=60000)
+    assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length,Object.keys(CRATE.MX.duck).length]") == [0, 0, 0]
+    assert page.input_value('[data-mxduck="bass"]') == "3"
