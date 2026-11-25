@@ -181,18 +181,18 @@ def src_bars(n, k):
     return max(1, int(round(n * k)))
 
 
-def render(track, stem, bar0, n, bpm, semis=0, k=1):
+def render(track, stem, bar0, n, bpm, semis=0.0, k=1):
     """n mixer bars of a stem from the song's bar bar0 (n * k of its bars), as a WAV exactly n bars long at bpm,
-    shifted by semis (drums never). -> path"""
+    shifted by semis. -> path"""
     import soundfile as sf
     from .stretch import signalsmith
     m = library()[int(track)]
-    semis = 0 if stem == "drums" else int(round(semis))
+    semis = round(float(semis), 2) or 0.0
     bt = m["bars"]
     n, k = max(1, int(n)), float(k or 1)
     ns = min(src_bars(n, k), len(bt) - 2)
     bar0 = max(0, min(int(bar0), len(bt) - 1 - ns))
-    h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis}|v3".encode()).hexdigest()[:16]
+    h = hashlib.sha1(f"{track}|{stem}|{bar0}|{n}|{k}|{float(bpm):.2f}|{semis:.2f}|v4".encode()).hexdigest()[:16]
     out = CACHE / f"{h}.wav"
     if out.exists():
         return out
@@ -354,9 +354,10 @@ def fit(a, b):
 
 
 def _semis(state, stem, part, lib, target=None):
+    off = int(part.get("off") or 0)
     if stem == "drums":
-        return 0
-    return key_semis(lib[int(part["track"])], target or target_key(state)) + int(part.get("off") or 0)
+        return off
+    return key_semis(lib[int(part["track"])], target or target_key(state)) + off
 
 
 def info(state):

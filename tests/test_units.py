@@ -623,3 +623,22 @@ def test_stem_picture_is_the_whole_stem(tmp_path, monkeypatch):
     assert stems.peaks(1, "other")["path"].stat().st_mtime_ns == made          # made once, then kept
     with pytest.raises(KeyError):
         stems.peaks(999, "other")
+
+
+def test_parts_take_fractions_of_a_semitone_and_drums_take_your_offset(tmp_path, monkeypatch):
+    import soundfile as sf
+    from digitalcrate import stems
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    monkeypatch.setattr(stems, "CACHE", tmp_path / "stems" / "cache")
+    stems._LIB.update(n=-1, lib={})
+    _fake_stem_song(tmp_path, 1, 100, 0, "major", 0)    # C major
+    _fake_stem_song(tmp_path, 2, 110, 2, "major", 2)    # D major
+    a, b, c = (stems.render(1, "other", 0, 2, 100, semis=s) for s in (0, 0.5, 1))
+    assert len({a, b, c}) == 3 and sf.info(str(b)).frames == round(2 * 240 / 100 * SR)
+    assert stems.render(1, "other", 0, 2, 100, semis=0.5) == b
+    d0, d2 = stems.render(1, "drums", 0, 2, 100, semis=0), stems.render(1, "drums", 0, 2, 100, semis=2)
+    assert d0 != d2 and not np.allclose(sf.read(str(d0))[0], sf.read(str(d2))[0])
+    st = dict(bpm=100, key="C", slots=dict(drums=dict(stem="drums", track=1, bar0=0, n=2, off=2),
+                                           bass=dict(stem="bass", track=2, bar0=0, n=2, off=1)))
+    i = stems.info(st)["slots"]
+    assert i["drums"]["semis"] == 2 and i["bass"]["semis"] == -1
