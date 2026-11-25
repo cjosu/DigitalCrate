@@ -1136,3 +1136,239 @@ def test_state_saved_before_blends_still_opens(site, page):
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=60000)
     assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length,Object.keys(CRATE.MX.duck).length]") == [0, 0, 0]
     assert page.input_value('[data-mxduck="bass"]') == "3"
+
+
+def _roll(page, slot, track):
+    """Put this prepared song's best-fitting bars into a slot, and wait until they are loaded."""
+    page.evaluate(f"CRATE.mxRoll('{slot}', true, {track})")
+    page.wait_for_function(f"CRATE.MX.slots['{slot}']&&CRATE.MX.slots['{slot}'].track==={track}&&CRATE.MX.slots['{slot}'].buf&&!CRATE.MX.slots['{slot}']._loading", timeout=60000)
+
+
+def test_snapshots_capture_recall_replace_delete(site, page):
+    """📸 keeps the mixer as it is; a snapshot comes back with a click, can be replaced and deleted, survives a reload,
+    freezes an auto key, and teaches the recommendations."""
+    _mixer(site, page)
+    assert page.evaluate("CRATE.MX.snaps.length") == 0 and page.is_disabled("#snplay")
+    _roll(page, "drums", 901)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===1&&CRATE.MX.snapSel===0")
+    assert page.evaluate("CRATE.MX.key") != ""                                   # an auto key is frozen by the first snapshot
+    page.wait_for_function("CRATE.MX.rated>=4", timeout=10000)                   # four slots, four weak yeses
+    _roll(page, "drums", 902)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===2&&CRATE.MX.snapSel===1")
+    label = page.inner_text('[data-sn="1"]')
+    assert "B" in label and "drums" in label and "bass" not in label             # what changed since A
+    assert "start" in page.inner_text('[data-sn="0"]')
+    assert page.evaluate("CRATE.MX.trans.length") == 1 and page.is_enabled("#snplay")
+    page.click('[data-sn="0"]')                                                  # A comes back
+    page.wait_for_function("CRATE.MX.snapSel===0&&CRATE.MX.slots.drums.track===901&&CRATE.MX.slots.drums.buf", timeout=60000)
+    bass = page.evaluate("CRATE.MX.slots.bass.track")
+    _roll(page, "bass", 903 if bass != 903 else 901)
+    page.click("#snrep")                                                         # ... and is replaced by what is playing now
+    page.wait_for_function(f"CRATE.MX.snaps[0].slots.bass.track!=={bass}")
+    assert page.evaluate("CRATE.MX.snaps.length") == 2
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.snaps.length===2", timeout=30000)
+    assert page.evaluate("[CRATE.MX.snaps[0].slots.drums.track,CRATE.MX.snaps[1].slots.drums.track,CRATE.MX.trans.length]") == [901, 902, 1]
+    page.click('[data-sn="1"]')
+    page.wait_for_function("CRATE.MX.snapSel===1")
+    page.click("#sndel")
+    page.wait_for_function("CRATE.MX.snaps.length===1&&CRATE.MX.trans.length===0&&CRATE.MX.snapSel===null")
+    assert page.is_disabled("#snplay")
+
+
+def test_blend_model(page):
+    """The pure half of the stem blends block: which layers differ between two snapshots, each transition's settings (kept from
+    the transition before), where a layer is for a master position, and the mix of a layer that stays."""
+    r = page.evaluate("""() => { const B = BLEND, P = (stem, track, o) => Object.assign({stem, track, bar0: 0, n: 4, k: 1, off: 0, db: 0, eq: [0, 0, 0], dly: 0, dt: '1/8'}, o);
+      const A = {order: ['drums', 'bass', 'vocals', 'other'], roles: {drums: 'drums', bass: 'bass', vocals: 'vocals', other: 'other'}, duck: {},
+                 slots: {drums: P('drums', 1), bass: P('bass', 2, {db: -2}), vocals: P('vocals', 3, {mute: true})}};
+      const Z = {order: ['drums', 'bass', 'vocals', 'other', 's1'], roles: {drums: 'drums', bass: 'bass', vocals: 'vocals', other: 'vocals', s1: 'other'}, duck: {},
+                 slots: {drums: P('drums', 1, {bar0: 4}), bass: P('bass', 2, {db: -4}), other: P('vocals', 5), s1: P('other', 6)}};
+      const rows = B.diffSnaps(A, Z), MX = {snaps: [A, Z, A], trans: [{bars: 4, layers: {drums: {style: 'xfade', win: 'second'}}}, {bars: 16, layers: {}}]};
+      const T = B.transFor(MX, 0);
+      return {rows: rows.map(x => [x.id, x.stem, x.kind]), back: B.diffSnaps(Z, A).map(x => [x.id, x.kind]), t0: T, t1: B.transFor(MX, 1),
+        pos: [B.rowPos(rows[0], 0.75, T, {}), B.rowPos(rows[1], 0.75, T, {}), B.rowPos(rows[0], 0.75, T, {drums: 0.1})],
+        mix: B.lerpMix(P('bass', 2, {db: -2, eq: [2, 0, 0], dly: 0.4, dt: '1/4'}), P('bass', 2, {db: -4, eq: [6, 0, 0], eqOn: false, dly: 0, dt: '1/16'}), 0.25),
+        lp: [B.layerPos(0.25, 'all'), B.layerPos(0.25, 'first'), B.layerPos(0.25, 'second'), B.layerPos(0.75, 'second'), B.layerPos(0.49, 'cut'), B.layerPos(0.5, 'cut')],
+        b: [B.blendAt('filter', 0, 22050), B.blendAt('filter', 0.5, 22050), B.blendAt('xfade', 0.5, 22050), B.blendAt('filter', 1, 22050), B.blendAt('filter', 0.025, 22050)]}; }""")
+    # a moved loop is a changed layer; a volume change alone is not; a muted part counts as absent; a slot's stem is the side that sounds
+    assert r["rows"] == [["drums", "drums", "change"], ["bass", "bass", "same"], ["vocals", "vocals", "empty"], ["other", "vocals", "enter"], ["s1", "other", "enter"]]
+    assert r["back"] == [["drums", "change"], ["bass", "same"], ["vocals", "empty"], ["other", "exit"], ["s1", "exit"]]
+    new = {"style": "filter", "win": "all"}
+    assert r["t0"] == {"bars": 4, "layers": {"drums": {"style": "xfade", "win": "second"}, "other": new, "s1": new}}
+    assert r["t1"] == {"bars": 16, "layers": {"drums": {"style": "xfade", "win": "second"}, "other": new, "s1": new}}   # drums: from the transition before
+    assert r["pos"] == [0.5, 0.75, 0.1]
+    m = r["mix"]
+    assert m["db"] == -2.5 and m["eq"] == [1.5, 0, 0] and abs(m["dly"] - 0.3) < 1e-9 and m["dt"] == "1/4" and m["eqOn"] is True and m["dlyOn"] is True
+    assert r["lp"] == [0.25, 0.5, 0, 0.5, 0, 1]
+    b = r["b"]
+    assert b[0] == {"ga": 1, "gb": 0, "hp": 0, "lp": 22050} and b[3] == {"ga": 0, "gb": 1, "hp": 0, "lp": 22050}
+    assert b[1]["ga"] == 1 and b[1]["gb"] == 1 and abs(b[1]["hp"] - 632.4555) < 0.001 and b[1]["lp"] == b[1]["hp"]
+    assert abs(b[2]["ga"] - 0.70711) < 1e-4 and abs(b[2]["gb"] - 0.70711) < 1e-4 and b[2]["hp"] == 0 and b[2]["lp"] == 22050
+    assert b[4]["ga"] == 1 and abs(b[4]["gb"] - 0.5) < 1e-9
+
+
+def _strip(site, page, bpm=100, three=False):
+    """A strip on the test songs: A (drums from song 901), B (drums from 902, "other" taken out) and, with three=True,
+    C (bass from another song)."""
+    _mixer(site, page, bpm)
+    _roll(page, "drums", 901)
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===1")
+    _roll(page, "drums", 902)
+    page.click('[data-mxdel="other"]')
+    page.wait_for_function("!CRATE.MX.slots.other")
+    page.click("#sncap")
+    page.wait_for_function("CRATE.MX.snaps.length===2")
+    if three:
+        bass = page.evaluate("CRATE.MX.slots.bass.track")
+        _roll(page, "bass", 903 if bass != 903 else 901)
+        page.click("#sncap")
+        page.wait_for_function("CRATE.MX.snaps.length===3")
+
+
+def _voice(page, slot, side):
+    """What a playback voice was last told: its gain, highpass and lowpass, and how long its loop is. None if there is none."""
+    return page.evaluate(f"(()=>{{const v=CRATE.PB.voice('{slot}','{side}');return v?{{...v.set,dur:v.buf.duration}}:null}})()")
+
+
+def test_playback_shows_both_sets_and_blends_by_hand(site, page):
+    """▶ play strip: both snapshots' four slots side by side, the transition controls between them, and a master and a
+    slider per layer that move the sound from the left snapshot to the right one."""
+    _strip(site, page)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    assert page.evaluate("CRATE.MX.on") is False and page.is_visible("#pb")
+    assert page.locator('#pb [data-pbside="a"]').count() == 4 and page.locator('#pb [data-pbside="b"]').count() == 4   # all eight slots
+    assert page.evaluate("CRATE.PB.rows.map(r=>[r.id,r.kind])") == [["drums", "change"], ["bass", "same"], ["vocals", "same"], ["other", "exit"]]
+    a, b = _voice(page, "drums", "a"), _voice(page, "drums", "b")
+    assert a["gain"] == 1 and b["gain"] == 0 and abs(b["dur"] - 9.6) < 0.01                 # 4 bars at 100 bpm, loaded but silent
+    assert page.evaluate("CRATE.PB.voice('bass','a')===CRATE.PB.voice('bass','b')")          # a layer that stays is one voice
+    assert "same in both" in page.inner_text('[data-pbrow="bass"]')
+    # every slot shows its waveform with a play line, as the mixer's rows do
+    page.wait_for_function("(()=>{const b=document.querySelector('[data-pbwave=\"b:drums\"]');return b&&b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'})()", timeout=10000)
+    _set(page, "#pbm", 50)                                                                   # the master, halfway
+    assert page.evaluate("CRATE.PB.m") == 0.5 and page.input_value('[data-pbpos="drums"]') == "50"
+    a, b = _voice(page, "drums", "a"), _voice(page, "drums", "b")
+    assert a["gain"] == 1 and b["gain"] == 1 and abs(a["hp"] - 632.46) < 0.1 and abs(b["lp"] - 632.46) < 0.1 and b["hp"] == 0
+    assert abs(_voice(page, "other", "a")["hp"] - 632.46) < 0.1 and _voice(page, "other", "b") is None   # leaves alone
+    page.select_option('[data-pbstyle="drums"]', "xfade")
+    a, b = _voice(page, "drums", "a"), _voice(page, "drums", "b")
+    assert abs(a["gain"] - 0.7071) < 0.001 and abs(b["gain"] - 0.7071) < 0.001 and a["hp"] == 0
+    page.select_option('[data-pbwin="drums"]', "second")                                     # changes over the second half only
+    assert page.evaluate("CRATE.PB.pos('drums')") == 0 and _voice(page, "drums", "b")["gain"] == 0
+    _set(page, "#pbm", 75)
+    assert page.evaluate("CRATE.PB.pos('drums')") == 0.5
+    _set(page, '[data-pbpos="other"]', 100, ("input", "change"))                            # one layer by hand
+    assert page.evaluate("[CRATE.PB.pos('other'),CRATE.PB.m]") == [1, 0.75]
+    assert page.locator('[data-pbrow="other"] .tag.hot').count() == 1 and page.locator('[data-pbwin="other"]').count() == 0
+    _set(page, "#pbm", 100)
+    assert page.evaluate("CRATE.PB.atEnd(1)") is True and page.is_disabled("#pbnext")        # B is the last snapshot
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).trans[0].layers.drums") == {"style": "xfade", "win": "second"}
+    page.click("#pbback")
+    page.wait_for_selector("#mxall")
+    assert page.evaluate("CRATE.PB.on") is False
+    _set(page, "#mxbpm", 120, ("change",))                                                   # the strip plays at the mixer's tempo
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    assert abs(_voice(page, "drums", "a")["dur"] - 8.0) < 0.01
+
+
+def test_playback_arrows_walk_the_strip(site, page):
+    """Fully on the right snapshot, ▶ moves the view on: B to the left without a gap in its sound, C on the right.
+    ◀ goes back. A part whose song is no longer prepared shows as missing and the rest plays on."""
+    _strip(site, page, three=True)
+    page.evaluate("CRATE.MX.snaps[2].slots.vocals.track=999999")
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing&&CRATE.PB.nextReady", timeout=90000)
+    assert page.is_disabled("#pbnext") and page.is_disabled("#pbprev")
+    _set(page, "#pbm", 100)
+    page.wait_for_function("!document.querySelector('#pbnext').disabled")
+    key, t = page.evaluate("[CRATE.PB.voice('drums','b').key,CRATE.PB.voice('drums','b').t]")
+    page.click("#pbnext")
+    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.ready", timeout=60000)
+    assert page.evaluate("[CRATE.PB.m,[...document.querySelectorAll('#pb .pbletter')].map(e=>e.textContent)]") == [0, ["B", "C"]]
+    assert page.evaluate("[CRATE.PB.voice('drums','a').key,CRATE.PB.voice('drums','a').t]") == [key, t]     # B's drums never stopped
+    assert "missing" in page.inner_text('[data-pbrow="vocals"] [data-pbside="b"]')
+    assert page.evaluate("CRATE.PB.rows.find(r=>r.id==='vocals').kind") == "exit"
+    assert page.is_disabled("#pbnext")                                                                    # C is the last one
+    page.click("#pbprev")
+    page.wait_for_function("CRATE.PB.i===0&&CRATE.PB.ready", timeout=60000)
+    assert page.evaluate("CRATE.PB.m") == 1
+
+
+def test_playback_waits_for_the_next_snapshot(site, page):
+    """The arrow stays off until the next snapshot's parts are loaded, however long that takes."""
+    _strip(site, page, three=True)
+    page.evaluate("""(()=>{const api=CRATE.api,slow=CRATE.MX.snaps[2].slots.bass.track;
+      CRATE.api=(p,b)=>p==='api/stems/render'&&b.stem==='bass'&&b.track===slow?new Promise(r=>setTimeout(r,4000)).then(()=>api(p,b)):api(p,b)})()""")
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    _set(page, "#pbm", 100)
+    assert page.evaluate("CRATE.PB.nextReady") is False and page.is_disabled("#pbnext")
+    page.wait_for_function("CRATE.PB.nextReady&&!document.querySelector('#pbnext').disabled", timeout=20000)
+
+
+def test_auto_walks_the_strip_and_hands_back_control(site, page):
+    """auto: hold a snapshot, move the master across over the transition's bars, move the view on, and stop on the last
+    snapshot. A hand on a slider switches it off where it stands."""
+    _strip(site, page, bpm=200, three=True)                  # 200 bpm: a bar lasts 1.2 s
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing&&CRATE.PB.nextReady", timeout=90000)
+    page.select_option("#pbbars", "2")
+    page.evaluate("CRATE.PB.setHold(1)")                     # the menu offers 4, 8 and 16 bars: one keeps the test short
+    page.click("#pbauto")
+    assert page.evaluate("CRATE.PB.auto") is True
+    page.wait_for_function("CRATE.PB.i===0&&CRATE.PB.m>0.2&&CRATE.PB.m<1", timeout=15000)   # moving, after the hold
+    assert "bar" in page.inner_text("#pbstat")
+    page.wait_for_function("CRATE.PB.i===1", timeout=15000)                                # on B: the view moved on by itself
+    _set(page, "#pbm", 30)                                                                  # a hand on the master
+    assert page.evaluate("[CRATE.PB.auto,CRATE.PB.m]") == [False, 0.3]
+    page.click("#pbauto")                                                                   # on again from where it stands
+    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.m===1&&CRATE.PB.auto===false", timeout=30000)   # the last snapshot: it stays
+
+
+def test_auto_holds_after_a_slow_next_snapshot(site, page):
+    """auto waits on a snapshot that loads slowly, and once it is in, holds it before moving on: it never skips the
+    hold or cuts through the transition because the wait was long."""
+    _strip(site, page, bpm=200, three=True)                  # a bar lasts 1.2 s
+    page.evaluate("""(()=>{const api=CRATE.api,slow=CRATE.MX.snaps[2].slots.bass.track;
+      CRATE.api=(p,b)=>p==='api/stems/render'&&b.stem==='bass'&&b.track===slow?new Promise(r=>setTimeout(r,12000)).then(()=>api(p,b)):api(p,b)})()""")
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    page.select_option("#pbbars", "2")
+    page.evaluate("CRATE.PB.setHold(1)")
+    page.click("#pbauto")
+    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.ready", timeout=40000)
+    page.wait_for_timeout(300)
+    assert page.evaluate("[CRATE.PB.auto,CRATE.PB.m,CRATE.PB.ph&&CRATE.PB.ph.kind]") == [True, 0, "hold"]
+
+
+def test_a_failed_info_call_keeps_the_pair_playing(site, page):
+    """When the server cannot answer for the next pair, ▶ leaves the view where it is and the sound playing; nothing
+    is marked missing."""
+    _strip(site, page, three=True)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing&&CRATE.PB.nextReady", timeout=90000)
+    _set(page, "#pbm", 100)
+    page.wait_for_function("!document.querySelector('#pbnext').disabled")
+    page.evaluate("""(()=>{const api=CRATE.api;CRATE.api=(p,b)=>p==='api/stems/info'?Promise.reject(new Error('down')):api(p,b)})()""")
+    page.click("#pbnext")
+    page.wait_for_timeout(1500)
+    assert page.evaluate("[CRATE.PB.i,CRATE.PB.ready,!!(CRATE.PB.voice('drums','b')&&CRATE.PB.voice('drums','b').src)]") == [0, True, True]
+    assert "missing" not in page.inner_text("#pb")
+
+
+def test_changing_the_length_during_auto_does_not_jump(site, page):
+    """A new transition length while auto is moving changes its speed from where the master is, not its position."""
+    _strip(site, page, bpm=200, three=True)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing&&CRATE.PB.nextReady", timeout=90000)
+    page.evaluate("CRATE.PB.setHold(1)")
+    page.click("#pbauto")                                    # over 8 bars: 9.6 s
+    page.wait_for_function("CRATE.PB.m>0.3", timeout=20000)
+    page.select_option("#pbbars", "2")
+    page.wait_for_timeout(150)
+    assert page.evaluate("CRATE.PB.m") < 0.6 and page.evaluate("CRATE.PB.i") == 0

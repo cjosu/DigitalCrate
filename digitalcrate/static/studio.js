@@ -1603,9 +1603,569 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
     return `<span class="mxeq${on ? '' : ' mxoff'}" title="duck: the drums' low end pushes this part's low end down a little, so kick and bass don't pile up · the slider is how many dB at most"><button class="tbtn mxtg${on ? ' on' : ''}" data-mxduckon="${id}" title="duck on / off (your setting is kept)">DUCK</button><label>lows<input type="range" min="0" max="${BL.DUCK.max}" step="0.5" value="${BL.duckDb(d)}" data-mxduck="${id}"></label></span>`;
   };
 
-  // Task 3 replaces these two: the snapshot strip above the slots, and the playback view
-  BL.stripHTML = () => '';
-  BL.pbDraw = () => false;
+  // ---------------------------------------------------------------- snapshots
+
+  BL.LETTERS = 'ABCDEFGH';
+  BL.STEMVAR = { drums: '--PERC', bass: '--BASS', vocals: '--VOX', other: '--KEYS' };
+  const copy = x => JSON.parse(JSON.stringify(x));
+
+  // a part that sounds: there, holding a song, not muted
+  BL.audible = p => !!p && p.track != null && p.mute !== true;
+  // the same audio: volume, EQ, delay and lock do not count
+  BL.sameAudio = (a, b) => BL.audible(a) && BL.audible(b) && a.stem === b.stem && a.track === b.track &&
+    a.bar0 === b.bar0 && a.n === b.n && (a.k || 1) === (b.k || 1) && (a.off || 0) === (b.off || 0);
+
+  // one row per slot of two snapshots: [{id, stem, a, b, kind}], kind one of same, change, enter, exit, empty
+  BL.diffSnaps = (A, B) => {
+    const ids = [...(A.order || [])];
+    (B.order || []).forEach(id => { if (!ids.includes(id)) ids.push(id); });
+    return ids.map(id => {
+      const pa = (A.slots || {})[id], pb = (B.slots || {})[id];
+      const a = BL.audible(pa) ? pa : null, b = BL.audible(pb) ? pb : null;
+      const kind = a && b ? (BL.sameAudio(a, b) ? 'same' : 'change') : b ? 'enter' : a ? 'exit' : 'empty';
+      const stem = (b && b.stem) || (a && a.stem) || (B.roles || {})[id] || (A.roles || {})[id] || id;
+      return { id, stem, a, b, kind };
+    });
+  };
+
+  // the mixer as it is now, in the shape save() writes
+  BL.snapNow = () => {
+    H.save();
+    const sv = JSON.parse(localStorage.getItem('dcStems') || '{}');
+    return { order: sv.order || [], roles: sv.roles || {}, slots: sv.slots || {}, duck: sv.duck || {} };
+  };
+
+  BL.capture = async () => {
+    const MX = H.MX;
+    if (MX.snaps.length >= BL.MAX_SNAPS) { toast('8 snapshots at most: delete one first'); return false; }
+    if (!MX.order.some(id => BL.audible(MX.slots[id]))) { toast('nothing to snapshot yet: 🎲 a part first'); return false; }
+    if (MX.key === '' && MX.info && MX.info.key) MX.key = MX.info.key;   // the auto key is frozen
+    const prev = MX.snaps[MX.snaps.length - 1], snap = BL.snapNow();
+    MX.snaps.push(snap); BL.fixTrans(MX); MX.snapSel = MX.snaps.length - 1;
+    const ids = prev ? BL.diffSnaps(prev, snap).filter(r => r.kind === 'change' || r.kind === 'enter').map(r => r.id)
+      : snap.order.filter(id => BL.audible(snap.slots[id]));
+    ids.forEach(id => H.ev('snap', id));
+    H.save(); H.draw();
+    return true;
+  };
+
+  // bring a snapshot back into the mixer, as opening a saved combination does
+  BL.recall = async i => {
+    const MX = H.MX, s = MX.snaps[i]; if (!s) return;
+    const was = MX.on; if (was) H.play(false);
+    MX.order = copy(s.order); MX.roles = copy(s.roles); MX.slots = copy(s.slots); MX.duck = copy(s.duck || {});
+    MX.info = null; MX.snapSel = i;
+    await H.sync();
+    MX.order.forEach(H.apply);
+    if (was) H.play(true);
+  };
+
+  BL.replace = i => { const MX = H.MX; if (!MX.snaps[i]) return; MX.snaps[i] = BL.snapNow(); H.save(); H.draw(); };
+
+  BL.remove = i => {
+    const MX = H.MX; if (!MX.snaps[i]) return;
+    MX.snaps.splice(i, 1);
+    MX.trans.splice(Math.min(i, MX.trans.length - 1), 1);
+    if (i > 0 && i < MX.snaps.length) MX.trans[i - 1] = { bars: 8, layers: {} };   // its two neighbours are a new pair
+    BL.fixTrans(MX); MX.snapSel = null; H.save(); H.draw();
+  };
+
+  // the strip above the slots
+  BL.stripHTML = () => {
+    const MX = H.MX, n = MX.snaps.length, sel = MX.snapSel, L = BL.LETTERS;
+    const label = i => {
+      if (!i) return '<span class="sub">start</span>';
+      const d = BL.diffSnaps(MX.snaps[i - 1], MX.snaps[i]).filter(r => r.kind !== 'same' && r.kind !== 'empty');
+      return d.length ? d.map(r => `<span class="sndot" style="--c:var(${BL.STEMVAR[r.stem] || '--mute'})"></span>${r.stem}`).join('') : '<span class="sub">same</span>';
+    };
+    return `<div class="snbar" id="snbar"><span class="snlab">snapshots</span>${MX.snaps.map((s, i) =>
+      `${i ? '<span class="snsep">›</span>' : ''}<button class="snchip${sel === i ? ' on' : ''}" data-sn="${i}" title="bring snapshot ${L[i]} back into the mixer"><b>${L[i]}</b>${label(i)}</button>`).join('')}
+     ${sel != null && sel < n ? `<button class="tbtn" id="snrep" title="write what is playing now over snapshot ${L[sel]}">↻ replace ${L[sel]}</button><button class="tbtn" id="sndel" title="delete snapshot ${L[sel]}">🗑</button>` : ''}
+     <button class="tbtn" id="sncap" title="keep every slot as it is now, as the next snapshot">📸 snapshot</button><span style="flex:1"></span>
+     ${n ? '<span class="sub">tempo and key belong to the strip</span>' : ''}<button class="pill" id="snplay" title="play the snapshots side by side and move from one to the next" ${n < 2 ? 'disabled' : ''}>▶ play strip</button></div>`;
+  };
+
+  // ---------------------------------------------------------------- transitions (pure: they never write to MX)
+
+  // the settings of the transition between snaps[i] and snaps[i + 1], for every layer that differs. A layer with no
+  // setting here takes the nearest earlier transition's stored one for that slot, else filter handoff over it all.
+  BL.transFor = (MX, i, rows) => {
+    rows = rows || BL.diffSnaps(MX.snaps[i], MX.snaps[i + 1]);
+    const tr = MX.trans || [], own = tr[i] || {}, layers = {};
+    for (const r of rows) {
+      if (r.kind !== 'change' && r.kind !== 'enter' && r.kind !== 'exit') continue;
+      let found = null;
+      for (let j = i; j >= 0 && !found; j--) { const e = ((tr[j] || {}).layers || {})[r.id]; if (e && typeof e === 'object') found = e; }
+      layers[r.id] = found ? { style: BL.STYLES.includes(found.style) ? found.style : 'filter', win: BL.WINS[found.win] ? found.win : 'all' }
+        : { style: 'filter', win: 'all' };
+    }
+    return { bars: BL.BARS.includes(own.bars) ? own.bars : 8, layers };
+  };
+
+  // where a row is for the master at m: a row that does not differ follows the master; a layer ridden by hand
+  // stays where the hand left it
+  BL.rowPos = (row, m, T, hand) => {
+    if (row.kind === 'same' || row.kind === 'empty') return m;
+    const h = (hand || {})[row.id];
+    if (h !== null && h !== undefined) return h;
+    return BL.layerPos(m, ((T.layers || {})[row.id] || {}).win);
+  };
+
+  // the mix of a layer that stays, at m: volume, EQ and delay glide; the delay's note value flips halfway
+  BL.lerpMix = (a, b, m) => {
+    const L = (x, y) => x + (y - x) * m, eq = p => p.eqOn === false ? [0, 0, 0] : (p.eq || [0, 0, 0]),
+      dly = p => p.dlyOn === false ? 0 : (p.dly || 0), ea = eq(a), eb = eq(b);
+    return { db: L(a.db || 0, b.db || 0), eq: [0, 1, 2].map(k => L(ea[k] || 0, eb[k] || 0)), dly: L(dly(a), dly(b)),
+      dt: (m < 0.5 ? a.dt : b.dt) || '1/8', eqOn: true, dlyOn: true, mute: false };
+  };
+
+  // ---------------------------------------------------------------- playing the strip
+
+  // two snapshots side by side: snaps[i] on the left, snaps[i + 1] on the right, and the sound moving between them
+  const PB = {
+    on: false, playing: false, ready: false, nextReady: true,
+    i: 0, m: 0, hand: {}, auto: false, hold: 8,
+    rows: [], T: null, info: [{}, {}], missing: {}, t0: 0,
+    cache: new Map(),   // buffer key -> Promise<AudioBuffer>
+    voices: new Map(),  // slot id + '|' + buffer key -> voice
+    seq: 0,             // which load is the current one
+  };
+
+  const PITCHED_STEMS = new Set(['bass', 'vocals', 'other']);
+  const fmtDb = x => (x < 0 ? '−' : '') + Math.abs(Math.round(x * 10) / 10);
+
+  // what the server says about one snapshot's audible parts: their shift, source tempo and key
+  const infoOf = async snap => {
+    const MX = H.MX, slots = {};
+    (snap.order || []).forEach(id => {
+      const p = (snap.slots || {})[id];
+      if (BL.audible(p)) slots[id] = { stem: p.stem, track: p.track, bar0: p.bar0, n: p.n, k: p.k || 1, off: p.off || 0 };
+    });
+    if (!Object.keys(slots).length) return { slots: {} };
+    try { return await window.CRATE.api('api/stems/info', { state: { bpm: MX.bpm, key: MX.key || null, slots } }); }
+    catch (e) { return null; }   // no answer at all: not the same as "this song is no longer prepared"
+  };
+  const semisOf = (info, id) => (((info || {}).slots || {})[id] || {}).semis || 0;
+  const keyOf = (p, semis) => [p.track, p.stem, p.bar0, p.n, p.k || 1, H.MX.bpm, semis].join('|');
+  // a part's audio at the mixer's tempo, rendered by the server once and shared
+  const bufferOf = (key, p, semis) => {
+    if (!PB.cache.has(key)) {
+      const pr = (async () => {
+        const r = await window.CRATE.api('api/stems/render', { track: p.track, stem: p.stem, bar0: p.bar0, n: p.n, k: p.k || 1, bpm: H.MX.bpm, semis });
+        const ab = await (await fetch(url(r.url))).arrayBuffer();
+        return await AC.decodeAudioData(ab);
+      })();
+      pr.catch(() => { if (PB.cache.get(key) === pr) PB.cache.delete(key); });   // a failure is tried again next time
+      PB.cache.set(key, pr);
+    }
+    return PB.cache.get(key);
+  };
+
+  const startVoice = v => {
+    if (v.src || !v.buf) return;
+    const when = AC.currentTime + 0.03, src = AC.createBufferSource(), g = AC.createGain(), d = v.buf.duration;
+    src.buffer = v.buf; src.loop = true; src.connect(g); g.connect(v.xf.in);
+    g.gain.setValueAtTime(0, when); g.gain.linearRampToValueAtTime(1, when + 0.012);
+    src.start(when, (((when - PB.t0) % d) + d) % d);
+    v.src = src; v.g = g; v.t = when;
+  };
+  const stopVoice = (v, t) => {
+    if (!v.src) return;
+    t = t || AC.currentTime;
+    try { v.g.gain.setTargetAtTime(0, t, 0.006); v.src.stop(t + 0.05); } catch (e) { }
+    v.src = null; v.g = null;
+  };
+  const dropVoice = v => {
+    stopVoice(v);
+    setTimeout(() => { try { v.chain.drop(); v.xf.out.disconnect(); } catch (e) { } }, 150);   // after the fade
+  };
+  const newVoice = (id, key, buf) => {
+    const MX = H.MX; BL.out(MX, AC);
+    const xf = BL.mkXf(AC), chain = BL.mkChain(AC, MX.master, MX.bus);
+    xf.out.connect(chain.in);
+    return { id, key, buf, xf, chain, src: null, g: null, t: 0, set: null };
+  };
+
+  // make snaps[i] and snaps[i + 1] the pair that plays. true: loaded; false: the server did not answer, and the
+  // pair that was playing is left as it was; null: a newer load or a close took over.
+  PB.load = async i => {
+    const MX = H.MX, my = ++PB.seq, A = MX.snaps[i], B = MX.snaps[i + 1];
+    PB.ready = false;
+    if (!A || !B) return null;
+    const info = await Promise.all([infoOf(A), infoOf(B)]);
+    if (my !== PB.seq) return null;
+    if (!info[0] || !info[1]) {
+      toast(`could not load ${BL.LETTERS[i]} and ${BL.LETTERS[i + 1]}: the server did not answer, try again`);
+      PB.ready = PB.rows.length > 0 && !!PB.T;   // what was playing still is
+      return false;
+    }
+    PB.info = info; PB.missing = {};
+    const sides = [copy(A), copy(B)], tag = ['a', 'b'];
+    const drop = (s, id) => { PB.missing[tag[s] + ':' + id] = true; delete sides[s].slots[id]; };
+    // a part whose song is no longer prepared gets no answer from the server
+    sides.forEach((snap, s) => Object.keys(snap.slots || {}).forEach(id => {
+      if (BL.audible(snap.slots[id]) && !((info[s].slots || {})[id])) drop(s, id);
+    }));
+    // every part's audio; a part whose render fails counts as missing too
+    const want = [];
+    BL.diffSnaps(sides[0], sides[1]).forEach(r => {
+      if (r.a) want.push({ s: 0, id: r.id, p: r.a, semis: semisOf(info[0], r.id), same: r.kind === 'same' });   // a layer that stays: one voice
+      if (r.b && r.kind !== 'same') want.push({ s: 1, id: r.id, p: r.b, semis: semisOf(info[1], r.id) });
+    });
+    want.forEach(w => { w.key = keyOf(w.p, w.semis); });
+    const got = await Promise.allSettled(want.map(w => bufferOf(w.key, w.p, w.semis)));
+    if (my !== PB.seq) return null;
+    const bufs = {};
+    want.forEach((w, k) => {
+      if (got[k].status === 'fulfilled') bufs[w.s + ':' + w.id] = { key: w.key, buf: got[k].value };
+      else { drop(w.s, w.id); if (w.same) drop(1, w.id); }
+    });
+    PB.rows = BL.diffSnaps(sides[0], sides[1]);
+    PB.T = BL.transFor(MX, i, PB.rows);
+    // voices: keep the ones still needed (they keep playing), drop the rest, make the missing ones
+    const old = PB.voices, keep = new Map();
+    const voiceFor = (id, b) => {
+      const ident = id + '|' + b.key;
+      let v = keep.get(ident) || old.get(ident);
+      if (!v) v = newVoice(id, b.key, b.buf);
+      keep.set(ident, v);
+      return v;
+    };
+    for (const r of PB.rows) {
+      r.va = r.vb = null;
+      if (r.kind === 'empty') continue;
+      const ba = bufs['0:' + r.id], bb = r.kind === 'same' ? ba : bufs['1:' + r.id];
+      if (r.a && ba) r.va = voiceFor(r.id, ba);
+      if (r.b && bb) r.vb = r.kind === 'same' ? r.va : voiceFor(r.id, bb);
+    }
+    old.forEach((v, ident) => { if (!keep.has(ident)) dropVoice(v); });
+    PB.voices = keep;
+    PB.used.set(i, new Set(want.filter(w => w.s === 0).map(w => w.key)));
+    PB.used.set(i + 1, new Set(want.filter(w => w.s === 1 || w.same).map(w => w.key)));
+    prune();
+    PB.nextReady = !MX.snaps[i + 2];
+    PB.ready = true;
+    applyPB();
+    if (PB.playing) PB.voices.forEach(startVoice);
+    H.draw();
+    PB.prefetch();
+    return true;
+  };
+
+  // apply the whole state: every voice's blend filter and chain
+  const applyPB = () => {
+    if (!PB.ready || !PB.T) return;
+    const t = AC.currentTime, nyq = AC.sampleRate / 2, MX = H.MX, A = MX.snaps[PB.i] || {}, B = MX.snaps[PB.i + 1] || {};
+    const o = { on: true, fx: MX.fx !== false, bar: H.barLenM(), DT: H.DT };
+    for (const r of PB.rows) {
+      if (r.kind === 'empty') continue;
+      const set = (v, x, part, duck) => { v.set = x; BL.setXf(v.xf, x, t); BL.applyChain(v.chain, BL.mixOf(part, r.stem, { ...o, duck }), t); };
+      if (r.kind === 'same') { if (r.va) set(r.va, { gain: 1, hp: 0, lp: nyq }, BL.lerpMix(r.a, r.b, PB.m), ((PB.m < 0.5 ? A : B).duck || {})[r.id]); continue; }
+      const b = BL.blendAt(PB.T.layers[r.id].style, PB.pos(r.id), nyq);
+      if (r.va) set(r.va, { gain: b.ga, hp: b.hp, lp: nyq }, r.a, (A.duck || {})[r.id]);
+      if (r.vb) set(r.vb, { gain: b.gb, hp: 0, lp: b.lp }, r.b, (B.duck || {})[r.id]);
+    }
+  };
+
+  PB.pos = id => { const r = PB.rows.find(x => x.id === id); return r && PB.T ? BL.rowPos(r, PB.m, PB.T, PB.hand) : null; };
+  const differs = r => r.kind === 'change' || r.kind === 'enter' || r.kind === 'exit';
+  PB.atEnd = side => PB.rows.filter(differs).every(r => PB.pos(r.id) === side);
+  PB.voice = (id, side) => { const r = PB.rows.find(x => x.id === id); return (r && (side === 'a' ? r.va : r.vb)) || null; };
+
+  PB.play = on => {
+    if (on) {
+      if (PB.playing) return;
+      AC.resume(); PB.t0 = AC.currentTime + 0.05; PB.playing = true;
+      PB.voices.forEach(startVoice);
+    } else {
+      PB.playing = false;
+      PB.voices.forEach(v => stopVoice(v));
+    }
+  };
+
+  PB.setMaster = m => { PB.m = BL.clamp01(m); applyPB(); PB.paint(); };
+  PB.setHand = (id, p) => { PB.hand[id] = BL.clamp01(p); applyPB(); PB.paint(); };
+  // a layer's entry in its transition is always the complete {style, win}
+  const setLayer = (id, k, v) => {
+    const MX = H.MX, tr = MX.trans[PB.i]; if (!tr || !PB.T || !PB.T.layers[id]) return;
+    tr.layers[id] = { ...PB.T.layers[id], [k]: v };
+    H.save(); PB.T = BL.transFor(MX, PB.i, PB.rows); applyPB(); H.draw();
+  };
+  PB.setStyle = (id, style) => setLayer(id, 'style', style);
+  PB.setWin = (id, win) => setLayer(id, 'win', win);
+  PB.setBars = n => {
+    const MX = H.MX, tr = MX.trans[PB.i]; if (!tr || !BL.BARS.includes(n)) return;
+    tr.bars = n; H.save(); PB.T = BL.transFor(MX, PB.i, PB.rows);
+    // auto moving: the new length changes its speed from where the master is, not its position
+    if (PB.auto && PB.ph && PB.ph.kind === 'move') PB.ph = { kind: 'move', from: AC.currentTime, m0: PB.m };
+    applyPB(); H.draw();
+  };
+
+  PB.open = async i => {
+    const MX = H.MX;
+    if (MX.on) H.play(false);
+    PB.on = true; PB.i = i; PB.m = 0; PB.hand = {};
+    H.draw();
+    await PB.load(i);
+    if (!PB.on || PB.i !== i) return;
+    PB.play(true); H.draw();
+  };
+  PB.close = () => {
+    if (PB.auto) PB.setAuto(false);   // no timer outlives the view
+    PB.seq++;
+    PB.play(false);
+    PB.voices.forEach(dropVoice); PB.voices = new Map(); PB.rows = []; PB.T = null; PB.ready = false;
+    PB.cache.clear(); PB.used.clear(); PB.nextReady = true;
+    PB.on = false; PB.auto = false;
+    H.draw();
+  };
+
+  // where each side stands, for its label: [left, right]
+  const sideWords = () => {
+    const e0 = PB.atEnd(0), e1 = PB.atEnd(1);
+    if (e0 && e1) return PB.m < 0.5 ? ['playing', 'next'] : ['silent', 'playing'];
+    if (e0) return ['playing', 'next'];
+    if (e1) return ['silent', 'playing'];
+    return ['going out', 'coming in'];
+  };
+  // ▶ only fully on the right with the next snapshot loaded; ◀ only fully on the left
+  const canNext = () => PB.ready && !!H.MX.snaps[PB.i + 2] && PB.nextReady && PB.atEnd(1);
+  const canPrev = () => PB.ready && PB.i > 0 && PB.atEnd(0);
+  // the arrows: [enabled, class, text] for ▶ and ◀
+  const arrows = () => {
+    const MX = H.MX, LT = BL.LETTERS, i = PB.i, more = !!MX.snaps[i + 2], n = canNext();
+    return {
+      next: [n, n ? 'pill' : 'tbtn', more ? `${LT[i + 1]} · ${LT[i + 2]} ▶` : `${LT[i + 1]} is last`],
+      prev: [canPrev(), 'tbtn', i > 0 ? `◀ ${LT[i - 1]} · ${LT[i]}` : '◀'],
+    };
+  };
+
+  // move the view on (dir 1: the right snapshot goes left, the next comes in) or back (dir -1). The snapshot that
+  // stays keeps its voices, so it never stops sounding.
+  PB.advance = async dir => {
+    if (dir === 1 ? !canNext() : !canPrev()) return false;
+    const was = { i: PB.i, m: PB.m, hand: PB.hand };
+    PB.i += dir; PB.m = dir === 1 ? 0 : 1; PB.hand = {};
+    const r = await PB.load(PB.i);
+    if (r === false) {   // the pair that was playing still is: stay on it
+      Object.assign(PB, was); applyPB(); H.draw();
+      return false;
+    }
+    return r === true;
+  };
+
+  // the buffer keys each snapshot uses, as last loaded: index -> Set
+  PB.used = new Map();
+  // load the snapshot after the pair while the pair plays
+  PB.prefetch = async () => {
+    const MX = H.MX, i = PB.i, my = PB.seq, C = MX.snaps[i + 2];
+    PB.nextReady = !C;
+    if (!C) return;
+    const info = await infoOf(C);
+    if (my !== PB.seq || PB.i !== i) return;
+    if (!info) { PB.nextReady = true; PB.paint(); return; }   // ▶ asks again, and says so if it still cannot load
+    const keys = new Set(), work = [];
+    (C.order || []).forEach(id => {
+      const p = (C.slots || {})[id];
+      if (!BL.audible(p) || !(info.slots || {})[id]) return;   // the server does not answer for a song no longer prepared
+      const semis = semisOf(info, id), key = keyOf(p, semis);
+      keys.add(key); work.push(bufferOf(key, p, semis));
+    });
+    PB.used.set(i + 2, keys);
+    await Promise.allSettled(work);   // a failed render counts as loaded: that part will show as missing
+    if (my !== PB.seq || PB.i !== i) return;
+    PB.nextReady = true; PB.paint();
+  };
+  // keep only the audio of the snapshots around the pair
+  const prune = () => {
+    const keep = new Set();
+    for (let j = PB.i - 1; j <= PB.i + 2; j++) (PB.used.get(j) || []).forEach(k => keep.add(k));
+    [...PB.used.keys()].forEach(j => { if (j < PB.i - 1 || j > PB.i + 2) PB.used.delete(j); });
+    [...PB.cache.keys()].forEach(k => { if (!keep.has(k)) PB.cache.delete(k); });
+  };
+  const setArrow = (el, [on, cls, txt]) => { if (!el) return; el.disabled = !on; el.className = cls; el.textContent = txt; };
+
+  // ---------------------------------------------------------------- auto: hold, move across, move on, again
+
+  PB.ph = null;   // null, or {kind: 'hold' | 'move', from (audio-clock time on a bar line), m0}
+  let autoTimer = 0, ticking = false;
+  const barL = () => H.barLenM();
+  const nextBar = () => PB.t0 + Math.ceil((AC.currentTime - PB.t0) / barL() - 1e-6) * barL();
+  const moveMaster = m => { PB.m = BL.clamp01(m); applyPB(); };   // auto's own setter: it does not switch auto off
+  const moveDur = ph => (1 - ph.m0) * PB.T.bars * barL();
+
+  const tick = async () => {
+    if (ticking || !PB.auto || !PB.ph || !PB.ready || !PB.T) return;   // while a pair loads, wait
+    ticking = true;
+    try {
+      const L = barL(), now = AC.currentTime, ph = PB.ph;
+      if (ph.kind === 'hold') {
+        if (now >= ph.from + PB.hold * L) PB.ph = { kind: 'move', from: ph.from + PB.hold * L, m0: 0 };
+      } else {
+        const dur = moveDur(ph), x = dur > 0 ? (now - ph.from) / dur : (now >= ph.from ? 1 : 0);
+        if (x < 1) { if (x >= 0) moveMaster(ph.m0 + (1 - ph.m0) * x); }
+        else {
+          moveMaster(1);
+          if (!H.MX.snaps[PB.i + 2]) PB.setAuto(false);   // the last snapshot: it stays
+          else if (PB.nextReady) {
+            if (await PB.advance(1)) {
+              // hold from where the move ended, or, after a long wait for the next snapshot, from the next bar line:
+              // the hold and the transition are never skipped
+              const end = ph.from + dur;
+              if (PB.auto) PB.ph = { kind: 'hold', from: AC.currentTime - end > barL() / 2 ? nextBar() : end };
+            } else if (PB.auto) PB.setAuto(false);   // the server did not answer (load said so): stop where it stands
+          }
+          // not loaded yet: try again next tick
+        }
+      }
+      PB.paint();
+    } finally { ticking = false; }
+  };
+
+  PB.setAuto = async on => {
+    clearInterval(autoTimer); autoTimer = 0;
+    if (!on) { PB.auto = false; PB.ph = null; PB.paint(); return; }   // in place: a slider being grabbed stays
+    if (!PB.playing) PB.play(true);
+    PB.hand = {}; PB.auto = true;
+    if (PB.m >= 1) {
+      if (!H.MX.snaps[PB.i + 2]) PB.auto = false;
+      else PB.ph = { kind: 'move', from: nextBar(), m0: 1 };   // moves on at the next bar line, once the next is loaded
+    } else PB.ph = PB.m <= 0 ? { kind: 'hold', from: nextBar() } : { kind: 'move', from: nextBar(), m0: PB.m };
+    if (PB.auto) autoTimer = setInterval(tick, 25);
+    H.draw();
+  };
+  PB.setHold = bars => { PB.hold = +bars > 0 ? +bars : 8; PB.paint(); };
+
+  // the status line: where auto is
+  const statText = () => {
+    const ph = PB.ph; if (!PB.auto || !ph || !PB.T) return '';
+    const L = barL(), now = AC.currentTime, LT = BL.LETTERS, cl = (b, n) => Math.max(1, Math.min(n, b));
+    if (ph.kind === 'hold') return `holding ${LT[PB.i]} · bar ${cl(Math.floor((now - ph.from) / L) + 1, PB.hold)} of ${PB.hold}`;
+    const n = PB.T.bars;
+    return `moving to ${LT[PB.i + 1]} · bar ${cl(Math.floor(ph.m0 * n + (now - ph.from) / L) + 1, n)} of ${n}`;
+  };
+
+  // update the open view in place: never redraw while a slider is being dragged
+  PB.paint = () => {
+    if (!$('pb')) return;
+    const fill = (el, p) => { el.value = Math.round(p * 100); el.style.setProperty('--a', 0); el.style.setProperty('--b', p.toFixed(4)); };
+    document.querySelectorAll('#pb [data-pbpos]').forEach(el => { const p = PB.pos(el.dataset.pbpos); if (p != null) fill(el, p); });
+    const m = $('pbm'); if (m) fill(m, PB.m);
+    PB.rows.forEach(r => {
+      const p = PB.pos(r.id), d = differs(r);
+      const a = document.querySelector(`#pb [data-pbside="a"][data-pbslot="${r.id}"]`), b = document.querySelector(`#pb [data-pbside="b"][data-pbslot="${r.id}"]`);
+      if (a) a.classList.toggle('off', d && p === 1);
+      if (b) b.classList.toggle('off', d && p === 0);
+    });
+    const w = sideWords(), sides = document.querySelectorAll('#pb .pbside .sub'), lets = document.querySelectorAll('#pb .pbletter');
+    if (sides[0]) sides[0].textContent = w[0];
+    if (sides[1]) sides[1].textContent = w[1];
+    if (lets[0]) lets[0].classList.toggle('idle', w[0] === 'silent');
+    if (lets[1]) lets[1].classList.toggle('idle', w[1] === 'next');
+    const ar = arrows(); setArrow($('pbnext'), ar.next); setArrow($('pbprev'), ar.prev);
+    const s = $('pbstat'); if (s) s.textContent = statText();
+    const au = $('pbauto'); if (au) { au.textContent = `auto ${PB.auto ? 'on' : 'off'}`; au.classList.toggle('on', PB.auto); }
+  };
+
+  // one slot's card: the part, its bars and where it comes from, and its waveform
+  const cardHTML = (r, side) => {
+    const MX = H.MX, s = side === 'a' ? 0 : 1, p = r[side], ICON = H.ICON || {};
+    const snap = MX.snaps[PB.i + s] || {}, info = (PB.info[s] || {}).slots || {};
+    const head = `<div class="pbslot" data-pbside="${side}" data-pbslot="${esc(r.id)}">`;
+    if (!p) {
+      const there = (snap.slots || {})[r.id], word = PB.missing[side + ':' + r.id] ? 'missing' : there && there.track != null && there.mute ? 'muted' : 'empty';
+      return `${head}<div class="mxname">${ICON[r.stem] || ''} ${esc(r.stem)}</div><div class="mxsrc"><span class="sub">${word}</span></div></div>`;
+    }
+    const I = info[r.id] || {}, sm = I.semis || 0, last = p.bar0 + Math.max(1, Math.round(p.n * (p.k || 1)));
+    const line = `bars ${p.bar0 + 1}–${last}${I.src_bpm != null ? ` · from ${I.src_bpm} bpm` : ''}${PITCHED_STEMS.has(p.stem) && I.key ? ` · ${I.key}${sm ? ` ${sm > 0 ? '+' : ''}${sm} st` : ''}` : ''}`;
+    return `${head}<div class="mxname">${ICON[p.stem] || ''} ${esc(p.stem)}</div>
+     <div class="mxsrc" title="${esc(p.artist || '')} — ${esc(p.title || '')}"><b>${esc(p.artist || '')}</b> — ${esc(p.title || '')}<br><span class="sub">${line}</span></div>
+     <div class="mxwave" data-pbwave="${side}:${esc(r.id)}"><canvas></canvas><i></i></div></div>`;
+  };
+  // the column between: a layer's style, when it changes, and its own slider
+  const midHTML = r => {
+    if (r.kind === 'same') {
+      const da = r.a.db || 0, db = r.b.db || 0;
+      return `<div class="pbsame">same in both${da !== db ? `<br><span class="sub">volume glides ${fmtDb(da)} → ${fmtDb(db)} dB</span>` : ''}</div>`;
+    }
+    if (r.kind === 'empty') return '<div class="pbsame">empty in both</div>';
+    const L = PB.T.layers[r.id], T = PB.T.bars, h = T / 2, id = esc(r.id), p = PB.pos(r.id);
+    const opt = (v, txt, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${txt}</option>`;
+    const win = PB.hand[r.id] != null ? '<span class="tag hot">by hand</span>'
+      : `<select data-pbwin="${id}">${opt('all', `bars 1–${T}`, L.win)}${opt('first', `bars 1–${h}`, L.win)}${opt('second', `bars ${h + 1}–${T}`, L.win)}${opt('cut', `cut at bar ${h + 1}`, L.win)}</select>`;
+    return `<div class="pbx"><div class="pbxrow"><select data-pbstyle="${id}">${opt('filter', 'filter handoff', L.style)}${opt('xfade', 'crossfade', L.style)}</select>${win}</div>
+     <label class="pbab"><span>A</span><input type="range" min="0" max="100" step="1" value="${Math.round(p * 100)}" data-pbpos="${id}"><span>B</span></label></div>`;
+  };
+
+  const waveCol = stem => getComputedStyle(document.documentElement).getPropertyValue(BL.STEMVAR[stem] || '').trim() || '#8cc0da';
+  const pbWaves = () => document.querySelectorAll('#pb [data-pbwave]').forEach(box => {
+    const [side, id] = box.dataset.pbwave.split(':'), v = PB.voice(id, side), r = PB.rows.find(x => x.id === id);
+    if (!v || !v.buf || !r) return;
+    const part = r[side] || r.a || r.b, c = box.querySelector('canvas'), dpr = devicePixelRatio || 1;
+    const W = Math.round(box.clientWidth * dpr), Hh = Math.round(34 * dpr); if (!W) return;
+    c.width = W; c.height = Hh;
+    const g = c.getContext('2d'), d = v.buf.getChannelData(0), step = d.length / W, m = new Float32Array(W);
+    let pk = 0;
+    for (let x = 0; x < W; x++) { let q = 0; for (let k = Math.floor(x * step), e = Math.min(d.length, Math.floor((x + 1) * step)); k < e; k += 3) q = Math.max(q, Math.abs(d[k])); m[x] = q; pk = Math.max(pk, q); }
+    g.fillStyle = waveCol(part.stem);
+    for (let x = 0; x < W; x++) { const hh = Math.max(1, m[x] / (pk || 1) * Hh); g.fillRect(x, (Hh - hh) / 2, 1, hh); }
+    g.fillStyle = 'rgba(255,255,255,.28)';
+    for (let b = 1; b < part.n; b++) g.fillRect(Math.round(b / part.n * W), 0, 1, Hh);   // bar lines
+  });
+  let pbRaf = 0;
+  const pbHeads = () => {
+    pbRaf = 0;
+    if (!PB.on || !PB.playing || st.tab !== 'M') return;
+    document.querySelectorAll('#pb [data-pbwave]').forEach(box => {
+      const [side, id] = box.dataset.pbwave.split(':'), v = PB.voice(id, side), el = box.querySelector('i');
+      if (!v || !v.buf || !el) return;
+      const d = v.buf.duration, x = ((AC.currentTime - PB.t0) % d + d) % d / d;
+      el.style.left = (x * 100).toFixed(2) + '%'; el.style.display = 'block';
+    });
+    pbRaf = requestAnimationFrame(pbHeads);
+  };
+
+  // the playback view, in place of the mixer while it is open
+  BL.pbDraw = L => {
+    if (!PB.on) return false;
+    const MX = H.MX, LT = BL.LETTERS, i = PB.i;
+    const key = MX.key || (PB.info[0] || {}).key || 'auto';
+    const chips = MX.snaps.map((s, k) => `${k ? '<span class="snsep">›</span>' : ''}<button class="snchip${k === i || k === i + 1 ? ' on' : ''}" data-pbsn="${k}"><b>${LT[k]}</b></button>`).join('');
+    const hold = [4, 8, 16].map(n => `<option value="${n}"${n === PB.hold ? ' selected' : ''}>${n} bars</option>`).join('');
+    const ready = PB.ready && PB.T, w = ready ? sideWords() : ['going out', 'coming in'], ar = arrows();
+    const btn = (id, [on, cls, txt]) => `<button class="${cls}" id="${id}"${on ? '' : ' disabled'}>${txt}</button>`;
+    let rows = '';
+    if (ready) {
+      rows = PB.rows.map(r => `<div class="pb3" data-pbrow="${esc(r.id)}">${cardHTML(r, 'a')}${midHTML(r)}${cardHTML(r, 'b')}</div>`).join('');
+      const bars = [2, 4, 8, 16].map(n => `<option value="${n}"${n === PB.T.bars ? ' selected' : ''}>${n} bars</option>`).join('');
+      rows += `<div class="pb3">
+       <div class="sub" style="align-self:center;text-align:right">moves every layer at once</div>
+       <div class="pbx pbmaster"><div class="pbxrow" style="justify-content:space-between"><b>master</b>
+         <label class="sub">over <select id="pbbars" style="flex:none">${bars}</select></label></div>
+        <label class="pbab"><span>A</span><input type="range" id="pbm" min="0" max="100" step="1" value="${Math.round(PB.m * 100)}"><span>B</span></label></div>
+       <div class="sub" id="pbstat" style="align-self:center">${statText()}</div>
+      </div>`;
+    }
+    L.innerHTML = `<div class="mx" id="pb">
+     <div class="mxtop pbhead">
+      <button id="pbback">◂ mixer</button><span class="snlab">playing the strip</span>${chips}
+      <button id="pbplay" class="${PB.playing ? 'on' : ''}">${PB.playing ? '■ stop' : '▶ play'}</button><span class="sub">${MX.bpm} bpm · ${esc(key)}</span><span style="flex:1"></span>
+      <button id="pbauto" class="${PB.auto ? 'on' : ''}">auto ${PB.auto ? 'on' : 'off'}</button>
+      <label class="sub">hold <select id="pbhold">${hold}</select></label>
+     </div>
+     <div class="pbscroll"><div class="pbgrid">
+      <div class="pb3" style="margin-bottom:6px">
+       <div class="pbside">${btn('pbprev', ar.prev)}<b class="pbletter${w[0] === 'silent' ? ' idle' : ''}">${LT[i]}</b><span class="sub">${w[0]}</span></div>
+       <div class="snlab" style="text-align:center;align-self:center">transition</div>
+       <div class="pbside r"><span class="sub">${w[1]}</span><b class="pbletter${w[1] === 'next' ? ' idle' : ''}">${LT[i + 1]}</b>${btn('pbnext', ar.next)}</div>
+      </div>
+      ${rows}
+     </div></div>
+    </div>`;
+    if (ready) { PB.paint(); pbWaves(); }
+    if (PB.playing && !pbRaf) pbRaf = requestAnimationFrame(pbHeads);
+    return true;
+  };
 
   BL.init = hooks => {
     H = BL.H = hooks;
@@ -1615,13 +2175,38 @@ midiBtn();if(navigator.requestMIDIAccess&&navigator.permissions)navigator.permis
       if (st.tab !== 'M') return;
       const t = e.target.closest('button'); if (!t) return;
       const ds = t.dataset;
-      if (ds.mxduckon) { const d = BL.duckOf(ds.mxduckon); d.on = d.on === false; H.apply(ds.mxduckon); H.save(); H.draw(); }
+      const MX = H.MX;
+      if (ds.mxduckon) { const d = BL.duckOf(ds.mxduckon); d.on = d.on === false; H.apply(ds.mxduckon); H.save(); H.draw(); return; }
+      if (t.id === 'sncap') { BL.capture(); return; }
+      if (ds.sn != null) { BL.recall(+ds.sn); return; }
+      if (t.id === 'snrep') { BL.replace(MX.snapSel); return; }
+      if (t.id === 'sndel') { BL.remove(MX.snapSel); return; }
+      if (t.id === 'snplay') { PB.open(0); return; }
+      if (t.id === 'pbback') { PB.close(); return; }
+      if (t.id === 'pbplay') { if (PB.playing && PB.auto) PB.setAuto(false); PB.play(!PB.playing); H.draw(); return; }
+      if (t.id === 'pbauto') { PB.setAuto(!PB.auto); return; }
+      // a hand switches auto off where it stands, then does what it does
+      if (t.id === 'pbnext') { if (PB.auto) PB.setAuto(false); PB.advance(1); return; }
+      if (t.id === 'pbprev') { if (PB.auto) PB.setAuto(false); PB.advance(-1); return; }
     });
     L.addEventListener('input', e => {
       if (st.tab !== 'M') return;
-      const ds = e.target.dataset || {};
-      if (ds.mxduck) { BL.duckOf(ds.mxduck).db = +e.target.value; H.apply(ds.mxduck); }
+      const t = e.target, ds = t.dataset || {};
+      if (ds.mxduck) { BL.duckOf(ds.mxduck).db = +t.value; H.apply(ds.mxduck); return; }
+      // read the hand's value first: switching auto off repaints the sliders
+      if (t.id === 'pbm') { const v = +t.value / 100; if (PB.auto) PB.setAuto(false); PB.setMaster(v); return; }
+      if (ds.pbpos) { const v = +t.value / 100; if (PB.auto) PB.setAuto(false); PB.setHand(ds.pbpos, v); return; }
     });
+    L.addEventListener('change', e => {
+      if (st.tab !== 'M') return;
+      const t = e.target, ds = t.dataset || {};
+      if (ds.pbpos) { H.draw(); return; }   // the "by hand" tag appears
+      if (ds.pbstyle) { PB.setStyle(ds.pbstyle, t.value); return; }
+      if (ds.pbwin) { PB.setWin(ds.pbwin, t.value); return; }
+      if (t.id === 'pbbars') { PB.setBars(+t.value); return; }
+      if (t.id === 'pbhold') { PB.setHold(+t.value); return; }
+    });
+    window.CRATE.PB = BL.pb = PB;
   };
 
   window.BLEND = BL;

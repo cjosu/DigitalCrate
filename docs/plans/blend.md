@@ -1,6 +1,6 @@
 # Plan: Snapshots and blends in the stem mixer, and a low-end duck
 
-Status: designed, not built. It builds on the stem mixer ([stems.md](stems.md)). The implementation plan is
+Status: built. It builds on the stem mixer ([stems.md](stems.md)). The implementation plan is
 [docs/superpowers/plans/2026-11-24-stem-snapshots-and-blends.md](../superpowers/plans/2026-11-24-stem-snapshots-and-blends.md).
 
 ## The idea
