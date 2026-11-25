@@ -257,6 +257,29 @@ def choose(con, n_random=40):
     return out
 
 
+def choose_new_artists(con, n):
+    """n songs by artists Mashup has nothing from yet, one song an artist: the artists you have favorites from first
+    (most favorites first, their most-favorited song), then artists at random. Never reference-only artists."""
+    norm = lambda a: (a or "").strip().lower()
+    have_t = set(library())
+    have_a = {norm(m.get("artist")) for m in library().values()}
+    ok = "t.status='done' AND COALESCE(t.policy,'source') != 'reference' AND t.tempo_ok=1"
+    favs = dict(con.execute("""SELECT s.track_id, COUNT(*) FROM favorites f JOIN samples s ON s.path = f.path
+                               GROUP BY s.track_id""").fetchall())
+    by = {}
+    for r in con.execute(f"SELECT t.id, t.artist FROM tracks t WHERE {ok} AND t.id IN (SELECT track_id FROM samples)"):
+        a = norm(r["artist"])
+        if a and a not in have_a and r["id"] not in have_t:
+            by.setdefault(a, []).append(r["id"])
+    rng = np.random.default_rng()
+    picks = []
+    for a, ids in by.items():
+        ids = sorted(ids, key=lambda t: (-favs.get(t, 0), rng.random()))
+        picks.append((sum(favs.get(t, 0) for t in ids), rng.random(), ids[0]))
+    picks.sort(key=lambda p: (-p[0], p[1]))
+    return [p[2] for p in picks[:n]]
+
+
 def top_up(limit=None, split=None, embed=None, *, standalone=True):
     from .memguard import breathe
     songs = [(tid, m) for tid, m in library().items() if "drums" in m["stems"] and not tops_ready(tid, m)][:limit]
@@ -280,13 +303,13 @@ def top_up(limit=None, split=None, embed=None, *, standalone=True):
     return made
 
 
-def prepare(n_random=40, limit=None, separate=True, tops_only=False):
+def prepare(n_random=40, limit=None, separate=True, tops_only=False, new_artists=False):
     from .memguard import breathe
     top_up(limit, split=None if separate else _rough_tops, standalone=tops_only)
     if tops_only:
         return
     con = connect()
-    ids = choose(con, n_random)
+    ids = choose_new_artists(con, n_random) if new_artists else choose(con, n_random)
     ids = ids[:limit] if limit else ids
     print(f"TASK preparing stems of {len(ids)} songs for Mashup", flush=True)
     done = 0

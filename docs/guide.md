@@ -85,7 +85,8 @@ Hover over the song for the full name and why that part was picked.
 
 - **Prepare songs first.** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
   (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used. Hip-hop gives
-  vocals only. Open **songs prepared for Mashup** to put a song's stem straight into a track.
+  vocals only. `digitalcrate stems --new-artists --random 100` takes songs by artists Mashup has nothing from yet,
+  one song an artist. Open **songs prepared for Mashup** to put a song's stem straight into a track.
 - **Tops** holds the hi-hat, ride and crash. Pick them with the Tops button in the song list. Drums plays the
   rest of the kit once a song has Tops. **digitalcrate stems** makes Tops for earlier songs first, adding about
   15 to 20 MB per song. Use `digitalcrate stems --tops-only` to prepare just those songs. Until then, Drums plays
