@@ -614,8 +614,10 @@ def oneshot(state, n=1, avoid=(), rng=None, path=None):
         k = idx[0]
     else:
         # the dice goes by harmony, so it leaves single drum hits out (you can still choose one yourself)
-        ok = np.array([r["dur"] <= 2 * bar + 0.05 and r["path"] not in bad and r["path"] not in avoid
-                       and r["category"] != "Percussion" and r["kind"] != "loop" for r in rows])  # a loop isn't a hit
+        # (shifting to the key is tape-style, so it changes the length: down a tritone is 41% longer)
+        long = np.array([r["dur"] for r in rows]) * 2.0 ** (-semis / 12.0)
+        ok = np.array([long[i] <= 2 * bar + 0.05 and r["path"] not in bad and r["path"] not in avoid
+                       and r["category"] != "Percussion" and r["kind"] != "loop" for i, r in enumerate(rows)])  # a loop isn't a hit
         if not ok.any():
             return None
         cand = np.where(ok)[0]
