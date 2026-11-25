@@ -1770,8 +1770,9 @@ def test_effects_are_numbers_under_every_track(site, page):
     assert devs("bass") == ["eq", "dly", "rev", "harm", "even", "duck"]
     assert devs("other") == ["eq", "dly", "rev", "harm", "duck"]
     page.evaluate("CRATE.TR.set('bass','fb',60)")
-    page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.fb.gain.value-0.6)<0.02")
     assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass.fb") == 0.6
+    page.evaluate("CRATE.TR.set('bass','dly',50)")
+    page.wait_for_function("Math.abs(CRATE.MX.slots.bass._c.fb.gain.value-0.6)<0.02")
     assert page.evaluate("CRATE.MX.slots.drums._c.fb.gain.value") == pytest.approx(0.35, abs=0.01)   # untouched: as it was fixed
     box = page.locator('[data-v="vocals:g0"]').bounding_box()
     x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
@@ -1782,7 +1783,6 @@ def test_effects_are_numbers_under_every_track(site, page):
     page.click('[data-mxrow="vocals"] [data-mxeqon]')
     page.wait_for_function("Math.abs(CRATE.MX.slots.vocals._c.lo.gain.value)<0.1")
     assert page.evaluate("CRATE.MX.slots.vocals.eq[0]") == 6 and page.locator('[data-mxrow="vocals"] .trdev[data-dev="eq"].mxoff').count() == 1
-    page.evaluate("CRATE.TR.set('bass','dly',50)")
     assert page.evaluate("CRATE.MX.slots.bass.dly") == pytest.approx(0.4)
     assert page.locator('[data-mxrow] input[data-mxeq], [data-mxrow] input[data-mxdly], [data-mxrow] select[data-mxdt], [data-mxrow] input[data-mxrev], [data-mxrow] input[data-mxduck]').count() == 0
     page.set_viewport_size({"width": 1280, "height": 800})
