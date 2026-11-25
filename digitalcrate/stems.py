@@ -60,6 +60,18 @@ def has_tops(track):
     return _meta_path(track).with_name("tops.flac").is_file()
 
 
+def tops_ready(track, meta=None):
+    """The completed metadata tells readers when the split can be used."""
+    if not has_tops(track):
+        return False
+    if meta is None:
+        try:
+            meta = json.loads(_meta_path(track).read_text())
+        except FileNotFoundError:
+            return False
+    return "tops" in meta.get("act", {})
+
+
 def _bar_rms(mono, edges):
     return np.array([np.sqrt(np.mean(mono[a:b] ** 2) + 1e-12) for a, b in zip(edges[:-1], edges[1:]) if b > a])
 
@@ -68,19 +80,17 @@ def _activity(rms):
     return np.clip(rms / (np.quantile(rms, 0.9) + 1e-9), 0, 1).round(3).tolist()
 
 
-def _levels(tid, m):
-    """Each stem's loudness (dBFS, the RMS of its loudest bars); stems that are all but silent in the song are
-    dropped from what the mixer offers. Worked out once per song and kept in its meta."""
+def _measure_levels(tid, m, tops=None):
+    """Measure the stems' loudest bars in dBFS and drop stems that are all but silent."""
     import soundfile as sf
     lv = {}
-    tops = has_tops(tid)
     for k in ROLES:
-        f = DIR / f"t{tid}" / f"{k}.flac"
-        if not f.exists():
+        f = tops if k == "tops" else DIR / f"t{tid}" / f"{k}.flac"
+        if f is None or not f.exists():
             continue
         y, sr = sf.read(str(f), dtype="float32", always_2d=True)
-        if k == "drums" and tops:
-            y -= sf.read(str(f.with_name("tops.flac")), dtype="float32", always_2d=True)[0]
+        if k == "drums" and tops is not None:
+            y -= sf.read(str(tops), dtype="float32", always_2d=True)[0]
         mono = y.mean(1)
         e = (np.array(m["bars"]) * sr).astype(int)
         rms = _bar_rms(mono, e)
@@ -88,6 +98,11 @@ def _levels(tid, m):
     top = max(lv.values()) if lv else 0.0
     m["level"] = lv
     m["stems"] = [k for k in m["stems"] if lv.get(k, -120) >= top + SILENT_DB and lv.get(k, -120) > -55]
+
+
+def _levels(tid, m):
+    tops = _meta_path(tid).with_name("tops.flac") if tops_ready(tid, m) else None
+    _measure_levels(tid, m, tops)
     with _cache_output(_meta_path(tid)) as tmp:
         tmp.write_text(json.dumps(m))
     return m
@@ -139,7 +154,9 @@ def make_tops(track, split=None, embed=None):
     zero = np.zeros_like(drums.T)
     tops = np.clip(sum(pieces.get(k, zero) for k in TOPS_PIECES), -1, 1)
     edges = (np.asarray(m["bars"]) * sr).round().astype(int)
-    with _cache_output(meta.with_name("tops.flac")) as tmp:
+    if "tops" not in m["stems"]:
+        m["stems"].append("tops")
+    with _cache_output(meta) as tmp_meta, _cache_output(meta.with_name("tops.flac")) as tmp:
         sf.write(str(tmp), tops.T, sr, format="FLAC", subtype="PCM_16")
         stored, _ = sf.read(str(tmp), dtype="float32", always_2d=True)
         for k, mono in (("drums", (drums - stored).mean(1)), ("tops", stored.mean(1))):
@@ -156,12 +173,12 @@ def make_tops(track, split=None, embed=None):
             mono = piece.mean(0)
             hops = np.arange(0, len(mono), 512)
             kit.append(np.sqrt(np.add.reduceat(mono ** 2, hops) / np.diff(np.r_[hops, len(mono)])))
+        _measure_levels(track, m, tmp)
         for name, data in (("emb.npy", emb), ("kit.npy", np.asarray(kit, np.float16))):
             with _cache_output(meta.with_name(name)) as tmp_array:
                 np.save(tmp_array, data)
-    if "tops" not in m["stems"]:
-        m["stems"].append("tops")
-    return _levels(track, m)
+        tmp_meta.write_text(json.dumps(m))
+    return m
 
 
 def _rough_tops(drums):
@@ -239,7 +256,7 @@ def choose(con, n_random=40):
 
 def top_up(limit=None, split=None, embed=None, *, standalone=True):
     from .memguard import breathe
-    songs = [(tid, m) for tid, m in library().items() if "drums" in m["stems"] and not has_tops(tid)][:limit]
+    songs = [(tid, m) for tid, m in library().items() if "drums" in m["stems"] and not tops_ready(tid, m)][:limit]
     print(f"TASK making Tops for {len(songs)} songs prepared before", flush=True)
     made = 0
     for k, (tid, m) in enumerate(songs, 1):
@@ -310,7 +327,7 @@ def render(track, stem, bar0, n, bpm, semis=0.0, k=1, *, legacy=False, with_tops
     from .stretch import signalsmith
     track, requested = int(track), int(bar0)
     m = library()[track]
-    split = stem in DRUM_ROLES and (has_tops(track) if with_tops is None else with_tops)
+    split = stem in DRUM_ROLES and (tops_ready(track, m) if with_tops is None else with_tops)
     if stem == "tops" and not split:
         raise KeyError((track, stem))
     semis = round(float(semis), 2) or 0.0
@@ -376,7 +393,9 @@ def peaks(track, stem):
     if stem not in ROLES:
         raise KeyError(stem)
     source = DIR / f"t{track}" / f"{stem}.flac"
-    split = stem == "drums" and has_tops(track)
+    split = stem == "drums" and tops_ready(track, m)
+    if stem == "tops" and not tops_ready(track, m):
+        raise KeyError((track, stem))
     tops = source.with_name("tops.flac")
     out = source.with_name("drums-notops.pk") if split else source.with_suffix(".pk")
     modified = max(source.stat().st_mtime_ns, tops.stat().st_mtime_ns) if split else source.stat().st_mtime_ns

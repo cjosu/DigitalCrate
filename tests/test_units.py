@@ -870,3 +870,20 @@ def test_the_tops_pass_tops_up_times_itself_and_survives(tmp_path, monkeypatch, 
     kept = sorted(f.name for f in (stems.DIR / f"t{left[0]}").glob("*.flac"))
     assert kept == ["bass.flac", "drums.flac", "other.flac", "vocals.flac"]                 # nothing half-made
     assert stems.top_up(limit=1, split=splits[left[0]], embed=one) == 1 and stems.top_up(split=split, embed=one) == 0
+
+
+def test_tops_pass_retries_if_the_song_metadata_was_left_unfinished(tmp_path, monkeypatch):
+    from digitalcrate import stems
+
+    monkeypatch.setattr(stems, "DIR", tmp_path / "stems")
+    split = _fake_kit_song(tmp_path, 1, 100)
+    embed = lambda _: np.ones(512, np.float32)
+    stems.library()
+    meta = stems.DIR / "t1" / "meta.json"
+    before = meta.read_text()
+    stems.make_tops(1, split=split, embed=embed)
+    meta.write_text(before)  # the audio was published just before the metadata write was interrupted
+    assert stems.has_tops(1)
+    assert not stems.tops_ready(1)
+    assert stems.top_up(split=split, embed=embed) == 1
+    assert "tops" in stems.library()[1]["stems"]
