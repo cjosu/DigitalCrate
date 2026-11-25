@@ -111,8 +111,10 @@ Hover over the song for the full name and why that part was picked.
   notes, feedback and amount. **Reverb** sends to the mixer's room, plate or hall, with the type and decay at the top.
   The dots on EQ, Delay and Reverb turn them on or off and keep their settings. **FX** switches those effects and
   harmonics together.
-- On stem tracks, **Harmonics** adds overtones above 110 Hz while keeping the volume steady. A pure sub-bass starts
-  at 100% so it can be heard on small speakers.
+- On stem tracks, **Harmonics** keeps the level steady as you add overtones, and a pure sub-bass starts at 100%.
+  **Octave** gives new parts a clean octave above the lows, so a 45 Hz note gains a 90 Hz overtone that you can hear
+  on monitors or headphones. Switch Octave off for the driven sound when you want higher overtones that carry on
+  phone or laptop speakers. Parts saved before this switch keep their original sound.
 - **Even** holds down stray bass peaks. It eases heavy sub when there is enough bass above it to balance against.
   It brings bass parts closer in loudness by ear. New bass parts start with Even on, and older parts open with it
   off. **FX** leaves Even as you set it. The dry Ableton export uses the same bass render.

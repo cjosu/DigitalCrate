@@ -1584,6 +1584,8 @@ def test_mashup_one_shot_slot(site, page):
     assert abs(tr[0] - 0.25) < 0.03 and abs(tr[1] - 0.75) < 0.03
     page.dblclick(f'canvas[data-mxtrim="{sid}"]')
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].trim") is None
+    page.click(f'[data-mxhk="{sid}"]')
+    page.wait_for_function("id=>!CRATE.MX.slots[id].hk", arg=sid)
     harmonics = page.locator(f'[data-mxharm="{sid}"]')
     harmonics.click()
     assert harmonics.get_attribute("aria-pressed") == "true"
@@ -2037,7 +2039,7 @@ def test_state_saved_before_tracks_still_opens(site, page, bass_harm):
     _roll(page, "bass", 901)
     assert page.evaluate("CRATE.MX.slots.bass.sub") >= 0.85
     page.evaluate("""bassHarm=>{CRATE.mxPlay(false);const s=JSON.parse(localStorage.getItem('dcStems'));delete s.v;
-      for(const id of Object.keys(s.slots)){const p=s.slots[id];delete p.ct;delete p.fb;p.harm=id==='bass'?bassHarm:id==='drums'?false:null;p.db=-2}
+      for(const id of Object.keys(s.slots)){const p=s.slots[id];delete p.ct;delete p.fb;delete p.hk;p.harm=id==='bass'?bassHarm:id==='drums'?false:null;p.db=-2}
       s.snaps=[{order:s.order,roles:s.roles,slots:JSON.parse(JSON.stringify(s.slots)),duck:{}}];localStorage.setItem('dcStems',JSON.stringify(s))}""", bass_harm)
     page.reload()
     page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX&&CRATE.MX.slots.bass", timeout=30000)
@@ -2548,3 +2550,156 @@ def test_even_bass_history_keeps_both_renders_of_one_part(site, page):
     }""") == [0, 1]
     page.click('[data-mxhist="bass:-1"]')
     page.wait_for_function("document.querySelector('[data-mxeven=bass]')?.getAttribute('aria-pressed') === 'false'")
+
+
+def test_new_parts_use_the_octave_and_parts_from_before_the_clipper(site, page):
+    _mixer(site, page)
+    bass = page.evaluate("CRATE.MX.slots.bass.track")
+    _roll(page, "bass", 902 if bass != 902 else 903)
+    switch = page.locator('[data-mxhk="bass"]')
+    assert page.evaluate("CRATE.MX.slots.bass.hk") == "oct"
+    assert switch.get_attribute("aria-pressed") == "true"
+    page.evaluate("CRATE.TR.set('bass','harm',100)")
+    live = "CRATE.MX.slots.bass._c"
+    def gains(chain, kind):
+        wet = {"drive": ("0.35", "0"), "oct": ("0", "BLEND.HARM.oct.gain"), "off": ("0", "0")}[kind]
+        page.wait_for_function(f"Math.abs({chain}.hg.gain.value-{wet[0]})<0.001&&Math.abs({chain}.hgo.gain.value-{wet[1]})<0.001")
+    gains(live, "oct")
+    page.click("#mxfx")
+    gains(live, "off")
+    page.click("#mxfx")
+    gains(live, "oct")
+    page.fill("#mxname", "octave")
+    page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    vol = live + ".vol.gain.value"
+    page.wait_for_timeout(200)
+    v_oct = page.evaluate(vol)
+    page.evaluate(f"window.__vols=[];window.__w=setInterval(()=>__vols.push({vol}),5)")
+    switch.click()
+    gains(live, "drive")
+    page.wait_for_timeout(200)
+    page.evaluate("clearInterval(__w)")
+    lo, hi = sorted((v_oct, page.evaluate(vol)))
+    assert page.evaluate("Math.min(...__vols)") > lo * 0.97
+    assert page.evaluate("Math.max(...__vols)") < hi * 1.03
+    assert "dirty" in page.get_attribute("#mxsave", "class")
+    assert "hk" not in page.evaluate("JSON.parse(localStorage.getItem('dcStems')).slots.bass")
+    page.click("#mxsave")
+    page.wait_for_function("CRATE.MX.savedSig===CRATE.mxSig()")
+    page.reload()
+    page.wait_for_selector("#mxplay")
+    page.click("#mxplay")
+    page.wait_for_function(f"!!{live}", timeout=60000)
+    gains(live, "drive")
+    assert switch.get_attribute("aria-pressed") == "false"
+    assert "dirty" not in (page.get_attribute("#mxsave", "class") or "")
+    for w in (1512, 1280):
+        page.set_viewport_size({"width": w, "height": 800})
+        assert page.evaluate("[...document.querySelectorAll('.trfx,.trfx *')].every(e=>e.getBoundingClientRect().right<=innerWidth+1)"), w
+    page.click("#sncap")
+    page.evaluate("CRATE.TR.set('other','harm',50)")
+    page.click("#sncap")
+    switch.click()
+    gains(live, "oct")
+    page.click("#sncap")
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.ready&&CRATE.PB.playing&&CRATE.PB.nextReady")
+    voice = "CRATE.PB.voice('bass','a')"
+    page.evaluate(f"window.__bassVoice={voice}")
+    gains(voice + ".chain", "drive")
+    page.evaluate("CRATE.PB.setMaster(1)")
+    page.click("#pbnext")
+    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.ready")
+    assert page.evaluate(f"{voice}===__bassVoice&&{voice}===CRATE.PB.voice('bass','b')")
+    for m, kind in ((0.2, "drive"), (0.5, "oct"), (0.8, "oct")):
+        page.evaluate(f"CRATE.PB.setMaster({m})")
+        gains(voice + ".chain", kind)
+        want = page.evaluate(f"""async()=>{{const v={voice},hc=await BLEND.harmMeasure(v.buf,'{kind}'),
+          p=CRATE.MX.snaps[1].slots.bass;return 10**(p.db/20)*BLEND.harmComp(p,hc)}}""")
+        page.wait_for_function(f"Math.abs({voice}.chain.vol.gain.value-{want})<0.001")
+
+
+def test_one_shot_uses_octave_harmonics(site, page):
+    _mixer(site, page)
+    slot = _one_shot(page)
+    p = f"CRATE.MX.slots['{slot}']"
+    assert page.evaluate(p + ".hk") == "oct"
+    assert page.get_attribute(f'[data-mxhk="{slot}"]', "aria-pressed") == "true"
+    page.evaluate(f"CRATE.TR.set('{slot}','harm',100)")
+    page.wait_for_function(f"{p}._hc&&{p}._c.hg.gain.value<0.001&&Math.abs({p}._c.hgo.gain.value-BLEND.HARM.oct.gain)<0.001")
+    page.click(f'[data-mxtrimopen="{slot}"]')
+    beat = 60 / page.evaluate("CRATE.MX.bpm")
+    dur = page.evaluate(p + ".buf.duration")
+    fit = next(b for b in (1, 2, 4, 8) if 0.45 < b * beat / dur < 2.4)
+    page.select_option(f'[data-mxwarp="{slot}"]', str(fit))
+    page.wait_for_function(f"{p}.wbuf&&!{p}._loading", timeout=60000)
+    assert page.evaluate(f"async()=>{p}._hc===await BLEND.harmMeasure({p}.wbuf,'oct')")
+    page.click(f'[data-mxhk="{slot}"]')
+    page.wait_for_function(f"!{p}.hk&&{p}._hc===null&&Math.abs({p}._c.hg.gain.value-0.35)<0.001")
+    # The scheduler must see a freshly dealt one-shot and its compensation together.
+    page.evaluate("""id=>{
+      const original=BLEND.harmMeasure, sample=CRATE.MX.slots[id].sample;
+      BLEND.harmMeasure=async(buf,kind)=>{
+        if(kind==='oct' && buf.duration<2){
+          BLEND.harmMeasure=original;
+          await new Promise(resolve=>window.releaseShot=resolve);
+        }
+        return original(buf,kind);
+      };
+      void CRATE.mxRoll(id,true,sample);
+    }""", slot)
+    page.wait_for_function("!!window.releaseShot")
+    assert page.evaluate(p + ".buf") is None
+    page.evaluate("releaseShot()")
+    page.wait_for_function(f"{p}.buf&&{p}._hc&&!{p}._loading")
+
+
+
+def test_octave_measurement_follows_the_current_part(site, page):
+    _mixer(site, page)
+    slot = "CRATE.MX.slots.bass"
+    switch = page.locator('[data-mxhk="bass"]')
+    # Hold the first measurement on the old buffer while the mixer handles other input.
+    def hold_drive():
+        page.evaluate("""() => {
+          const original=BLEND.harmMeasure, old=CRATE.MX.slots.bass.buf;
+          window.releaseDrive=null;
+          BLEND.harmMeasure=async(buf,kind)=>{
+            if(buf===old&&kind==='drive'){
+              BLEND.harmMeasure=original;
+              await new Promise(resolve=>window.releaseDrive=resolve);
+            }
+            return original(buf,kind);
+          };
+        }""")
+        switch.click()
+        page.wait_for_function("!!window.releaseDrive")
+    hold_drive()
+    switch.click()
+    page.evaluate("releaseDrive()")
+    page.wait_for_function(f"!{slot}._hkRequest&&{slot}.hk==='oct'")
+
+    hold_drive()
+    page.evaluate(f"window.__oldBuf={slot}.buf")
+    page.click('[data-mxeven="bass"]')
+    page.wait_for_function(f"{slot}.buf!==__oldBuf&&!{slot}._loading")
+    page.evaluate("releaseDrive()")
+    page.wait_for_function(f"!{slot}.hk")
+    assert page.evaluate(f"async()=>{slot}._hc===await BLEND.harmMeasure({slot}.buf,'drive')")
+
+    switch.click()
+    page.wait_for_function(f"{slot}.hk==='oct'")
+    hold_drive()
+    track = page.evaluate(slot + ".track")
+    _roll(page, "bass", 902 if track != 902 else 903)
+    page.evaluate("releaseDrive()")
+    assert page.evaluate(slot + ".hk") == "oct"
+    switch.click()
+    page.wait_for_function(f"!{slot}.hk")
+    page.click('[data-mxhist="bass:-1"]')
+    page.wait_for_function(f"{slot}.track==={track}&&{slot}.buf")
+    assert page.evaluate(slot + ".hk") == "oct"
+    page.click('[data-mxhist="bass:1"]')
+    page.wait_for_function(f"{slot}.track!=={track}&&{slot}.buf")
+    assert page.evaluate(slot + ".hk") is None

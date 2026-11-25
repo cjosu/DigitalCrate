@@ -115,10 +115,9 @@ inside it. Every track's settings are in view at once; there is nothing to selec
 - **Delay:** time (1/4, 1/8, 3/16, 1/16), feedback (0 to 90%, starting at the 35% it is fixed at today), amount.
 - **Reverb:** how much of the track goes to the mixer's one reverb. The reverb's type and decay stay in the top bar,
   as they belong to every track.
-- **Harmonics:** an amount from 0 to 100%, where there is a switch today. At 0 there are none; at 100% they are as
-  strong as the switch makes them now, and they come in evenly in between. As they come in, the track is turned down
-  to match, so turning them up changes the tone and not how loud the track is: its level, measured, stays where it
-  was at 0. For a pure sub-bass it still sets itself, to 100%.
+- **Harmonics** adds overtones from 0 to 100% while holding the measured stem level steady. A pure sub-bass starts at 100%.
+  - **Octave on** adds a clean octave above the lows. New parts start with this kind.
+  - **Octave off** uses the soft clipper. Its higher overtones carry on small speakers, and older parts keep this sound.
 - **Duck**, on the tracks that duck: Bass under the drums' low end (today's), Tops and Other under the vocals (6).
   An amount, 0 to 12 dB, and its switch.
 - Every number drags as the pitch numbers do (3), and its sound follows as you drag: these are live settings, not a
