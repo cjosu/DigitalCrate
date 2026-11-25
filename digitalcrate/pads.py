@@ -210,8 +210,8 @@ def run(redo=False, move=True):
                     move_sample(con, con.execute("SELECT * FROM samples WHERE id=?", (r["id"],)).fetchone(), cat, sub)
                 except Exception as e:
                     print(f"    couldn't move {r['path']}: {str(e)[:80]}", flush=True)
+            con.commit()  # right away: a write lock held across the next item's audio work blocks the app (saving, ratings) for minutes
         if k % 50 == 0:
-            con.commit()
             print(f"pads: {k}/{len(rows)} [{moved[PADS]} pads]", flush=True)
     con.commit()
     print(f"TASK DONE {moved[PADS]} pads · {moved[STRINGS]} strings & orchestral · {moved['Chords & Keys']} chords & keys",

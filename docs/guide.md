@@ -107,8 +107,8 @@ Hover over the song for the full name and why that part was picked.
   notes, feedback and amount. **Reverb** sends to the mixer's room, plate or hall, with the type and decay at the top.
   The dots on EQ, Delay and Reverb turn them on or off and keep their settings. **FX** switches those effects and
   harmonics together.
-- **Harmonics** adds overtones above 110 Hz while keeping the volume steady. A pure sub-bass starts at 100% so it can
-  be heard on small speakers. **Duck** on Bass starts on at 3 dB. The drums' low end pushes down the bass's low end
+- On stem tracks, **Harmonics** adds overtones above 110 Hz while keeping the volume steady. A pure sub-bass starts
+  at 100% so it can be heard on small speakers. **Duck** on Bass starts on at 3 dB. The drums' low end pushes down the bass's low end
   by up to the amount shown under **lows**.
 - **One-shot tracks** play a library sample at chosen moments. Set a cycle of 1, 2, 4 or 8 bars and click a step to
   place or remove a hit. The die picks a sample that fits and keeps your steps. **Choose a sample** searches the
@@ -116,7 +116,9 @@ Hover over the song for the full name and why that part was picked.
   The sample follows the mashup's key, and the pitch numbers also change its speed. Bar numbers under the steps are
   tinted by how well it fits each bar's harmony. **Every time**, **every 2nd** and **every 4th** set how often the
   cycle plays. The waveform at each hit shows its length. Drag across **Trim** to choose the piece that plays, drag
-  an edge to adjust it, or double-click for the whole sample.
+  an edge to adjust it, or double-click for the whole sample. **Fine** opens a full-width waveform with a time
+  axis and exact trim times. Hold **Shift** while dragging for finer control. The start and end buttons nudge by
+  5 ms, or 1 ms with **Shift**. The **Harmonics** switch adds overtones to low one-shots.
 - **💾 save** keeps a named combination (open it again from the menu next to it).
 - **📸 snapshot** keeps the mixer as it is, in a strip above the slots (A, B, C… up to 8). Click one to bring it back;
   **↻** replaces it, **🗑** deletes it. Tempo and key belong to the strip, and 💾 saves the strip too. Edits change

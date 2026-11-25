@@ -214,8 +214,8 @@ def run(redo=False):
                         (lp["start"], lp["end"], lp["q"], lp["xf"], r["id"]))
         else:
             con.execute("UPDATE samples SET loop_q=0 WHERE id=?", (r["id"],))
+        con.commit()  # right away: a write lock held across the next item's audio work blocks the app (saving, ratings) for minutes
         if k % 50 == 0:
-            con.commit()
             print(f"loops: {k}/{len(rows)} [{found} loopable]", flush=True)
     con.commit()
     print(f"TASK DONE {found} of {len(rows)} loop cleanly", flush=True)

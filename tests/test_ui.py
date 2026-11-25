@@ -996,8 +996,11 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     # the list of prepared songs, and a stem button that puts a song straight into a slot of that kind
     page.click("#mxsongs summary")
     page.wait_for_function("document.querySelectorAll('#mxsongs .mxsong').length===3", timeout=10000)
+    page.evaluate("window._since=Object.fromEntries(Object.entries(CRATE.MX.slots).map(([id,p])=>[id,p&&p.since]))")
     page.click('[data-mxput="drums:903"]')
-    page.wait_for_function("Object.entries(CRATE.MX.slots).some(([id,p])=>CRATE.MX.roles[id]==='drums'&&p&&p.track===903&&p.buf)", timeout=120000)
+    # (the slot may already hold that song from the dice: wait for the part that was just put in, not just for the song)
+    page.wait_for_function("Object.entries(CRATE.MX.slots).some(([id,p])=>CRATE.MX.roles[id]==='drums'&&p&&p.track===903&&p.buf&&!p._loading&&p.since!==window._since[id])", timeout=120000)
+    page.wait_for_timeout(400)
     # ⇄ steps to another stretch of the same stem in the same song
     b0, tr = page.evaluate(f"[CRATE.MX.slots['{stem}'].bar0,CRATE.MX.slots['{stem}'].track]")
     _more(page, stem)
@@ -1554,6 +1557,33 @@ def test_mashup_one_shot_slot(site, page):
     assert abs(tr[0] - 0.25) < 0.03 and abs(tr[1] - 0.75) < 0.03
     page.dblclick(f'canvas[data-mxtrim="{sid}"]')
     assert page.evaluate(f"CRATE.MX.slots['{sid}'].trim") is None
+    harmonics = page.locator(f'[data-mxharm="{sid}"]')
+    harmonics.click()
+    assert harmonics.get_attribute("aria-pressed") == "true"
+    page.wait_for_function("id=>Math.abs(CRATE.MX.slots[id]._c.hg.gain.value-0.35)<0.01", arg=sid)
+    assert page.evaluate("id=>JSON.parse(localStorage.getItem('dcStems')).slots[id].harm", sid) == 1
+    harmonics.click()
+    assert harmonics.get_attribute("aria-pressed") == "false"
+    page.wait_for_function("id=>CRATE.MX.slots[id]._c.hg.gain.value<0.01", arg=sid)
+    # ⤢ the large trim view: the same drag on a much wider waveform, shift for fine, nudges of 5 ms
+    page.click(f'[data-mxtrimopen="{sid}"]')
+    big = page.locator(f'canvas.mxtrim.big[data-mxtrim="{sid}"]')
+    bb = big.bounding_box()
+    assert bb["width"] > 4 * tb["width"]
+    page.mouse.move(bb["x"] + bb["width"] * 0.2, bb["y"] + 40)
+    page.mouse.down()
+    page.mouse.move(bb["x"] + bb["width"] * 0.6, bb["y"] + 40, steps=5)
+    page.mouse.up()
+    tr = page.evaluate(f"CRATE.MX.slots['{sid}'].trim")
+    assert abs(tr[0] - 0.2) < 0.01 and abs(tr[1] - 0.6) < 0.01
+    dur = page.evaluate(f"CRATE.MX.slots['{sid}'].buf.duration")
+    page.click(f'[data-mxnudge="{sid}:0:1"]')                        # the start, 5 ms later
+    assert abs(page.evaluate(f"CRATE.MX.slots['{sid}'].trim[0]") - (tr[0] + 0.005 / dur)) < 1e-6
+    assert "start" in page.inner_text(f'[data-mxtrimtxt="{sid}"]')
+    page.click(f'[data-mxtrimall="{sid}"]')
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].trim") is None
+    page.click(f'.mxtrimbar [data-mxtrimopen="{sid}"]')              # done
+    assert page.locator(".mxtrimbox").count() == 0
     # ⧉ duplicate: the same sample, placement and settings in a new slot right below
     _more(page, sid)
     page.click(f'[data-mxdup="{sid}"]')
@@ -1589,8 +1619,18 @@ def test_saving_under_a_new_name_asks_about_another_ones_snapshots(site, page):
     page.click("#sncap")
     page.wait_for_selector("#snrep")
     page.fill("#mxname", "first one")
+    page.evaluate("""() => {
+        const api = CRATE.api;
+        CRATE.api = (path, body) => path === 'api/stems/save'
+            ? new Promise(resolve => { window.releaseSave = () => { CRATE.api = api; resolve(api(path, body)); }; })
+            : api(path, body);
+    }""")
     page.click("#mxsave")
-    page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
+    assert page.locator("#mxsave").is_disabled() and "saving" in page.inner_text("#mxsave")
+    page.evaluate("CRATE.mxSync()")
+    assert page.locator("#mxsave").is_disabled() and "saving" in page.inner_text("#mxsave")
+    page.evaluate("releaseSave()")
+    page.wait_for_function("!document.querySelector('#mxsave').disabled && !document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
     page.fill("#mxname", "second one")
     page.click("#mxsave")
     page.wait_for_selector(".mxask")                                 # asked, not saved yet
@@ -1707,7 +1747,7 @@ def test_effects_are_numbers_under_every_track(site, page):
         r = _box(page, f'[data-mxrow="{s}"]')
         assert page.evaluate(f"[...document.querySelectorAll('[data-mxrow=\"{s}\"] .trfx .trdev')].every(d=>d.getBoundingClientRect().right<={r['r']}+1)")
     os = _one_shot(page)
-    assert devs(os) == ["eq", "dly", "rev", "trim"] and page.locator(f'[data-mxrow="{os}"] .trfx canvas[data-mxtrim="{os}"]').count() == 1
+    assert devs(os) == ["eq", "dly", "rev", "harm", "trim"] and page.locator(f'[data-mxrow="{os}"] .trfx canvas[data-mxtrim="{os}"]').count() == 1
 
 
 EMOJI = "[\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}]"
