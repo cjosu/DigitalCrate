@@ -136,3 +136,21 @@ input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:#2a2
 .pbab{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px;align-items:center;font:10px ui-monospace,Menlo,monospace;color:var(--mute)}.pbab input{width:100%}
 .pbsame{display:grid;place-items:center;text-align:center;color:var(--mute);font-size:12px;border:1px dashed var(--line);border-radius:10px;padding:6px 8px}
 .pbx.pbmaster{border-style:solid;background:#11141a}
+/* Mashup, laid out: full width (no library sidebar, sample panel or library toolbars on this tab); a slot is three
+   zones (what it is · the part · its controls), and every control has its label above it */
+body.mash .projbar{display:none}
+.mxtop{gap:8px 12px}.mxtop .mxfit{margin-left:4px}.mxrate{display:inline-flex;gap:3px}.mxsaveg{display:inline-flex;gap:6px;align-items:center;margin-left:auto}.mxtop #mxclear{color:var(--mute)}
+.mxrow{display:grid;grid-template-columns:128px minmax(200px,1fr) auto;grid-template-areas:"head line line" "head wave ctl";gap:6px 16px;align-items:center;padding:10px 12px;flex-wrap:nowrap}
+.mxhead{grid-area:head;display:grid;gap:6px;align-content:center}.mxhead .mxname{width:auto}.mxhead .mxname select{width:100%}.mxsm{display:flex;gap:3px}.mxsm .tbtn{flex:1;padding:2px 0;text-align:center}
+.mxmain{display:contents}.mxline{grid-area:line;display:flex;gap:12px;align-items:center;min-width:0}.mxline .mxsrc{flex:0 1 auto;min-width:0}
+.mxline .mxsrc br{display:none}.mxline .mxsrc>.sub{margin-left:10px}
+.mxpart{display:inline-flex;gap:2px;flex:none;padding:2px;border:1px solid var(--line);border-radius:8px;background:#0f1216}.mxpart .tbtn{border-color:transparent}
+.mxrow .mxwave{grid-area:wave;height:44px;min-width:0;flex:none;align-self:end}.mxrow .mxwave canvas{height:100%}
+.mxctl{grid-area:ctl;display:flex;gap:8px 13px;align-items:flex-start;flex-wrap:wrap;justify-content:flex-end}
+.mxc{display:grid;gap:3px}.mxl{height:18px;display:flex;gap:6px;align-items:center;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);white-space:nowrap}
+.mxl output{text-transform:none;letter-spacing:0;font:10px ui-monospace,Menlo,monospace;color:var(--ink)}.mxl .mxtg{letter-spacing:.07em}
+.mxv{display:flex;gap:4px;align-items:center;height:26px}.mxv output{min-width:38px;text-align:center;font:11px ui-monospace,Menlo,monospace;color:var(--mute)}
+.mxv input[type=range]{width:56px}.mxvol .mxv input[type=range]{width:108px}.mxv select{padding:1px 4px;font-size:11px}
+.mxb{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--mute)}.mxb i{font-style:normal}.mxb+.mxb{margin-left:4px}
+.mxempty{grid-template-areas:"head line ctl"}.mxempty .mxpart{border:0;background:none;gap:6px}.mxempty .mxpart .tbtn{border-color:var(--line)}
+@media (max-width:1280px){.mxrow{grid-template-columns:128px minmax(0,1fr);grid-template-areas:"head line" "head wave" "ctl ctl"}.mxctl{justify-content:flex-start}.mxempty{grid-template-areas:"head line" "ctl ctl"}}

@@ -80,6 +80,8 @@ Drum one-shots you add become pads in a step sequencer (16 steps a bar, 1 or 2 b
 
 **🎛 Mashup** recombines songs: drums, bass, vocals and "other" (keys, guitars, pads), each from a different song,
 all on one tempo and key. It's a prototype; the plan is in [docs/plans/stems.md](plans/stems.md).
+The tab uses the whole window. Each slot has three zones: what it plays (with solo, mute, lock and ✕), the part (the
+song, its waveform, and the buttons that change the part), and its controls, each with its label above it.
 
 - **Prepare songs first:** `digitalcrate stems` separates the sources of your favorites plus some random mined songs
   (a few minutes a song, about 65 MB each) and keeps their stems. Reference-only artists are never used; hip-hop
