@@ -1840,11 +1840,23 @@ def test_track_plays_without_its_picture(site, page):
     """The picture can't be had: the track still shows its loop and plays."""
     r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
     assert "STEMS OK" in r.stdout
-    page.evaluate("(()=>{const a=CRATE.api;CRATE.api=(p,b)=>p==='api/stems/peaks'?Promise.reject(new Error('no picture')):a(p,b)})()")
+    page.evaluate("""() => {
+        const api = CRATE.api;
+        window.pictureUnavailable = true;
+        CRATE.api = (path, body) => path === 'api/stems/peaks' && pictureUnavailable
+            ? Promise.reject(new Error('no picture')) : api(path, body);
+    }""")
     page.click("#tabM"); page.wait_for_selector("#mxall"); page.click("#mxall")
     page.wait_for_function("CRATE.MX.on&&['drums','bass','vocals','other'].every(s=>CRATE.MX.slots[s]&&CRATE.MX.slots[s].buf)", timeout=90000)
     assert page.evaluate("CRATE.TR.has('drums')") is False
     page.wait_for_function("(()=>{const b=document.querySelector('[data-mxwave=\"drums\"]');return b.querySelector('canvas').width>50&&getComputedStyle(b.querySelector('i')).display==='block'})()")
+    wave = page.locator('[data-mxwave="drums"]')
+    wave.hover()
+    assert wave.locator(".trzoom").is_hidden()
+    page.evaluate("() => { window.pictureUnavailable = false; return CRATE.mxSync(); }")
+    page.wait_for_function("CRATE.TR.has('drums')", timeout=5000)
+    wave.hover()
+    assert wave.locator(".trzoom").is_visible()
 
 
 def _edge(page, slot):
@@ -1949,6 +1961,13 @@ def test_zoom_and_the_view_switch(site, page):
       w=CRATE.TR.loopView(g.bars[p.bar0],g.bars[e],g.bars[1]-g.bars[0],g.dur);return Math.abs(p._v[0]-w[0])<0.01&&Math.abs(p._v[1]-w[1])<0.01})""")
     page.click('[data-trview="song"]'); page.wait_for_timeout(400)
     assert page.evaluate("CRATE.MX.slots.bass._v[0]===0&&Math.abs(CRATE.MX.slots.bass._v[1]-CRATE.TR.song(CRATE.MX.slots.bass.track,'bass').dur)<0.01")
+    wave = page.locator('[data-mxwave="drums"]')
+    wave.hover()
+    assert wave.locator(".trzoom").is_visible()
+    wave.locator('[data-trz="loop"]').click()
+    assert page.evaluate("CRATE.MX.slots.drums._viewMode") == "loop"
+    wave.locator('[data-trz="song"]').click()
+    assert page.evaluate("CRATE.MX.slots.drums._viewMode") == "song"
     page.click("#tabS"); page.click("#tabM"); page.wait_for_selector(".trfx")                 # away and back: still there, nothing stuck
     assert page.locator(".trfx").count() == 4
 
@@ -2043,3 +2062,85 @@ def test_pitch_after_snapshot_recall_keeps_the_other_parts_pitch(site, page):
     page.wait_for_function("bar=>CRATE.MX.slots.drums.bar0===bar&&!CRATE.MX.slots.drums._loading", arg=original)
     page.evaluate("CRATE.TR.set('drums','ct',-20)")
     assert page.evaluate("bar=>CRATE.MX.hist.drums.find(p=>p.bar0===bar).ct", alternate) == 7
+
+
+def test_master_chain_is_unity_when_quiet_trims_the_ends_and_holds_loud_peaks(page):
+    r = page.evaluate("""(async()=>{const SR=48000;
+      const run=async(make)=>{const ctx=new OfflineAudioContext(2,SR*2,SR),c=await CRATE.masterChain(ctx);make(ctx).connect(c.in);c.out.connect(ctx.destination);
+        const d=(await ctx.startRendering()).getChannelData(0);let s=0,pk=0;for(let k=0;k<d.length;k++){pk=Math.max(pk,Math.abs(d[k]));if(k>=SR)s+=d[k]*d[k]}return {rms:Math.sqrt(s/SR),pk}};
+      const tone=(f,a)=>ctx=>{const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=f;g.gain.value=a;o.connect(g);o.start();return g};
+      const noise=ctx=>{const b=ctx.createBuffer(2,SR*2,SR);for(let c=0;c<2;c++){const d=b.getChannelData(c);let x=7+c;for(let k=0;k<d.length;k++){x=(x*1664525+1013904223)>>>0;d[k]=(x/4294967296*2-1)*1.4}}
+        const s=ctx.createBufferSource();s.buffer=b;s.start();return s};
+      const A=0.03,ref=A/Math.SQRT2,db=x=>20*Math.log10(x/ref);
+      return {mid:db((await run(tone(1000,A))).rms),low:db((await run(tone(20,A))).rms),high:db((await run(tone(15000,A))).rms),peak:(await run(noise)).pk,
+              makeup:await CRATE.masterProbe({threshold:-18,knee:12,ratio:2,attack:0.03,release:0.25})}})()""")
+    assert r["makeup"] > 1.2, r        # the browser's compressor adds make-up gain by itself
+    assert abs(r["mid"]) < 0.5, r      # below the threshold: out at the level it went in
+    assert -10 < r["low"] < -6, r      # 20 Hz, under the 30 Hz highpass
+    assert -1.6 < r["high"] < -0.6, r  # 15 kHz, on the -1.5 dB shelf
+    assert r["peak"] < 0.9, r          # noise peaking at 1.4 going in
+
+
+def test_master_switch_is_on_by_default_bypasses_and_is_kept(site, page):
+    page.evaluate("localStorage.setItem('dcStems', JSON.stringify({bpm:100,key:'',slots:{}}))")
+    page.reload()
+    page.evaluate("""() => {
+        const start = OfflineAudioContext.prototype.startRendering;
+        const gate = new Promise(resolve => { window.releaseMasterProbe = resolve; });
+        // Hold back the master chain's calibration only (one second of mono at 48 kHz). Loading a part renders
+        // offline too, to measure its harmonics, and must go through.
+        OfflineAudioContext.prototype.startRendering = function () {
+            const probe = this.length === 48000 && this.sampleRate === 48000 && this.destination.channelCount === 1;
+            return probe ? gate.then(() => start.call(this)) : start.call(this);
+        };
+        const targets = new Set();
+        const connect = AudioNode.prototype.connect, disconnect = AudioNode.prototype.disconnect;
+        AudioNode.prototype.connect = function (target) {
+            const output = connect.apply(this, arguments);
+            if (this === CRATE.MX.master) targets.add(target);
+            return output;
+        };
+        AudioNode.prototype.disconnect = function (target) {
+            disconnect.apply(this, arguments);
+            if (this === CRATE.MX.master) {
+                if (arguments.length) targets.delete(target);
+                else targets.clear();
+            }
+        };
+        window.masterRoutedTo = target => {
+            const {master, mast} = CRATE.MX;
+            const node = target === 'direct' ? master.context.destination : mast.chain?.in;
+            return targets.size === 1 && targets.has(node);
+        };
+    }""")
+    _mixer(site, page)
+    assert page.evaluate("CRATE.MX.mast.on") is True and page.is_checked("#mxmaster")   # no saved 'master' key: on
+    page.evaluate("for(let k=0;k<6;k++)document.getElementById('mxmaster').click()")
+    assert page.evaluate("CRATE.MX.mast.built===0 && masterRoutedTo('direct')")
+    page.evaluate("releaseMasterProbe()")
+    page.wait_for_function("CRATE.MX.mast.chain", timeout=10000)
+    page.wait_for_function("masterRoutedTo('chain')")
+    page.wait_for_function("/^-?\\d+\\.\\d dB$/.test(document.getElementById('mxgr').textContent)", timeout=5000)
+    page.evaluate("for(let k=0;k<6;k++)document.getElementById('mxmaster').click()")          # six quick flips: back on
+    assert page.evaluate("CRATE.MX.mast.on") is True and page.evaluate("CRATE.MX.mast.built") == 1  # built once
+    page.click("#mxmaster")
+    assert page.evaluate("CRATE.MX.mast.on") is False
+    assert page.evaluate("JSON.parse(localStorage.getItem('dcStems')).master.on") is False
+    page.wait_for_function("document.getElementById('mxgr').textContent===''", timeout=2000)   # off: no readout
+    page.wait_for_function("masterRoutedTo('direct')")
+    page.reload()
+    page.wait_for_function("typeof CRATE!=='undefined'&&CRATE.MX&&document.getElementById('mxmaster')", timeout=60000)
+    assert not page.is_checked("#mxmaster")                                                    # kept across a refresh
+
+
+def test_delay_loops_are_connected_only_while_in_use(site, page):
+    _mixer(site, page)
+    setd = "(v)=>CRATE.TR.set('drums','dly',v/0.008)"
+    on = "CRATE.MX.slots.drums._c.dlyOn"
+    assert page.evaluate(on) is False                 # delay at zero: the loop is not in the graph
+    page.evaluate(f"({setd})(0.3)"); assert page.evaluate(on) is True
+    page.evaluate(f"({setd})(0)");   assert page.evaluate(on) is True    # echoes die away first
+    page.wait_for_timeout(2000); page.evaluate(f"({setd})(0.2)")          # raised again inside the 4 s
+    page.wait_for_timeout(3000); assert page.evaluate(on) is True
+    page.evaluate(f"({setd})(0)"); page.wait_for_timeout(4400)
+    assert page.evaluate(on) is False
