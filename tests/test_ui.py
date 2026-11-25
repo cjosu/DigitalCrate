@@ -2144,3 +2144,52 @@ def test_delay_loops_are_connected_only_while_in_use(site, page):
     page.wait_for_timeout(3000); assert page.evaluate(on) is True
     page.evaluate(f"({setd})(0)"); page.wait_for_timeout(4400)
     assert page.evaluate(on) is False
+
+
+def test_space_starts_and_stops_the_mashup(site, page):
+    """Space is play / stop on the Mashup tab, whatever control was used last. In a text box it types a space."""
+    _mixer(site, page)
+    on = "CRATE.MX.on"
+    assert page.evaluate(on) is True
+    page.keyboard.press("Space"); assert page.evaluate(on) is False
+    assert page.inner_text("#mxplay") == "▶ play"
+    page.keyboard.press("Space"); assert page.evaluate(on) is True
+    page.focus("#mxplay"); page.keyboard.press("Space")                  # on the button itself: once, not twice
+    assert page.evaluate(on) is False
+    part = "[CRATE.MX.slots.drums.track,CRATE.MX.slots.drums.bar0]"
+    before = page.evaluate(part)
+    page.focus('[data-mxroll="drums"]'); page.keyboard.press("Space")    # on a die: plays, deals nothing
+    page.wait_for_timeout(300)
+    assert page.evaluate(on) is True and page.evaluate(part) == before
+    page.focus("#mxmaster"); page.keyboard.press("Space")                # on a switch: the switch stays as it was
+    assert page.evaluate(on) is False and page.is_checked("#mxmaster")
+    page.focus("#mxkey"); page.keyboard.press("Space")
+    assert page.evaluate(on) is True
+    page.focus("#mxbpm"); page.keyboard.press("Space")                   # typing: not a transport key
+    assert page.evaluate(on) is True
+    page.click("#tabS"); page.keyboard.press("Space")                    # another tab: the mashup is left alone
+    assert page.evaluate(on) is True
+
+
+def test_space_starts_and_stops_the_strip(site, page):
+    _strip(site, page)
+    page.click("#snplay")
+    page.wait_for_function("CRATE.PB.on&&CRATE.PB.ready&&CRATE.PB.playing", timeout=90000)
+    page.keyboard.press("Space"); assert page.evaluate("CRATE.PB.playing") is False
+    page.keyboard.press("Space"); assert page.evaluate("CRATE.PB.playing") is True
+
+
+def test_the_die_sits_beside_the_song_and_stands_out(site, page):
+    _mixer(site, page)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    for slot in ("drums", "bass", "vocals", "other"):
+        row = f'[data-mxrow="{slot}"] .trh'
+        src, die, back = _box(page, f"{row} .mxsrc"), _box(page, f"{row} [data-mxroll]"), _box(page, f'{row} [data-mxhist="{slot}:-1"]')
+        bars = _box(page, f"{row} .trbars")
+        assert 0 <= die["l"] - src["r"] <= 14, (slot, src, die)             # straight after the song's text
+        assert die["r"] <= back["l"] and back["r"] < bars["l"], (slot, die, back, bars)
+        assert die["r"] - die["l"] > back["r"] - back["l"] and die["b"] - die["t"] <= 24, (slot, die, back)   # a little larger, not tall
+        icon = _box(page, f"{row} [data-mxroll] svg")
+        assert abs(icon["r"] - icon["l"] - 16) < 0.5 and abs(icon["b"] - icon["t"] - 16) < 0.5, (slot, icon)       # and upright
+    assert page.evaluate("getComputedStyle(document.querySelector('[data-mxroll=\"drums\"]')).color"
+                         "===getComputedStyle(document.querySelector('#mxplay.on')).backgroundColor")   # in the accent colour

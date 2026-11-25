@@ -163,7 +163,19 @@ body.mash .projbar{display:none}
 .trk{position:relative;min-width:0;margin:0 0 5px;padding:0 6px;border:1px solid var(--line);border-radius:7px;background:#12151a}
 .trk.muted{opacity:.55}.trk.open{z-index:3;opacity:1}
 .trh{display:flex;height:30px;min-width:0;gap:8px;align-items:center;white-space:nowrap}
-.trh>*{flex:none}.trh .trsrc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.trh>*{flex:none}.trh .trsrc{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* new part, back and forward sit straight after the song's text; what is left of the row's width comes after them */
+.trh .trpick{margin-right:auto}
+/* the die deals a new part: the loudest control in a track's header, and in the top bar */
+.die{display:block;transition:transform .15s ease-out}
+.trh .tbtn.trdie{min-width:26px;padding:1px 4px}
+.trdie,#mxall{color:var(--acc);border-color:color-mix(in srgb,var(--acc) 60%,transparent);background:color-mix(in srgb,var(--acc) 13%,transparent)}
+.trdie:hover:enabled,#mxall:hover{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 26%,transparent)}
+.trdie:focus-visible,#mxall:focus-visible{outline:2px solid var(--acc);outline-offset:1px;background:color-mix(in srgb,var(--acc) 26%,transparent)}
+.trdie:hover:enabled .die,#mxall:hover .die{transform:rotate(8deg)}
+.trdie:active:enabled .die,#mxall:active .die{transform:rotate(90deg);transition-duration:.09s}
+.trdie:disabled{color:var(--mute);border-color:var(--line);background:none}
+@media (prefers-reduced-motion:reduce){.die{transition:none}}
 .trsrc>.sub{margin-left:6px}.trname{display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .trname::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--trcol)}
 .trbars{font-size:11px;color:var(--mute)}.trgroup{display:inline-flex;align-items:center;gap:3px}
