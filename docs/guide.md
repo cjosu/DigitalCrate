@@ -99,7 +99,9 @@ song, its waveform, and the buttons that change the part), and its controls, eac
 - Each slot shows its waveform with bar lines and a play line. A song near twice or half the tempo plays half-time or
   double-time.
 - **Per slot:** where the loop starts (◀ ▶), its length (1–8 bars), your own pitch offset (− ＋; drums keep their
-  pitch), volume, solo and mute, a 3-band EQ and a tempo-synced delay, each with an on/off switch (**FX** switches them all).
+  pitch), volume, solo and mute, a 3-band EQ, a tempo-synced delay and a reverb send, each with an on/off switch (**FX**
+  switches them all). The reverb is one for the whole mixer (room, plate or hall, with its decay time, at the top).
+  The waveform's axis names the song's own bars.
   Everything but pitch, position and length is live.
 - **DUCK** on bass slots (on to begin with): the drums' low end pushes the bass's low end down a few dB, so a kick and
   a bass line from different songs don't pile up. The slider is how many dB at most.

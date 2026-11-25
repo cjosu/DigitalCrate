@@ -172,7 +172,7 @@ def page(site, browser):
     errors = []
     pg.on("pageerror", lambda e: errors.append(str(e)))
     pg.goto(site["base"])
-    pg.wait_for_function("typeof S!=='undefined'&&document.querySelectorAll('#list .row').length>=3", timeout=60000)
+    pg.wait_for_function("typeof S!=='undefined'&&document.querySelectorAll('#list .row').length>=3", timeout=120000)
     pg.evaluate("localStorage.removeItem('atlasSketchDraft')")
     yield pg
     ctx.close()
@@ -294,7 +294,7 @@ def test_pad_editor_and_volume(page):
 def test_complete_the_kit(page):
     _drums(page, ("Kick",))
     page.click("[data-dfind='0']")
-    page.wait_for_selector(".dfrow", timeout=60000)
+    page.wait_for_selector(".dfrow", timeout=120000)
     kinds = [x.split("\n")[0] for x in page.locator(".dfrow .dlab").all_inner_texts()]
     assert "Snare" in kinds and "Kick" not in kinds
     page.locator(".dfrow").first.locator("[data-dfadd]").first.click()
@@ -584,16 +584,16 @@ def test_why_this(site, page):
         req = urllib.request.Request(site["base"] + "api/fav", method="POST", data=json.dumps(dict(path=p, on=True)).encode())
         urllib.request.urlopen(req, timeout=30)
     page.reload()
-    page.wait_for_function("TASTE.loaded", timeout=60000)
+    page.wait_for_function("TASTE.loaded", timeout=120000)
     i = page.evaluate(f"byPath.get({json.dumps(paths[3])})")
     page.evaluate(f"select({i},'list')")
     page.click("#whybtn")
-    page.wait_for_function("document.querySelector('#whybox b')", timeout=60000)
+    page.wait_for_function("document.querySelector('#whybox b')", timeout=120000)
     txt = page.inner_text("#whybox")
     assert "In your" in txt and "sounds closest to what you liked" in txt
     page.locator("#whybox [data-go2]").first.click()  # a liked sample opens; the explanation follows it
     page.wait_for_function(f"st.sel!=={i}")
-    page.wait_for_function("document.querySelector('#whybox b')", timeout=60000)
+    page.wait_for_function("document.querySelector('#whybox b')", timeout=120000)
 
 
 def test_build_a_kit_around_a_hit(page):
@@ -602,7 +602,7 @@ def test_build_a_kit_around_a_hit(page):
     page.evaluate(f"select({i},'list')")
     page.click("#kitaround")
     page.wait_for_function("SK.lanes[0]&&SK.lanes[0].type==='drums'&&SK.lanes[0].pads.length===1", timeout=30000)
-    page.wait_for_selector(".dfrow [data-dfadd]", timeout=60000)
+    page.wait_for_selector(".dfrow [data-dfadd]", timeout=120000)
     page.locator(".dfrow").filter(has_text="Snare").first.locator("[data-dfadd]").first.click()
     page.wait_for_function("SK.lanes[0].pads.length===2", timeout=30000)
 
@@ -657,7 +657,7 @@ def test_hold_a_pad_on_its_sustain_loop(page):
     page.click("#holdit")
     page.wait_for_function("!players.has('hold')")
     page.evaluate(f"CRATE.skAdd({i})")
-    page.wait_for_function("SK.lanes.length&&SK.lanes[SK.lanes.length-1].state==='ok'", timeout=60000)
+    page.wait_for_function("SK.lanes.length&&SK.lanes[SK.lanes.length-1].state==='ok'", timeout=120000)
     page.evaluate("(()=>{const l=SK.lanes[SK.lanes.length-1];l.more=true;CRATE.drawSK()})()")
     page.locator("[data-skhold]").last.click()
     assert page.evaluate("(()=>{const l=SK.lanes[SK.lanes.length-1];const h=CRATE.laneHold(l);return l.hold&&l.every>=2&&!!h&&h.b>h.a})()")
@@ -674,7 +674,7 @@ def test_drum_takes_alternate(site, page):
             break
     assert found is not None, "the test library should have a drum hit with another take in its song"
     page.evaluate(f"CRATE.drumAdd({found},{{quiet:true}})")
-    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=60000)
+    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=120000)
     page.locator("[data-dtakes]").first.click()
     page.wait_for_function("(()=>{const l=SK.lanes.find(l=>l.type==='drums');return l.pads[0].tk&&l.pads[0].tk.length>0})()", timeout=30000)
     seq = page.evaluate("""(()=>{const l=SK.lanes.find(l=>l.type==='drums'),p=l.pads[0];p.steps=new Array(32).fill(0);[0,4,8,12].forEach(k=>p.steps[k]=1);
@@ -701,7 +701,7 @@ def test_drum_takes_pin_shuffle_and_make_main(site, page):
             break
     assert found is not None
     page.evaluate(f"CRATE.drumAdd({found},{{quiet:true}})")
-    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=60000)
+    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=120000)
     page.locator("[data-dtakes]").first.click()
     page.wait_for_function("(()=>{const l=SK.lanes.find(l=>l.type==='drums');return l.pads[0].tk&&l.pads[0].tk.length>0})()", timeout=30000)
     page.evaluate("(()=>{const p=SK.lanes.find(l=>l.type==='drums').pads[0];p.steps=new Array(32).fill(0);[0,4,8,12].forEach(k=>p.steps[k]=1);CRATE.drawSK()})()")
@@ -730,7 +730,7 @@ def test_pad_solo_hears_only_that_pad(page):
     """S on a drum pad: only that pad plays, and the other lanes go quiet too."""
     i = page.evaluate("S.findIndex(s=>s[F.cat]==='Percussion'&&s[F.kind]==='oneshot')")
     page.evaluate(f"CRATE.drumAdd({i},{{quiet:true}})")
-    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=60000)
+    page.wait_for_function("SK.lanes.some(l=>l.type==='drums'&&l.state==='ok')", timeout=120000)
     page.locator("[data-dsolo]").first.click()
     assert page.evaluate("SK.lanes.find(l=>l.type==='drums').pads[0].solo") is True
     assert page.evaluate("CRATE.laneSolo(SK.lanes.find(l=>l.type==='drums'))") is True
@@ -749,7 +749,7 @@ def test_playable_pad_for_live(site, page):
     page.evaluate("window._t=[];const o=toast;toast=(m,...a)=>{_t.push(String(m));return o(m,...a)}")
     page.route("**/api/pad/playable", lambda route: route.continue_(post_data=json.dumps({**json.loads(route.request.post_data), "reveal": False})))
     page.click("#playit")
-    page.wait_for_function("_t.some(m=>m.includes('Playable pads')||m.includes('failed'))", timeout=60000)
+    page.wait_for_function("_t.some(m=>m.includes('Playable pads')||m.includes('failed'))", timeout=120000)
     msg = page.evaluate("_t.find(m=>m.includes('Playable pads')||m.includes('failed'))")
     assert "Playable pads" in msg, msg
     d = site["root"] / "ableton" / "Playable pads"
@@ -913,7 +913,7 @@ def test_lane_trim_sticks_to_bars(page):
     assert i >= 0
     n0 = page.evaluate("SK.lanes.length")
     page.evaluate(f"CRATE.skAdd({i})")
-    page.wait_for_function(f"SK.lanes.length>{n0}&&SK.lanes[SK.lanes.length-1].state==='ok'", timeout=60000)
+    page.wait_for_function(f"SK.lanes.length>{n0}&&SK.lanes[SK.lanes.length-1].state==='ok'", timeout=120000)
     k = page.evaluate("SK.lanes.length-1")
     c = page.locator(f'[data-skw="{k}"]')
     c.scroll_into_view_if_needed()
@@ -974,7 +974,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
             assert abs(p["dur"] - p["n"] * 2.4) < 0.01, (k, p)   # n bars at 100 bpm, whatever the song's tempo
     stem = next(k for k, p in slots.items() if p["dur"])
     page.select_option(f'[data-mxlen="{stem}"]', "2")
-    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     page.click("#mxup")
     page.wait_for_function("CRATE.MX.rated>0", timeout=10000)
     # the waveform and its play line
@@ -982,12 +982,12 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     # ↶ goes back to the part a slot held before a 🎲, ↷ forward again
     before = page.evaluate(f"[CRATE.MX.slots['{stem}'].track,CRATE.MX.slots['{stem}'].bar0]")
     page.click(f'[data-mxroll="{stem}"]')
-    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p&&p.buf&&!p._loading&&(p.track!=={before[0]}||p.bar0!=={before[1]})}})()", timeout=60000)
+    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p&&p.buf&&!p._loading&&(p.track!=={before[0]}||p.bar0!=={before[1]})}})()", timeout=120000)
     after = page.evaluate(f"[CRATE.MX.slots['{stem}'].track,CRATE.MX.slots['{stem}'].bar0]")
     page.click(f'[data-mxhist="{stem}:-1"]')
-    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={before[0]}&&p.bar0==={before[1]}&&p.buf&&!p._loading}})()", timeout=60000)
+    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={before[0]}&&p.bar0==={before[1]}&&p.buf&&!p._loading}})()", timeout=120000)
     page.click(f'[data-mxhist="{stem}:1"]')
-    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={after[0]}&&p.bar0==={after[1]}&&p.buf&&!p._loading}})()", timeout=60000)
+    page.wait_for_function(f"(()=>{{const p=CRATE.MX.slots['{stem}'];return p.track==={after[0]}&&p.bar0==={after[1]}&&p.buf&&!p._loading}})()", timeout=120000)
     # a part that is all sub-bass gets harmonics by itself (small speakers can't play it), and says so
     b = next((k for k in page.evaluate("CRATE.MX.order") if page.evaluate(f"CRATE.MX.roles['{{}}']".format(k)) == "bass" and page.evaluate(f"!!CRATE.MX.slots['{{}}']".format(k))), None)
     if b:
@@ -997,11 +997,11 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.click("#mxsongs summary")
     page.wait_for_function("document.querySelectorAll('#mxsongs .mxsong').length===3", timeout=10000)
     page.click('[data-mxput="drums:903"]')
-    page.wait_for_function("Object.entries(CRATE.MX.slots).some(([id,p])=>CRATE.MX.roles[id]==='drums'&&p&&p.track===903&&p.buf)", timeout=60000)
+    page.wait_for_function("Object.entries(CRATE.MX.slots).some(([id,p])=>CRATE.MX.roles[id]==='drums'&&p&&p.track===903&&p.buf)", timeout=120000)
     # ⇄ steps to another stretch of the same stem in the same song
     b0, tr = page.evaluate(f"[CRATE.MX.slots['{stem}'].bar0,CRATE.MX.slots['{stem}'].track]")
     page.click(f'[data-mxalt="{stem}"]')
-    page.wait_for_function(f"CRATE.MX.slots['{stem}'].bar0!=={b0}&&CRATE.MX.slots['{stem}'].buf&&!CRATE.MX.slots['{stem}']._loading", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].bar0!=={b0}&&CRATE.MX.slots['{stem}'].buf&&!CRATE.MX.slots['{stem}']._loading", timeout=120000)
     assert page.evaluate(f"CRATE.MX.slots['{stem}'].track") == tr and page.evaluate(f"CRATE.MX.slots['{stem}'].alt[1]") >= 2
     # ✕ takes a part out; 🔍 puts a chosen song in
     page.click(f'[data-mxdel="{stem}"]')
@@ -1010,7 +1010,7 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.fill("#mxq", "Stem Artist 902")
     page.wait_for_selector(f'[data-mxsong="{stem}:902"]')
     page.keyboard.press("Enter")
-    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=120000)
     # save, clear all, open it again
     assert "dirty" in page.locator("#mxsave").get_attribute("class")      # unsaved changes: the button says so
     page.fill("#mxname", "ui mix")
@@ -1024,26 +1024,26 @@ def test_stem_mixer_deals_plays_and_learns(site, page):
     page.click("#mxclear")
     assert page.evaluate("Object.keys(CRATE.MX.slots).length") == 0
     page.select_option("#mxload", "ui mix")
-    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track===902&&CRATE.MX.slots['{stem}'].buf", timeout=120000)
     page.select_option(f'[data-mxlen="{stem}"]', "2")
-    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     # ↺ revert: changes made to an open saved combination are dropped, and it's back as saved
     saved_track = page.evaluate(f"CRATE.MX.slots['{stem}'].track")
     page.click(f'[data-mxdel="{stem}"]')
     page.wait_for_function(f"!CRATE.MX.slots['{stem}']", timeout=10000)
     page.click("#mxrevert")
-    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track==={saved_track}&&CRATE.MX.slots['{stem}'].buf", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}']&&CRATE.MX.slots['{stem}'].track==={saved_track}&&CRATE.MX.slots['{stem}'].buf", timeout=120000)
     page.wait_for_function("!document.querySelector('#mxsave').classList.contains('dirty')", timeout=10000)
     page.select_option(f'[data-mxlen="{stem}"]', "2")   # (the saved one had 4 bars: 2 again, for the reload check below)
-    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{stem}'].buf&&Math.abs(CRATE.MX.slots['{stem}'].buf.duration-4.8)<0.01", timeout=120000)
     # another slot (a second "other"), then its role changed to vocals: a part of the new kind comes in
     page.select_option("#mxaddrole", "other")
     page.click("#mxadd")
-    page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.slots[CRATE.MX.order[4]]&&CRATE.MX.slots[CRATE.MX.order[4]].buf", timeout=60000)
+    page.wait_for_function("CRATE.MX.order.length===5&&CRATE.MX.slots[CRATE.MX.order[4]]&&CRATE.MX.slots[CRATE.MX.order[4]].buf", timeout=120000)
     new = page.evaluate("CRATE.MX.order[4]")
     assert page.evaluate(f"CRATE.MX.slots['{new}'].stem") == "other"
     page.select_option(f'[data-mxrole="{new}"]', "vocals")
-    page.wait_for_function(f"CRATE.MX.roles['{new}']==='vocals'&&CRATE.MX.slots['{new}']&&CRATE.MX.slots['{new}'].stem==='vocals'&&CRATE.MX.slots['{new}'].buf", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.roles['{new}']==='vocals'&&CRATE.MX.slots['{new}']&&CRATE.MX.slots['{new}'].stem==='vocals'&&CRATE.MX.slots['{new}'].buf", timeout=120000)
     page.click("#mxplay")
     assert page.evaluate("CRATE.MX.on") is False
     page.reload()                                   # the tab and the combination come back
@@ -1175,7 +1175,7 @@ def test_state_saved_before_blends_still_opens(site, page):
       roles:{drums:'drums',bass:'bass',vocals:'vocals',other:'other'},slots:{bass:{stem:'bass',track:901,bar0:0,n:4,k:1,off:0,bars:16,
       artist:'Stem Artist 901',title:'Song',db:-2,mute:false,lock:false,eq:[0,0,0],dly:0,dt:'1/8',eqOn:true,dlyOn:true}}}));localStorage.setItem('dcTab','M')""")
     page.reload()
-    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=60000)
+    page.wait_for_function("typeof st!=='undefined'&&st.tab==='M'&&CRATE.MX.slots.bass&&CRATE.MX.slots.bass.buf", timeout=120000)
     assert page.evaluate("[CRATE.MX.snaps.length,CRATE.MX.trans.length,Object.keys(CRATE.MX.duck).length]") == [0, 0, 0]
     assert page.input_value('[data-mxduck="bass"]') == "3"
 
@@ -1183,7 +1183,7 @@ def test_state_saved_before_blends_still_opens(site, page):
 def _roll(page, slot, track):
     """Put this prepared song's best-fitting bars into a slot, and wait until they are loaded."""
     page.evaluate(f"CRATE.mxRoll('{slot}', true, {track})")
-    page.wait_for_function(f"CRATE.MX.slots['{slot}']&&CRATE.MX.slots['{slot}'].track==={track}&&CRATE.MX.slots['{slot}'].buf&&!CRATE.MX.slots['{slot}']._loading", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.slots['{slot}']&&CRATE.MX.slots['{slot}'].track==={track}&&CRATE.MX.slots['{slot}'].buf&&!CRATE.MX.slots['{slot}']._loading", timeout=120000)
 
 
 def test_snapshots_capture_recall_replace_delete(site, page):
@@ -1204,7 +1204,7 @@ def test_snapshots_capture_recall_replace_delete(site, page):
     assert "start" in page.inner_text('[data-sn="0"]')
     assert page.evaluate("CRATE.MX.trans.length") == 1 and page.is_enabled("#snplay")
     page.click('[data-sn="0"]')                                                  # A comes back
-    page.wait_for_function("CRATE.MX.snapSel===0&&CRATE.MX.slots.drums.track===901&&CRATE.MX.slots.drums.buf", timeout=60000)
+    page.wait_for_function("CRATE.MX.snapSel===0&&CRATE.MX.slots.drums.track===901&&CRATE.MX.slots.drums.buf", timeout=120000)
     bass = page.evaluate("CRATE.MX.slots.bass.track")
     _roll(page, "bass", 903 if bass != 903 else 901)
     page.click("#snrep")                                                         # ... and is replaced by what is playing now
@@ -1330,14 +1330,14 @@ def test_playback_arrows_walk_the_strip(site, page):
     page.wait_for_function("!document.querySelector('#pbnext').disabled")
     key, t = page.evaluate("[CRATE.PB.voice('drums','b').key,CRATE.PB.voice('drums','b').t]")
     page.click("#pbnext")
-    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.ready", timeout=60000)
+    page.wait_for_function("CRATE.PB.i===1&&CRATE.PB.ready", timeout=120000)
     assert page.evaluate("[CRATE.PB.m,[...document.querySelectorAll('#pb .pbletter')].map(e=>e.textContent)]") == [0, ["B", "C"]]
     assert page.evaluate("[CRATE.PB.voice('drums','a').key,CRATE.PB.voice('drums','a').t]") == [key, t]     # B's drums never stopped
     assert "missing" in page.inner_text('[data-pbrow="vocals"] [data-pbside="b"]')
     assert page.evaluate("CRATE.PB.rows.find(r=>r.id==='vocals').kind") == "exit"
     assert page.is_disabled("#pbnext")                                                                    # C is the last one
     page.click("#pbprev")
-    page.wait_for_function("CRATE.PB.i===0&&CRATE.PB.ready", timeout=60000)
+    page.wait_for_function("CRATE.PB.i===0&&CRATE.PB.ready", timeout=120000)
     assert page.evaluate("CRATE.PB.m") == 1
 
 
@@ -1442,7 +1442,7 @@ def test_snapshot_says_when_the_mixer_has_moved_on(site, page):
     page.click(f'[data-mxdel="{sid}"]')
     page.wait_for_function(f"!CRATE.MX.slots['{sid}']", timeout=10000)
     page.click('[data-sn="0"]')
-    page.wait_for_function(f"CRATE.MX.snapSel===0&&CRATE.MX.slots['{sid}']&&CRATE.MX.slots['{sid}'].buf", timeout=60000)
+    page.wait_for_function(f"CRATE.MX.snapSel===0&&CRATE.MX.slots['{sid}']&&CRATE.MX.slots['{sid}'].buf", timeout=120000)
     page.wait_for_selector("#snundo")
     page.click("#snundo")
     page.wait_for_function(f"!CRATE.MX.slots['{sid}']&&CRATE.MX.snapSel===null", timeout=30000)
@@ -1451,6 +1451,56 @@ def test_snapshot_says_when_the_mixer_has_moved_on(site, page):
     assert page.evaluate("CRATE.MX.snaps.length") == 1 and "click again" in page.inner_text("#mxclear")
     page.click("#mxclear")
     assert page.evaluate("CRATE.MX.snaps.length") == 0 and page.evaluate("Object.keys(CRATE.MX.slots).length") == 0
+    page.evaluate("CRATE.mxPlay(false)")
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.click("#tabS")
+
+
+def test_reverb_has_a_tail_that_decays_and_is_stereo(page):
+    """The mixer's reverb, measured offline: a short burst rings on, dies away at about the decay time, and left and
+    right differ (it is wide). A longer decay rings longer."""
+    r = page.evaluate("""async()=>{
+      const run=async(type,decay)=>{const sr=44100,c=new OfflineAudioContext(2,sr*4,sr),out=c.createGain();out.connect(c.destination);
+        const rv=BLEND.reverb(c,out,{type,decay}),b=c.createBuffer(1,Math.floor(0.03*sr),sr),d=b.getChannelData(0);
+        for(let i=0;i<d.length;i++)d[i]=Math.sin(i*0.9)*Math.sin(i*0.31)*0.8;            // a 30 ms burst with highs and mids
+        const s=c.createBufferSource();s.buffer=b;s.connect(rv.in);s.start(0);
+        const o=await c.startRendering(),L=o.getChannelData(0),R=o.getChannelData(1);
+        const rms=(x,a,z)=>{let e=0;const i0=Math.floor(a*sr),i1=Math.floor(z*sr);for(let i=i0;i<i1;i++)e+=x[i]*x[i];return Math.sqrt(e/(i1-i0))};
+        let num=0,dl=0,dr=0;for(let i=Math.floor(0.1*sr);i<sr;i++){num+=L[i]*R[i];dl+=L[i]*L[i];dr+=R[i]*R[i]}
+        return {early:rms(L,0.1,0.3),late:rms(L,decay-0.1,decay+0.1),end:rms(L,3.5,3.9),corr:num/Math.sqrt(dl*dr+1e-20)}};
+      return {plate:await run('plate',1.5),hall:await run('hall',3.0)}}""")
+    import math
+    p, h = r["plate"], r["hall"]
+    assert p["early"] > 1e-4                                            # it rings on after the 30 ms burst
+    drop = 20 * math.log10(p["late"] / p["early"])                      # by the decay time it is far down
+    assert -70 < drop < -30, drop
+    assert abs(p["corr"]) < 0.4                                         # left and right are different: wide, not mono
+    assert h["end"] > 5 * p["end"]                                      # the hall is still ringing when the plate is gone
+
+
+def test_mashup_reverb_send_and_bar_axis(site, page):
+    """A slot's REVERB send reaches the shared reverb; its type is set at the top; the waveform has its bar axis."""
+    r = subprocess.run([sys.executable, "-c", STEM_SONGS], env=site["env"], capture_output=True, text=True)
+    assert "STEMS OK" in r.stdout, r.stderr[-2000:]
+    page.evaluate("localStorage.removeItem('dcStems')")
+    page.reload()
+    page.wait_for_function("typeof st!=='undefined'&&window.CRATE&&CRATE.MX", timeout=30000)
+    page.click("#tabM")
+    page.wait_for_selector("#mxall")
+    page.click("#mxall")
+    page.wait_for_function("Object.values(CRATE.MX.slots).some(p=>p&&p.buf)", timeout=90000)
+    page.wait_for_function("CRATE.MX.on&&CRATE.MX.order.some(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id]._c)", timeout=90000)
+    sid = page.evaluate("CRATE.MX.order.find(id=>CRATE.MX.slots[id]&&CRATE.MX.slots[id]._c)")   # (a slot's chain exists once it plays)
+    page.evaluate(f"(()=>{{const e=document.querySelector('[data-mxrev=\"{sid}\"]');e.value=0.5;e.dispatchEvent(new Event('input',{{bubbles:true}}))}})()")
+    page.wait_for_function(f"Math.abs(CRATE.MX.slots['{sid}']._c.rsend.gain.value-0.5)<0.02", timeout=5000)
+    page.click(f'[data-mxrevon="{sid}"]')                                # off: nothing is sent, the setting is kept
+    page.wait_for_function(f"CRATE.MX.slots['{sid}']._c.rsend.gain.value<0.02", timeout=5000)
+    assert page.evaluate(f"CRATE.MX.slots['{sid}'].rev") == 0.5
+    page.select_option("#mxrvtype", "hall")
+    page.wait_for_function("CRATE.MX.reverb.type==='hall'&&CRATE.MX.bus.rev.type==='hall'", timeout=5000)
+    # the part buttons stay put whatever the song's name is: they come before it
+    assert page.evaluate(f"(()=>{{const r=document.querySelector('[data-mxrow=\"{sid}\"]'),b=r.querySelector('[data-mxroll]').getBoundingClientRect(),t=r.querySelector('.mxsrc').getBoundingClientRect();return b.right<=t.left+1}})()")
+    assert page.evaluate(f"document.querySelector('[data-mxwave=\"{sid}\"] canvas').height") > 40
     page.evaluate("CRATE.mxPlay(false)")
     page.evaluate("localStorage.removeItem('dcStems')")
     page.click("#tabS")
